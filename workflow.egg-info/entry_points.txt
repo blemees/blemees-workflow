@@ -1,0 +1,2 @@
+[console_scripts]
+workflow = workflow.cli:main

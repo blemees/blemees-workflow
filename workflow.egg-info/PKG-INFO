@@ -1,0 +1,184 @@
+Metadata-Version: 2.4
+Name: workflow
+Version: 0.1.0
+Summary: The canonical operation mechanism for agent-driven state machine workflows. Implements the framework defined in agent-workflow-skill-creator.
+Author: heldcrafthq
+License: MIT
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0; extra == "dev"
+
+# workflow
+
+The canonical operation mechanism for agent-driven state-machine workflows.
+
+This tool implements the framework defined in [`agent-workflow-skill-creator`](../../skills/operator/agent-workflow-skill-creator/). It reads the framework's authoritative artifacts — lifecycle `.mermaid` files, process docs with HCP catalog rows, trust grants, role mappings — and exposes them as a set of operations agents and humans invoke against work items on the backing issue tracker.
+
+The tool is backend-neutral by design. Today it ships with a GitHub backend; future backends (GitLab, Jira, Linear) implement the same operation surface against their respective trackers.
+
+## Status
+
+Alpha. Implementing the eleven framework operations and the GitHub backend per `hitl-principles.md` § 5 and `backends/github-encoding.md`.
+
+## Installation
+
+```bash
+cd tools/workflow-tool
+pipx install -e .
+```
+
+Or for development:
+
+```bash
+cd tools/workflow-tool
+python -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+## Usage
+
+```bash
+workflow --help                              # top-level help
+workflow <operation> --help                  # per-operation help
+
+workflow advance --transition "PM marks ready" --issue 123
+workflow await-signal --gate ready_for_dev --issue 123 --packet-from packet.md
+workflow approve --gate ready_for_dev --issue 123
+workflow reject --gate ready_for_dev --issue 123 --feedback-from feedback.md
+workflow request-input --issue 123 --question-from question.md
+workflow resolve --issue 123 --response-from response.md
+```
+
+The tool resolves the workflow's canonical artifacts at startup (via `--workflow` or workspace conventions), validates the contract, and dispatches the operation against the configured backend.
+
+## The framework's eleven operations
+
+Three groups. See `hitl-principles.md` § 5 for full semantics.
+
+**Lifecycle:**
+
+- `advance` — move a work item to a new state.
+- `claim` — agent takes responsibility for a resting state.
+- `release` — agent gives up the claim.
+
+**Catalogued HITL — block-level:**
+
+- `await-signal` — fire a catalogued gate; pause for human signal.
+- `review` — human claims pre-action review.
+- `approve` — human authorizes the transition.
+- `reject` — human rejects the packet; agent iterates.
+
+**Catalogued HITL — audit-level:**
+
+- `record-action` — agent acts atomically; queue for retroactive review.
+- `audit` — human claims post-action audit.
+- `check` — human confirms post-hoc.
+- `revoke` — human triggers remediation.
+
+**Recognized HITL:**
+
+- `request-input` — agent invokes for an unanticipated moment.
+- `advise` — human claims response.
+- `resolve` — human provides input.
+
+## Configuration
+
+The tool's configuration travels with the **agent**, not the OS user. Each agent has its own home directory containing a `.workflow/` folder:
+
+```
+<agent-home>/
+  .workflow/
+    config.json          # defaults: workflow, team, backend, repo
+    trust-grants/        # this agent's team-specific trust grants
+      refinement/
+        ready_for_dev.json
+      inner-loop/
+        staged.json
+```
+
+### Agent home discovery
+
+1. `AGENT_HOME` environment variable, if set and the directory contains `.workflow/`.
+2. Walk up from cwd looking for any directory containing `.workflow/`.
+
+### Resolution order (highest priority first)
+
+1. CLI flags (`--workflow`, `--lifecycle`, `--grants-dir`, etc.).
+2. Environment variables (`WORKFLOW`, `WORKFLOW_TEAM`, `WORKFLOW_REPO`, `WORKFLOW_BACKEND`).
+3. Agent config: `<agent-home>/.workflow/config.json`.
+4. Repo-relative conventions for canonical artifacts: `<repo_root>/skills/workflows/shared/resources/`. `repo_root` is `WORKFLOW_REPO_ROOT` env var if set, else discovered by walking up from cwd.
+
+If `--grants-dir` is not supplied, the tool defaults to `<agent-home>/.workflow/trust-grants/`.
+
+### Canonical artifact file names
+
+The tool reads structured data only — no markdown parsing. Per workflow:
+
+- `<workflow>-lifecycle.mermaid` — the state diagram.
+- `<workflow>-hcps.json` — the HCP catalog (rows; one entry per gate). Optional; absence means no catalogued HCPs.
+- `roles.json` — the role directory (shared across workflows).
+- `<gate>.json` files under `trust-grants/<workflow>/` — per-team relaxations.
+
+Human-readable prose process docs (`<workflow>-process.md`) may exist alongside these but are NOT parsed by the tool. They are for human reading only.
+
+### Example `<agent-home>/.workflow/config.json`
+
+```json
+{
+  "workflow": "refinement",
+  "team": "acme-eng",
+  "backend": "github",
+  "repo": "acme/some-repo"
+}
+```
+
+Optional path overrides (relative paths are anchored to the agent home):
+
+```json
+{
+  "lifecycle": "../shared-workflows/refinement-lifecycle.mermaid",
+  "hcp_catalog": "../shared-workflows/refinement-hcps.json",
+  "roles": "../shared-workflows/roles.json",
+  "grants_dir": "trust-grants"
+}
+```
+
+## Architecture
+
+```
+workflow/
+  cli.py                       # argparse / click entry — one sub-command per operation
+  core/
+    model/                     # dataclasses: Lifecycle, State, Transition, HCP, TrustGrant, Role
+    parser/                    # mermaid, process doc, trust grant, roles parsers
+    validator.py               # cross-reference checks + static rules
+    planner.py                 # operation → marker change set
+    controller.py              # operation orchestration
+    operations/                # one module per framework operation
+  backends/
+    base.py                    # WorkflowBackend protocol
+    github.py                  # GitHub implementation (uses gh CLI)
+tests/
+```
+
+The core is backend-agnostic. The `backends/` layer is the only place that talks to a specific tracker. To support a new backend, implement the `WorkflowBackend` protocol; nothing in `core/` changes.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## License
+
+MIT
