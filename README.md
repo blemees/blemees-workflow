@@ -47,7 +47,9 @@ workflow --help                              # top-level help
 workflow <operation> --help                  # per-operation help
 
 workflow --agent-role pm init
-workflow setup-labels                                          # creates state:*, wip:*, hitl:* labels on the repo
+workflow setup-github                                          # ensure org Issue Types (best-effort) + repo labels
+workflow setup-github --setup-org                              # admin path — create org Issue Types and refresh cache
+workflow capabilities                                          # show the per-(host, owner) encoding cache
 workflow create --to raw --title "Fix login bug"               # open a new work item in an initial state
 workflow inbox                                                 # claimable items + actionable wip for the configured role
 workflow search --state ready_for_dev --awaiting-gate '*'      # arbitrary filter combinations

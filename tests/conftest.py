@@ -17,6 +17,19 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLE_WORKFLOWS = _REPO_ROOT / "examples" / ".workflow" / "workflows"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_capability_cache(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin XDG_CONFIG_HOME at a tmp dir so tests don't read/write the user's
+    real capability cache under `~/.config/blemees-workflow/`. Autouse so
+    every test gets a clean cache automatically.
+    """
+    cache_dir = tmp_path_factory.mktemp("xdg-config")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cache_dir))
+
+
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return _REPO_ROOT

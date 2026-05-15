@@ -180,6 +180,20 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
     if canonical_catalog_path is not None and not isinstance(canonical_catalog_path, str):
         raise ParseError("`canonical_catalog_path` must be a string if present.")
 
+    issue_types_raw = data.get("issue_types", [])
+    if not isinstance(issue_types_raw, list):
+        raise ParseError(
+            f"`issue_types` must be a list of type ids "
+            f"(got {type(issue_types_raw).__name__})."
+        )
+    issue_types: list[str] = []
+    for i, t in enumerate(issue_types_raw):
+        if not isinstance(t, str) or not t.strip():
+            raise ParseError(
+                f"`issue_types[{i}]` must be a non-empty string (got {t!r})."
+            )
+        issue_types.append(t.strip())
+
     states_raw = data.get("states")
     if not isinstance(states_raw, dict):
         raise ParseError("`states` must be a JSON object (id → state spec).")
@@ -229,6 +243,7 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
         name=name,
         states=states,
         transitions=transitions,
+        issue_types=issue_types,
         canonical_catalog_path=canonical_catalog_path,
         gates_in_legend=gates_in_legend,
         source_path=source_path,

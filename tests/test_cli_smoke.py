@@ -482,6 +482,8 @@ def test_create_dry_run_does_not_call_backend(
                 "create",
                 "--to",
                 "raw",
+                "--type",
+                "bug",
                 "--title",
                 "Fix login bug",
             ]
@@ -520,11 +522,19 @@ def test_create_invokes_backend_with_resolved_state(
     workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """A successful create returns the new id from the backend."""
-    with mock.patch(
-        "workflow.backends.github.GitHubBackend.create_issue",
-        return_value="123",
-    ) as create_mock:
+    """A successful create returns the new id from the backend. When the
+    capability probe returns existing Issue Types, encoding is `native` →
+    issue_type is passed through as the GitHub type name."""
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.list_issue_types",
+            return_value=["Bug", "Feature", "Task"],  # native encoding
+        ),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.create_issue",
+            return_value="123",
+        ) as create_mock,
+    ):
         rc = cli(
             [
                 "--repo",
@@ -534,6 +544,8 @@ def test_create_invokes_backend_with_resolved_state(
                 "create",
                 "--to",
                 "raw",
+                "--type",
+                "bug",
                 "--title",
                 "Fix the thing",
                 "--body",
@@ -549,6 +561,8 @@ def test_create_invokes_backend_with_resolved_state(
     assert kwargs["state"] == "raw"
     assert kwargs["body"] == "Steps to reproduce: ..."
     assert kwargs["extra_labels"] == []
+    # Issue type resolved to GitHub's "Bug" via issue-types.json.
+    assert kwargs["issue_type"] == "Bug"
     assert "#123" in output
     # StateMachine was auto-resolved to refinement (state:raw belongs to refinement).
     assert "refinement" in output
@@ -573,6 +587,10 @@ def test_create_with_claim_creates_then_claims(
     )
     with (
         mock.patch(
+            "workflow.backends.github.GitHubBackend.list_issue_types",
+            return_value=["Bug", "Feature", "Task"],
+        ),
+        mock.patch(
             "workflow.backends.github.GitHubBackend.create_issue",
             return_value="99",
         ) as create_mock,
@@ -595,6 +613,8 @@ def test_create_with_claim_creates_then_claims(
                 "create",
                 "--to",
                 "raw",
+                "--type",
+                "bug",
                 "--title",
                 "Mine",
                 "--claim",
@@ -629,6 +649,8 @@ def test_create_with_claim_but_no_agent_role_errors(
             "create",
             "--to",
             "raw",
+            "--type",
+            "bug",
             "--title",
             "X",
             "--claim",
@@ -639,29 +661,35 @@ def test_create_with_claim_but_no_agent_role_errors(
     assert "agent role" in (captured.out + captured.err).lower()
 
 
-def test_setup_labels_dry_run_enumerates_without_calling_backend(
+def test_setup_github_dry_run_enumerates_without_calling_backend(
     workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """Dry-run prints the label set without contacting the backend.
-
-    Note: the dry-run path doesn't even build the backend (no --repo needed).
-    """
-    with mock.patch(
-        "workflow.backends.github.subprocess.run",
-    ) as patched:
+    """Dry-run prints the label set without contacting the backend's mutating
+    operations. The capability probe still runs (returns None → label mode)."""
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.list_issue_types",
+            return_value=None,  # feature not available → label encoding
+        ),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.ensure_label",
+        ) as ensure_mock,
+    ):
         rc = cli(
             [
                 "--dry-run",
+                "--repo",
+                "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
-                "setup-labels",
+                "setup-github",
             ]
         )
 
     output = capsys.readouterr().out
     assert rc == 0, output
-    assert not patched.called
+    assert not ensure_mock.called
     # The fixed HITL singletons must always appear.
     for fixed in (
         "hitl:reviewing",
@@ -671,45 +699,53 @@ def test_setup_labels_dry_run_enumerates_without_calling_backend(
         "hitl:resolved",
     ):
         assert fixed in output, f"expected {fixed} in dry-run output"
-    # State labels from the shipped refinement workflow.
     assert "state:raw" in output
-    # wip labels from roles.json.
     assert "wip:pm" in output
     assert "wip:developer" in output
+    # In label-encoding mode, `type:*` labels are also enumerated.
+    assert "type:bug" in output
 
 
-def test_setup_labels_json_dry_run(
+def test_setup_github_json_dry_run(
     workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    rc = cli(
-        [
-            "--json",
-            "--dry-run",
-            "--workflow-dir",
-            str(workflow_dir),
-            "setup-labels",
-        ]
-    )
+    with mock.patch(
+        "workflow.backends.github.GitHubBackend.list_issue_types",
+        return_value=None,
+    ):
+        rc = cli(
+            [
+                "--json",
+                "--dry-run",
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "setup-github",
+            ]
+        )
     output = capsys.readouterr().out
     assert rc == 0, output
     payload = json.loads(output)
     assert "labels" in payload
     labels = payload["labels"]
     assert isinstance(labels, list)
-    assert labels == sorted(labels), "labels should be sorted in JSON output"
+    assert labels == sorted(labels)
     assert "hitl:reviewing" in labels
 
 
-def test_setup_labels_creates_only_missing(
+def test_setup_github_creates_only_missing(
     workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """A label that already exists on the repo is skipped; missing ones are
-    created via the backend's ensure_label method."""
-    # Pretend the repo already has hitl:reviewing but is missing the rest.
+    """Missing labels are created via ensure_label; existing ones are skipped."""
     existing = ["hitl:reviewing"]
     with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.list_issue_types",
+            return_value=None,  # label encoding
+        ),
         mock.patch(
             "workflow.backends.github.GitHubBackend.list_labels",
             return_value=existing,
@@ -725,14 +761,13 @@ def test_setup_labels_creates_only_missing(
                 "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
-                "setup-labels",
+                "setup-github",
             ]
         )
 
     output = capsys.readouterr().out
     assert rc == 0, output
     assert list_mock.called
-    # ensure_label was called for every required label EXCEPT hitl:reviewing.
     called_labels = {call.args[0] for call in ensure_mock.call_args_list}
     assert "hitl:reviewing" not in called_labels  # skipped
     assert "hitl:auditing" in called_labels

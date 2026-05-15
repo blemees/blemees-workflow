@@ -142,6 +142,10 @@ class StateMachine:
     name: str
     states: dict[str, State] = field(default_factory=dict)
     transitions: list[Transition] = field(default_factory=list)
+    # Issue types this process accepts (declared as a list of type ids). The
+    # ids are resolved against the shared `issue-types.json` (an
+    # `IssueTypeDirectory`). Empty list means no type constraint is declared.
+    issue_types: list[str] = field(default_factory=list)
     canonical_catalog_path: str | None = None
     gates_in_legend: dict[str, ReversibilityClass] = field(default_factory=dict)
     source_path: str | None = None

@@ -438,19 +438,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Title for the new issue.",
     )
-    body_group = p_create.add_mutually_exclusive_group()
-    body_group.add_argument(
-        "--body",
+    p_create.add_argument(
+        "--type",
+        dest="issue_type",
         default=None,
-        help="Inline body for the new issue.",
+        help="Issue type id (e.g., bug, feature). Required when the process "
+        "supports multiple types; optional (auto-defaulted) when there's only one.",
     )
-    body_group.add_argument(
-        "--body-from",
-        dest="body_from",
-        type=_path_existing_file,
-        default=None,
-        help="Path to a markdown file containing the body.",
-    )
+    _add_body_args(p_create, required=False)
     p_create.add_argument(
         "--claim",
         action="store_true",
@@ -630,26 +625,61 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_init.set_defaults(func=_do_init)
 
-    p_setup_labels = subparsers.add_parser(
-        "setup-labels",
-        help="Provision every framework-required label on the configured repo.",
+    p_setup = subparsers.add_parser(
+        "setup-github",
+        help="Provision GitHub Issue Types (org-level) and labels (repo-level).",
         description=(
-            "Enumerate every label the framework needs across all "
-            "discovered workflows and create them on the configured backend "
-            "repo. Idempotent: existing labels are skipped (their colors "
-            "are NOT overwritten). Includes one `state:*` label per "
-            "workflow state, one `wip:*` per role in roles.json, the five "
-            "HITL singleton labels (`hitl:reviewing`, `hitl:auditing`, "
-            "`hitl:advising`, `hitl:awaiting-input`, `hitl:resolved`), and "
-            "one `hitl:awaiting-<gate>` / `hitl:audit-<gate>` per "
-            "catalogued HCP whose `allowed_levels` includes that level. "
-            "Transient signal markers (`hitl:approved-<dest>`, "
-            "`hitl:rejected-<gate>`, etc.) are NOT pre-created — they're "
-            "added lazily by the relevant operations. Use --dry-run to "
-            "list the labels without contacting the backend."
+            "Default: get the configured repo ready to use. Tries to "
+            "provision missing Issue Types at the org (best effort — falls "
+            "back to label encoding if it can't), then ensures every "
+            "required label exists on the repo. Use --setup-org to "
+            "explicitly create Issue Types at the org level (requires org "
+            "admin rights); on success the capability cache is refreshed."
         ),
     )
-    p_setup_labels.set_defaults(func=_do_setup_labels)
+    p_setup.add_argument(
+        "--setup-org",
+        action="store_true",
+        default=False,
+        help="Org-level operation only — create missing Issue Types in the "
+        "org (requires admin rights). Does not touch repo labels. "
+        "Force-refreshes the capability cache even for manual entries.",
+    )
+    p_setup.set_defaults(func=_do_setup_github)
+
+    p_caps = subparsers.add_parser(
+        "capabilities",
+        help="Inspect or manage the per-(host, owner) capability cache.",
+        description=(
+            "The framework caches whether each tracker org supports native "
+            "Issue Types or needs label fallback. Default behavior prints "
+            "the cache. Use --clear to wipe; --refresh to re-probe "
+            "non-manual entries; --set-encoding to pin manually."
+        ),
+    )
+    caps_action = p_caps.add_mutually_exclusive_group()
+    caps_action.add_argument(
+        "--clear",
+        action="store_true",
+        default=False,
+        help="Wipe every cache entry (including manual pins).",
+    )
+    caps_action.add_argument(
+        "--refresh",
+        action="store_true",
+        default=False,
+        help="Re-probe every non-manual cache entry against its backend. "
+        "Manual entries are left alone (use --set-encoding to change them).",
+    )
+    caps_action.add_argument(
+        "--set-encoding",
+        dest="set_encoding",
+        choices=("native", "label"),
+        default=None,
+        help="Pin the encoding for the current --repo / --host. Sets "
+        "manual=true so it survives --refresh. Use --clear to undo.",
+    )
+    p_caps.set_defaults(func=_do_capabilities)
 
     return parser
 
@@ -1439,7 +1469,45 @@ def _do_create(args: argparse.Namespace) -> int:
         )
         return 2
 
-    # 2. Resolve claim role if --claim is set.
+    # 2. Resolve and validate issue type.
+    try:
+        process = registry.get_process(process_name)
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+
+    supported_types = process.state_machine.issue_types
+    issue_type: str | None = args.issue_type
+    if supported_types:
+        if issue_type is None:
+            if len(supported_types) == 1:
+                issue_type = supported_types[0]
+            else:
+                _handle_workflow_error(
+                    ConfigError(
+                        f"Process {process_name!r} supports multiple issue types "
+                        f"{sorted(supported_types)}; pass --type to disambiguate."
+                    )
+                )
+                return 2
+        elif issue_type not in supported_types:
+            _handle_workflow_error(
+                ConfigError(
+                    f"Issue type {issue_type!r} is not declared in process "
+                    f"{process_name!r}'s supported types {sorted(supported_types)}."
+                )
+            )
+            return 2
+    elif issue_type is not None:
+        _handle_workflow_error(
+            ConfigError(
+                f"Process {process_name!r} does not declare any issue types; "
+                f"--type {issue_type!r} cannot be applied."
+            )
+        )
+        return 2
+
+    # 3. Resolve claim role if --claim is set.
     claim_role: str | None = None
     if args.claim:
         claim_role = _resolve_agent_role(ctx)
@@ -1452,19 +1520,15 @@ def _do_create(args: argparse.Namespace) -> int:
             )
             return 2
 
-    # 3. Load body.
-    if args.body_from is not None:
-        try:
-            body = Path(args.body_from).read_text(encoding="utf-8")
-        except OSError as exc:
-            _handle_workflow_error(ConfigError(f"Could not read body file {args.body_from}: {exc}"))
-            return 2
-    elif args.body is not None:
-        body = args.body
-    else:
-        body = ""
+    # 4. Load body.
+    try:
+        body_text = _resolve_body(args)
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+    body = body_text if body_text is not None else ""
 
-    # 4. Dry run path: print the plan, don't touch the backend.
+    # 5. Dry run path: print the plan, don't touch the backend.
     if ctx["dry_run"]:
         extras = [f"wip:{claim_role}"] if claim_role else []
         if ctx["json_output"]:
@@ -1474,6 +1538,7 @@ def _do_create(args: argparse.Namespace) -> int:
                         "workflow": process_name,
                         "initial_state": args.initial_state,
                         "title": args.title,
+                        "type": issue_type,
                         "labels": [f"state:{args.initial_state}", *extras],
                         "body_chars": len(body),
                         "dry_run": True,
@@ -1485,6 +1550,8 @@ def _do_create(args: argparse.Namespace) -> int:
             print(f"[dry-run] would create issue in workflow {process_name!r}:")
             print(f"  title:         {args.title}")
             print(f"  initial state: {args.initial_state}")
+            if issue_type:
+                print(f"  type:          {issue_type}")
             if claim_role:
                 print(f"  claim:         {claim_role}")
             print(f"  body:          {len(body)} character(s)")
@@ -1497,6 +1564,32 @@ def _do_create(args: argparse.Namespace) -> int:
         _handle_workflow_error(exc)
         return 2
 
+    # Resolve encoding from capability cache (probe if needed). Then resolve
+    # framework type id to either a backend-specific type string (native
+    # encoding) or a `type:<id>` label (label encoding).
+    backend_issue_type: str | None = None
+    type_extra_labels: list[str] = []
+    if issue_type is not None:
+        encoding = _resolve_encoding(ctx, backend)
+        if process.issue_type_directory is not None:
+            try:
+                type_entry = process.issue_type_directory.get(issue_type)
+            except KeyError:
+                _handle_workflow_error(
+                    ConfigError(
+                        f"Issue type {issue_type!r} is declared by the process "
+                        f"but not defined in issue-types.json."
+                    )
+                )
+                return 2
+            if encoding == "native":
+                backend_issue_type = type_entry.github_issue_type
+            else:
+                type_extra_labels = [f"type:{issue_type}"]
+        elif encoding == "label":
+            # Fall back to `type:<id>` even without a directory entry.
+            type_extra_labels = [f"type:{issue_type}"]
+
     # Create at the initial state with no claim label. Claiming, if
     # requested, runs as a second operation so the state machine moves
     # resting → working properly (sets wip:<role> AND wip-from:<initial_state>).
@@ -1505,7 +1598,8 @@ def _do_create(args: argparse.Namespace) -> int:
             title=args.title,
             body=body,
             state=args.initial_state,
-            extra_labels=[],
+            extra_labels=type_extra_labels,
+            issue_type=backend_issue_type,
         )
     except BackendError as exc:
         _handle_workflow_error(exc)
@@ -2051,7 +2145,12 @@ def _do_validate(args: argparse.Namespace) -> int:
         except (ConfigError, ParseError) as exc:
             logger.warning("Skipping workflow %r: %s", wf_name, exc)
             continue
-        findings = validate_state_machine(wf_context.state_machine, wf_context.catalog, wf_context.grants)
+        findings = validate_state_machine(
+            wf_context.state_machine,
+            wf_context.catalog,
+            wf_context.grants,
+            issue_type_directory=wf_context.issue_type_directory,
+        )
         results.append((wf_name, wf_context.state_machine, wf_context.catalog, findings))
 
     return _emit_validate_result(results, json_output=json_output)
@@ -2311,26 +2410,22 @@ def _do_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _enumerate_required_labels(ctx: dict) -> set[str]:
+def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
     """Compute the full set of label names the framework requires for a repo.
 
     Sources, aggregated across every workflow in the registry:
 
     - `state:<name>` for every state in every workflow.
     - `wip:<role_id>` for every role in roles.json.
+    - `wip-from:<state>` for every resting state (origin marker).
     - The five HITL singleton labels (`hitl:reviewing`, `hitl:auditing`,
       `hitl:advising`, `hitl:awaiting-input`, `hitl:resolved`).
-    - `hitl:awaiting-<gate>` for every HCP whose `allowed_levels` includes
-      BLOCK.
-    - `hitl:audit-<gate>` for every HCP whose `allowed_levels` includes
-      AUDIT.
+    - `hitl:awaiting-<gate>` / `hitl:audit-<gate>` per catalogued HCP.
+    - `type:<type_id>` per declared issue type WHEN encoding is `"label"`.
 
-    Signal markers (`hitl:approved-*`, `hitl:rejected-*`, `hitl:checked-*`,
-    `hitl:revoked-*`) are intentionally omitted — they're transient
-    audit-trace labels and the create-on-first-use path during marker
-    changes handles them naturally.
-
-    Raises `ConfigError` if no workflow source tree can be discovered.
+    Signal markers (`hitl:approved-*`, `hitl:rejected-*`, etc.) are
+    transient audit-trace labels created on first use; they aren't
+    pre-provisioned here.
     """
     from workflow.config import build_registry
     from workflow.core.model.hcp import HCPLevel
@@ -2364,8 +2459,6 @@ def _enumerate_required_labels(ctx: dict) -> set[str]:
 
         for state_name, state in wf_context.state_machine.states.items():
             labels.add(f"state:{state_name}")
-            # Every RESTING state may serve as the origin for a claim into a
-            # WORKING state — provision the `wip-from:<state>` marker.
             if state.state_class.value == "resting":
                 labels.add(f"wip-from:{state_name}")
 
@@ -2380,35 +2473,21 @@ def _enumerate_required_labels(ctx: dict) -> set[str]:
             for role_id in wf_context.role_directory.roles:
                 labels.add(f"wip:{role_id}")
 
+        # When encoding is `"label"`, type is conveyed via `type:<id>` labels.
+        if encoding == "label" and wf_context.issue_type_directory:
+            for type_id in wf_context.issue_type_directory.types:
+                labels.add(f"type:{type_id}")
+
     return labels
 
 
-def _do_setup_labels(args: argparse.Namespace) -> int:
-    """Provision every framework-required label on the configured repo."""
-    ctx = _ctx_obj_from_args(args)
-
-    try:
-        required = _enumerate_required_labels(ctx)
-    except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
-
-    if ctx["dry_run"]:
-        if ctx["json_output"]:
-            print(_json.dumps({"labels": sorted(required)}, indent=2))
-        else:
-            print(f"[dry-run] would ensure {len(required)} label(s) on repo:")
-            for name in sorted(required):
-                print(f"  {name}")
-        return 0
-
-    try:
-        backend = _build_backend(ctx)
-    except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
-
-    # Snapshot existing labels first so we can report created vs skipped.
+def _provision_labels(
+    backend: Any,
+    required: set[str],
+    *,
+    json_output: bool,
+) -> int:
+    """Idempotently create every label in `required` on the backend repo."""
     try:
         existing = set(backend.list_labels())
     except BackendError as exc:
@@ -2430,37 +2509,326 @@ def _do_setup_labels(args: argparse.Namespace) -> int:
         if was_created:
             created.append(name)
         else:
-            # Backend reported the label already existed despite our
-            # snapshot (race or stale cache). Treat as skipped.
             skipped.append(name)
 
-    if ctx["json_output"]:
+    if json_output:
         print(
             _json.dumps(
                 {
-                    "created": created,
-                    "skipped": skipped,
-                    "failed": [{"label": n, "error": e} for n, e in failed],
+                    "labels_created": created,
+                    "labels_skipped": skipped,
+                    "labels_failed": [{"label": n, "error": e} for n, e in failed],
                 },
                 indent=2,
             )
         )
     else:
         print(
-            f"setup-labels: created {len(created)}, "
+            f"labels: created {len(created)}, "
             f"skipped {len(skipped)} (already existed), "
             f"failed {len(failed)}."
         )
-        if created:
-            print("Created:")
+        for name in created:
+            print(f"  + {name}")
+        for name, err in failed:
+            print(f"  ! {name}: {err}")
+    return 1 if failed else 0
+
+
+def _resolve_encoding(
+    ctx: dict, backend: Any, *, force_probe: bool = False
+) -> str:
+    """Resolve the encoding for the current (host, owner), consulting the cache.
+
+    - Manual entries are returned as-is (unless `force_probe=True`).
+    - Non-manual, non-expired entries are returned as-is.
+    - Otherwise, probes via `backend.list_issue_types(owner)` and caches.
+
+    Returns `"native"` or `"label"`.
+    """
+    from workflow.core.capability_cache import CapabilityCache
+
+    host, owner = _host_and_owner(backend)
+    cache = CapabilityCache.load()
+    entry = cache.get(host, owner)
+    if entry is not None and not force_probe:
+        if entry.manual or not entry.is_expired():
+            return entry.encoding
+
+    types = backend.list_issue_types(owner)
+    encoding = "native" if (types is not None and types) else "label"
+    cache.set(host, owner, encoding, manual=False)
+    cache.save()
+    return encoding
+
+
+def _host_and_owner(backend: Any) -> tuple[str, str]:
+    """Extract (host, owner) from a backend for cache keying."""
+    host = backend.host or "github.com"
+    owner = backend.repo.split("/", 1)[0] if backend.repo else "unknown"
+    return host, owner
+
+
+def _do_setup_github(args: argparse.Namespace) -> int:
+    """Provision GitHub Issue Types (org-level) and labels (repo-level).
+
+    Default: best-effort org types + always repo labels (with encoding
+    auto-fallback). `--setup-org`: org types only; force-refreshes cache.
+    """
+    from workflow.config import build_registry
+    from workflow.core.capability_cache import CapabilityCache
+
+    ctx = _ctx_obj_from_args(args)
+
+    try:
+        backend = _build_backend(ctx)
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+    host, owner = _host_and_owner(backend)
+
+    # Collect issue types from the registry (the first process's directory wins
+    # since it's shared across processes in a workflow).
+    registry = build_registry(
+        agent_home=ctx.get("agent_home"),
+        workflow_dir=ctx.get("workflow_dir"),
+        backend=None,
+        grants_dir=ctx.get("grants_dir"),
+    )
+    if registry is None:
+        _handle_workflow_error(
+            ConfigError(
+                "No workflows directory found. Set WORKFLOW_DIR or run from "
+                "inside a tree containing `*-states.json` files."
+            )
+        )
+        return 2
+    type_directory = None
+    for wf_name in registry.discovered_processes():
+        try:
+            wf_context = registry.get_process(wf_name)
+        except WorkflowError:
+            continue
+        if wf_context.issue_type_directory is not None:
+            type_directory = wf_context.issue_type_directory
+            break
+
+    # --- --setup-org path: force-probe, create types, refresh cache, stop ---
+    if args.setup_org:
+        types_now = backend.list_issue_types(owner)
+        if types_now is None:
+            _handle_workflow_error(
+                ConfigError(
+                    f"Org {owner!r} does not support Issue Types (or you "
+                    f"lack permission to read them)."
+                )
+            )
+            return 2
+        existing = set(types_now)
+        if type_directory is None or not type_directory.types:
+            print(f"No issue-types.json found; nothing to provision at org {owner!r}.")
+            cache = CapabilityCache.load()
+            cache.set(host, owner, "native" if existing else "label", manual=False)
+            cache.save()
+            return 0
+        created: list[str] = []
+        skipped: list[str] = []
+        for entry in type_directory.types.values():
+            gh_name = entry.github_issue_type
+            if not gh_name:
+                continue
+            if gh_name in existing:
+                skipped.append(gh_name)
+                continue
+            try:
+                backend.ensure_issue_type(
+                    owner,
+                    name=gh_name,
+                    description=entry.description,
+                    color=entry.github_issue_type_color,
+                )
+                created.append(gh_name)
+            except BackendError as exc:
+                _handle_workflow_error(exc)
+                return 2
+        # Refresh cache (always native after a successful org provisioning).
+        cache = CapabilityCache.load()
+        cache.set(host, owner, "native", manual=False)
+        cache.save()
+        if ctx["json_output"]:
+            print(
+                _json.dumps(
+                    {
+                        "org": owner,
+                        "types_created": created,
+                        "types_skipped": skipped,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"setup-github --setup-org: created {len(created)}, skipped {len(skipped)}.")
             for name in created:
                 print(f"  + {name}")
-        if failed:
-            print("Failed:")
-            for name, err in failed:
-                print(f"  ! {name}: {err}")
+        return 0
 
-    return 1 if failed else 0
+    # --- Default path: best-effort org, then repo labels ---
+    # First, resolve the encoding. If cache says native (or no entry yet and
+    # probe says native), attempt org provisioning best-effort.
+    encoding = _resolve_encoding(ctx, backend)
+
+    if encoding == "native" and type_directory is not None and type_directory.types:
+        existing_types = backend.list_issue_types(owner) or []
+        existing_set = set(existing_types)
+        org_failed = False
+        for entry in type_directory.types.values():
+            gh_name = entry.github_issue_type
+            if not gh_name or gh_name in existing_set:
+                continue
+            try:
+                backend.ensure_issue_type(
+                    owner,
+                    name=gh_name,
+                    description=entry.description,
+                    color=entry.github_issue_type_color,
+                )
+            except BackendError as exc:
+                logger.info(
+                    "Could not provision org type %r (%s); falling back to label encoding.",
+                    gh_name,
+                    exc,
+                )
+                org_failed = True
+                break
+        if org_failed:
+            encoding = "label"
+            cache = CapabilityCache.load()
+            cache.set(host, owner, "label", manual=False)
+            cache.save()
+        else:
+            # Org provisioning succeeded — refresh cache to native (idempotent
+            # for the already-native case; ensures the timestamp is fresh).
+            cache = CapabilityCache.load()
+            cache.set(host, owner, "native", manual=False)
+            cache.save()
+
+    if not ctx["json_output"]:
+        print(f"Encoding for {host}/{owner}: {encoding}")
+
+    try:
+        required = _enumerate_required_labels(ctx, encoding=encoding)
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+
+    if ctx["dry_run"]:
+        if ctx["json_output"]:
+            print(
+                _json.dumps(
+                    {
+                        "encoding": encoding,
+                        "labels": sorted(required),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"[dry-run] would ensure {len(required)} label(s) on repo:")
+            for name in sorted(required):
+                print(f"  {name}")
+        return 0
+
+    return _provision_labels(backend, required, json_output=ctx["json_output"])
+
+
+def _do_capabilities(args: argparse.Namespace) -> int:
+    """Inspect or manage the capability cache."""
+    from workflow.core.capability_cache import CapabilityCache
+
+    ctx = _ctx_obj_from_args(args)
+    cache = CapabilityCache.load()
+
+    if args.clear:
+        cache.clear()
+        cache.save()
+        print("Capability cache cleared.")
+        return 0
+
+    if args.set_encoding:
+        try:
+            backend = _build_backend(ctx)
+        except WorkflowError as exc:
+            _handle_workflow_error(exc)
+            return 2
+        host, owner = _host_and_owner(backend)
+        cache.set(host, owner, args.set_encoding, manual=True)
+        cache.save()
+        print(
+            f"Pinned {host}/{owner} encoding to {args.set_encoding!r} (manual)."
+        )
+        return 0
+
+    if args.refresh:
+        try:
+            backend = _build_backend(ctx)
+        except WorkflowError as exc:
+            _handle_workflow_error(exc)
+            return 2
+        refreshed: list[str] = []
+        skipped: list[str] = []
+        for key, entry in list(cache.entries.items()):
+            if entry.manual:
+                skipped.append(key)
+                continue
+            host, _, owner = key.partition("/")
+            if not host or not owner:
+                continue
+            # Use the configured backend's host/owner to bound the probe
+            # to a single endpoint we have credentials for.
+            cb_host, cb_owner = _host_and_owner(backend)
+            if (host, owner) != (cb_host, cb_owner):
+                # Skip entries that aren't for the currently-configured backend.
+                skipped.append(key)
+                continue
+            types = backend.list_issue_types(owner)
+            encoding = "native" if (types is not None and types) else "label"
+            cache.set(host, owner, encoding, manual=False)
+            refreshed.append(f"{key} → {encoding}")
+        cache.save()
+        if ctx["json_output"]:
+            print(_json.dumps({"refreshed": refreshed, "skipped": skipped}, indent=2))
+        else:
+            print(f"Refreshed {len(refreshed)} entry(ies); skipped {len(skipped)}.")
+            for line in refreshed:
+                print(f"  {line}")
+        return 0
+
+    # Default: print the cache.
+    if ctx["json_output"]:
+        print(
+            _json.dumps(
+                {
+                    key: {
+                        "encoding": e.encoding,
+                        "checked_at": e.checked_at,
+                        "manual": e.manual,
+                    }
+                    for key, e in cache.entries.items()
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if not cache.entries:
+        print("(empty capability cache)")
+        return 0
+    width = max(len(k) for k in cache.entries) + 2
+    for key, entry in sorted(cache.entries.items()):
+        suffix = " [manual]" if entry.manual else ""
+        print(f"  {key.ljust(width)} {entry.encoding}{suffix}  ({entry.checked_at})")
+    return 0
 
 
 if __name__ == "__main__":

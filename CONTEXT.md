@@ -98,6 +98,30 @@ For each gated transition the block surfaces: gate name, default vs effective le
 
 This means the agent does not have to consult the process documentation to figure out the next command — every operation that surfaces an issue's state surfaces its options too.
 
+## Issue type
+
+Each process declares which issue types it accepts via a top-level `"issue_types": [...]` array on its state machine JSON. The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).
+
+`workflow create` requires `--type` when the process supports multiple types; auto-defaults when only one. Issue type is set at creation and **immutable** — if a type needs to change, that's a new issue, not a retype. The validator checks every type id a process declares exists in `issue-types.json`; missing ids are an ERROR, missing directory is a WARNING.
+
+### Type encoding (native vs label)
+
+How the type is recorded on the tracker depends on what the org supports:
+
+- **Native** — GitHub's first-class Issue Type field (`gh issue create --type "Bug"`). Requires GHES ≥ ?? / GitHub.com, the org to have Issue Types enabled, and the user to have read access to the types.
+- **Label** — `type:<framework_id>` regular label (e.g., `type:bug`). Works on every tracker without preconditions.
+
+The choice is **auto-detected** per (host, owner) by probing the org's `/issue-types` endpoint via `gh api`. A non-empty type list → native; anything else (404, 403, empty list, network error) → label. The decision is cached in `~/.config/blemees-workflow/capabilities.json` with a 30-day TTL.
+
+A manual override is set via `workflow capabilities --set-encoding native|label` — `manual=true` on the entry pins it so refreshes don't touch it. `--clear` wipes the cache. `--refresh` re-probes non-manual entries.
+
+### `workflow setup-github`
+
+Provisions both org Issue Types and repo labels:
+
+- **Default** (`workflow setup-github`): best-effort — tries to create missing org Issue Types; if it can't (permissions), falls back to label encoding and provisions `type:*` labels on the repo. Always provisions state/wip/wip-from/hitl labels.
+- **`--setup-org`**: admin path; creates missing Issue Types at the org and refreshes the capability cache. Fails loudly on any error. Does not touch repo labels.
+
 ## Closing the tracker's issue
 
 Each terminal state declares its own `close_reason` in `<name>-states.json` — the literal string the backend hands to the tracker (e.g., GitHub's `"completed"` or `"not planned"`). When `close_reason` is set, advancing into the state closes the tracker's issue with that reason as part of the same atomic apply step. When `close_reason` is absent, the issue stays open — used for handoff-style terminals where the work continues elsewhere.

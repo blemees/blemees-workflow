@@ -51,12 +51,14 @@ from typing import Any
 
 from workflow.backends.base import TrackerBackend
 from workflow.core.model.hcp import HCPCatalog
+from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.role import RoleDirectory
 from workflow.core.model.state_machine import StateMachine
 from workflow.core.model.trust_grant import TrustGrant
 from workflow.core.parser import (
     load_team_grants,
     parse_hcp_catalog,
+    parse_issue_type_directory,
     parse_role_directory,
     parse_state_machine,
 )
@@ -76,6 +78,7 @@ class Process:
     state_machine: StateMachine
     catalog: HCPCatalog | None = None
     role_directory: RoleDirectory | None = None
+    issue_type_directory: IssueTypeDirectory | None = None
     grants: dict[str, TrustGrant] = field(default_factory=dict)
     backend: TrackerBackend | None = None
     workflow_dir: Path | None = None  # dir containing *-states.json files
@@ -281,6 +284,12 @@ def load_process(
     if roles_path.exists():
         role_directory = parse_role_directory(roles_path)
 
+    # Issue type directory (optional, shared across workflows).
+    issue_type_directory: IssueTypeDirectory | None = None
+    issue_types_path = workflow_dir / "issue-types.json"
+    if issue_types_path.exists():
+        issue_type_directory = parse_issue_type_directory(issue_types_path)
+
     # Trust grants — priority: explicit grants_dir > env > agent config > default.
     grants: dict[str, TrustGrant] = {}
     if grants_dir is None:
@@ -301,6 +310,7 @@ def load_process(
         state_machine=state_machine,
         catalog=catalog,
         role_directory=role_directory,
+        issue_type_directory=issue_type_directory,
         grants=grants,
         backend=backend,
         workflow_dir=workflow_dir,

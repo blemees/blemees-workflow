@@ -237,6 +237,7 @@ class GitHubBackend:
         body: str,
         state: str,
         extra_labels: list[str] | None = None,
+        issue_type: str | None = None,
     ) -> str:
         """Create a new GitHub issue with the framework's state marker.
 
@@ -246,6 +247,10 @@ class GitHubBackend:
         the repo are required; missing ones are created lazily via
         `ensure_label` before the issue is created so `gh` doesn't error
         on an unknown label.
+
+        When `issue_type` is set, `gh issue create --type <issue_type>` is
+        added — this is GitHub's first-class Issue Type field. The string
+        must be the exact GitHub Issue Type name (e.g., "Bug", "Feature").
 
         The issue URL printed by `gh` is parsed back into the issue number
         and returned as a string.
@@ -265,7 +270,7 @@ class GitHubBackend:
             tmp.write(body or "")
             tmp_path = tmp.name
         try:
-            output = self._gh(
+            args: list[str] = [
                 "issue",
                 "create",
                 "--repo",
@@ -276,7 +281,10 @@ class GitHubBackend:
                 tmp_path,
                 "--label",
                 ",".join(labels),
-            )
+            ]
+            if issue_type:
+                args += ["--type", issue_type]
+            output = self._gh(*args)
         finally:
             try:
                 os.unlink(tmp_path)
@@ -667,6 +675,76 @@ class GitHubBackend:
             remove -= overlap
 
         return add, remove
+
+    def list_issue_types(self, org: str) -> list[str] | None:
+        """Read org-level Issue Types via `gh api orgs/{org}/issue-types`.
+
+        Returns:
+          - `list[str]` (names) on success — empty list means feature on
+            but no types defined.
+          - `None` on 403 (no permission), 404 (feature absent), or any
+            backend error. The CLI treats `None` as "encode as labels".
+
+        Side effect: none — read-only.
+        """
+        try:
+            output = self._gh("api", f"orgs/{org}/issue-types", check=False)
+        except BackendError:
+            return None
+        if not output.strip():
+            return None
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            return None
+        # On 4xx, `gh api` typically returns a JSON error object like
+        # {"message": "...", "documentation_url": "...", "status": "404"}.
+        if isinstance(data, dict) and "message" in data and "status" in data:
+            return None
+        if not isinstance(data, list):
+            return None
+        names: list[str] = []
+        for entry in data:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                names.append(entry["name"])
+        return names
+
+    def ensure_issue_type(
+        self,
+        org: str,
+        name: str,
+        description: str,
+        color: str | None = None,
+    ) -> bool:
+        """Create the GitHub Issue Type at the org if missing.
+
+        Idempotent via a pre-check: list existing types, skip if present.
+        Otherwise calls `gh api orgs/{org}/issue-types -f name=...`.
+        Raises `BackendError` if the API call fails — the caller's
+        `setup-github --setup-org` path expects loud failures.
+        """
+        existing = self.list_issue_types(org)
+        if existing is None:
+            raise BackendError(
+                f"Cannot list issue types for org {org!r}; feature may not "
+                f"be enabled or you may lack permission."
+            )
+        if name in existing:
+            return False
+        args = [
+            "api",
+            f"orgs/{org}/issue-types",
+            "-f",
+            f"name={name}",
+            "-f",
+            f"description={description}",
+            "-f",
+            "is_enabled=true",
+        ]
+        if color:
+            args += ["-f", f"color={color}"]
+        self._gh(*args)
+        return True
 
     def list_labels(self) -> list[str]:
         """Return every label currently defined on the repo.

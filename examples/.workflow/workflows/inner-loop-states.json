@@ -1,6 +1,7 @@
 {
   "name": "inner-loop",
   "canonical_catalog_path": "inner-loop-hcps.json",
+  "issue_types": ["bug", "feature", "task"],
   "states": {
     "ready_for_dev": {
       "class": "resting",

@@ -1,6 +1,7 @@
 {
   "name": "refinement",
   "canonical_catalog_path": "refinement-hcps.json",
+  "issue_types": ["bug", "feature", "task"],
   "states": {
     "raw": {
       "class": "resting",

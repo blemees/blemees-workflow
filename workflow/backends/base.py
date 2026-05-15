@@ -110,6 +110,7 @@ class TrackerBackend(Protocol):
         body: str,
         state: str,
         extra_labels: list[str] | None = None,
+        issue_type: str | None = None,
     ) -> str:
         """Create a new issue in the given initial state.
 
@@ -119,6 +120,12 @@ class TrackerBackend(Protocol):
         item never exists without a state, and SHOULD attach any
         `extra_labels` the caller passed (e.g., a `wip:<role>` to claim
         the item at intake).
+
+        `issue_type`, if provided, is the backend-specific type identifier
+        (GitHub Issue Type name, Jira issue type, etc.). The CLI resolves
+        the framework's type id to this backend-specific string via the
+        `IssueTypeDirectory`. Backends that don't support typed issues
+        ignore the argument.
         """
         ...
 
@@ -206,6 +213,37 @@ class TrackerBackend(Protocol):
         Used by `setup-labels` to skip labels that already exist, and by any
         future audit that wants to compare the framework's required set
         against the repo's actual set.
+        """
+        ...
+
+    def list_issue_types(self, org: str) -> list[str] | None:
+        """Return existing issue type names at the org, or None if unavailable.
+
+        `None` means the backend cannot read issue types in this org for any
+        reason — feature not enabled, user lacks permission, server doesn't
+        support the feature, etc. The CLI treats `None` as "encode as labels"
+        rather than trying to distinguish causes.
+
+        An empty list `[]` means the feature is supported and accessible but
+        no types have been defined yet. The CLI also treats this as "encode
+        as labels" (no native types to attach), until someone runs
+        `setup-github --setup-org` to create them.
+        """
+        ...
+
+    def ensure_issue_type(
+        self,
+        org: str,
+        name: str,
+        description: str,
+        color: str | None = None,
+    ) -> bool:
+        """Create the named issue type at the org if it doesn't exist.
+
+        Returns True if a new type was created, False if it already existed.
+        Backends that don't support issue types should raise `BackendError`
+        rather than silently succeeding — the CLI's `--setup-org` path
+        wants loud failures so the admin can fix permissions or feature flags.
         """
         ...
 

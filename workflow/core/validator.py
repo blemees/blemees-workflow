@@ -17,6 +17,7 @@ from enum import Enum
 
 from workflow.backends.base import IssueState
 from workflow.core.model.hcp import HCPCatalog, HCPLevel
+from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.state_machine import (
     ReversibilityClass,
     StateClass,
@@ -50,6 +51,7 @@ def validate_state_machine(
     state_machine: StateMachine,
     catalog: HCPCatalog | None,
     grants: dict[str, TrustGrant] | None = None,
+    issue_type_directory: IssueTypeDirectory | None = None,
 ) -> list[ValidationFinding]:
     """Run every static cross-artifact check; return findings."""
     grants = grants or {}
@@ -61,6 +63,7 @@ def validate_state_machine(
     findings.extend(_check_transition_type_compatibility(state_machine))
     findings.extend(_check_working_states_are_claim_destinations(state_machine))
     findings.extend(_check_level_keywords_not_on_diagram(state_machine))
+    findings.extend(_check_issue_types_resolved(state_machine, issue_type_directory))
 
     if catalog is not None:
         findings.extend(_check_legend_catalog_sync(state_machine, catalog))
@@ -566,4 +569,47 @@ def _check_level_keywords_not_on_diagram(state_machine: StateMachine) -> list[Va
                     )
                 )
                 break  # one finding per note line is enough
+    return findings
+
+
+def _check_issue_types_resolved(
+    state_machine: StateMachine,
+    issue_type_directory: IssueTypeDirectory | None,
+) -> list[ValidationFinding]:
+    """Every issue type a process declares must exist in the issue-types directory.
+
+    If the process declares `issue_types` but no directory was loaded, that's
+    a WARNING (directory missing or malformed). If the directory exists but
+    one of the referenced ids is absent, that's an ERROR (dangling reference).
+    """
+    findings: list[ValidationFinding] = []
+    if not state_machine.issue_types:
+        return findings
+    if issue_type_directory is None:
+        findings.append(
+            ValidationFinding(
+                severity=Severity.WARNING,
+                principle_cite="state-machine-principles.md#1",
+                message=(
+                    f"Process declares issue_types {sorted(state_machine.issue_types)} "
+                    f"but no issue-types.json was found. Types cannot be resolved "
+                    f"to backend type identifiers."
+                ),
+                location=state_machine.source_path,
+            )
+        )
+        return findings
+    for type_id in state_machine.issue_types:
+        if not issue_type_directory.has(type_id):
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#1",
+                    message=(
+                        f"Process references issue type {type_id!r} but it is not "
+                        f"defined in {issue_type_directory.source_path or 'issue-types.json'}."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
     return findings
