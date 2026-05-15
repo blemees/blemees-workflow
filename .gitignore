@@ -1,0 +1,36 @@
+# Byte-compiled / cached Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# uv / virtualenvs
+.venv/
+venv/
+env/
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Linting / type-check caches
+.ruff_cache/
+.mypy_cache/
+.pytype/
+
+# Editor scratch
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
