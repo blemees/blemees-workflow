@@ -98,6 +98,12 @@ For each gated transition the block surfaces: gate name, default vs effective le
 
 This means the agent does not have to consult the process documentation to figure out the next command — every operation that surfaces an issue's state surfaces its options too.
 
+## Generated documentation
+
+`workflow generate-docs` regenerates the agent/human-readable layer of the workflow directory: state-machine diagrams in mermaid, per-process reference docs in markdown, plus shared `roles.md`, `issue-types.md`, and a top-level `README.md` index. All emitted artifacts live alongside the canonical JSON sources.
+
+Per-process markdown (`<name>.md`) contains everything an agent needs to operate on that process without chasing links: issue types accepted, embedded state diagram, states table, transitions table (with HITL level after trust-grant resolution), HCP details, cross-process handoff list, and any active trust grants. The emitter is read-only and deterministic — two runs produce byte-identical output, so pre-commit hooks can verify the checked-in docs are in sync with the JSON.
+
 ## Issue type
 
 Each process declares which issue types it accepts via a top-level `"issue_types": [...]` array on its state machine JSON. The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).

@@ -573,29 +573,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_validate.set_defaults(func=_do_validate)
 
-    p_render = subparsers.add_parser(
-        "render-mermaid",
-        help="Emit a stateDiagram-v2 .mermaid visualization for a process.",
+    p_gendocs = subparsers.add_parser(
+        "generate-docs",
+        help="Regenerate mermaid + markdown docs for every process.",
         description=(
-            "Render the canonical <name>-states.json as a "
-            "stateDiagram-v2 .mermaid file. The mermaid is a generated "
-            "visualization, not the source of truth — authors edit JSON "
-            "and re-render. Writes <name>-states.mermaid alongside "
-            "the JSON by default; pass --stdout to print instead."
+            "Regenerate the agent/human-readable documentation alongside "
+            "the canonical JSON sources. Emits `<process>-states.mermaid` "
+            "(state diagrams), `<process>.md` (per-process reference docs "
+            "with states, transitions, HCPs, cross-process handoffs, and "
+            "active trust grants), `roles.md`, `issue-types.md`, and "
+            "`README.md`. Authors edit JSON; regenerate."
         ),
     )
-    p_render.add_argument(
-        "process",
-        nargs="?",
-        help="Process name to render. Omit to render every discovered process.",
-    )
-    p_render.add_argument(
-        "--stdout",
-        action="store_true",
-        default=False,
-        help="Print to stdout instead of writing alongside the JSON.",
-    )
-    p_render.set_defaults(func=_do_render_mermaid)
+    p_gendocs.set_defaults(func=_do_generate_docs)
 
     p_doctor = subparsers.add_parser(
         "doctor",
@@ -2068,10 +2058,26 @@ def _do_view(args: argparse.Namespace) -> int:
     return 0
 
 
-def _do_render_mermaid(args: argparse.Namespace) -> int:
-    """Emit mermaid visualization(s) for one or all discovered workflows."""
+def _do_generate_docs(args: argparse.Namespace) -> int:
+    """Regenerate mermaid + markdown docs for every discovered process.
+
+    Emits, alongside the JSON sources in the workflow directory:
+
+    - `<process>-states.mermaid` per process (state diagram)
+    - `<process>.md` per process (reference doc)
+    - `roles.md` if `roles.json` is present
+    - `issue-types.md` if `issue-types.json` is present
+    - `README.md` (index)
+    """
     from workflow.config import build_registry
-    from workflow.core.emitter import emit_mermaid
+    from workflow.core.emitter import (
+        ProcessDocInput,
+        emit_index_doc,
+        emit_issue_types_doc,
+        emit_mermaid,
+        emit_process_doc,
+        emit_roles_doc,
+    )
 
     ctx = _ctx_obj_from_args(args)
     registry = build_registry(
@@ -2089,24 +2095,74 @@ def _do_render_mermaid(args: argparse.Namespace) -> int:
         )
         return 2
 
-    requested = [args.process] if args.process else registry.discovered_processes()
-    for wf_name in requested:
+    written: list[str] = []
+    process_names = registry.discovered_processes()
+    workflow_dir = None
+    role_directory = None
+    issue_type_directory = None
+    for wf_name in process_names:
         try:
-            wf_context = registry.get_process(wf_name)
+            process = registry.get_process(wf_name)
         except WorkflowError as exc:
             _handle_workflow_error(exc)
             return 2
-        text = emit_mermaid(wf_context.state_machine)
-        if args.stdout:
-            print(f"# {wf_name}-states.mermaid")
-            print(text)
+        if workflow_dir is None:
+            workflow_dir = process.workflow_dir
+        # Capture shared directories from the first process that has them —
+        # they're shared across processes in a workflow.
+        if role_directory is None and process.role_directory is not None:
+            role_directory = process.role_directory
+        if issue_type_directory is None and process.issue_type_directory is not None:
+            issue_type_directory = process.issue_type_directory
+
+        if workflow_dir is None:
+            # No on-disk target; print to stdout and continue.
+            print(emit_mermaid(process.state_machine))
             continue
-        if wf_context.workflow_dir is None:
-            print(text)
-            continue
-        out_path = wf_context.workflow_dir / f"{wf_name}-states.mermaid"
-        out_path.write_text(text, encoding="utf-8")
-        print(f"Rendered {out_path}")
+
+        mermaid_path = workflow_dir / f"{wf_name}-states.mermaid"
+        mermaid_path.write_text(emit_mermaid(process.state_machine), encoding="utf-8")
+        written.append(str(mermaid_path))
+
+        doc_path = workflow_dir / f"{wf_name}.md"
+        doc_path.write_text(
+            emit_process_doc(
+                ProcessDocInput(
+                    state_machine=process.state_machine,
+                    catalog=process.catalog,
+                    issue_type_directory=process.issue_type_directory,
+                    grants=process.grants,
+                )
+            ),
+            encoding="utf-8",
+        )
+        written.append(str(doc_path))
+
+    if workflow_dir is not None:
+        if role_directory is not None:
+            roles_path = workflow_dir / "roles.md"
+            roles_path.write_text(emit_roles_doc(role_directory), encoding="utf-8")
+            written.append(str(roles_path))
+        if issue_type_directory is not None:
+            types_path = workflow_dir / "issue-types.md"
+            types_path.write_text(emit_issue_types_doc(issue_type_directory), encoding="utf-8")
+            written.append(str(types_path))
+        readme_path = workflow_dir / "README.md"
+        readme_path.write_text(
+            emit_index_doc(
+                process_names,
+                has_roles=role_directory is not None,
+                has_issue_types=issue_type_directory is not None,
+            ),
+            encoding="utf-8",
+        )
+        written.append(str(readme_path))
+
+    if ctx["json_output"]:
+        print(_json.dumps({"written": written}, indent=2))
+    else:
+        for path in written:
+            print(f"Wrote {path}")
     return 0
 
 
