@@ -10,16 +10,18 @@ Each finding cites the source principle so that drift reports stay legible.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 
-from workflow.backends.base import WorkItemState
+from workflow.backends.base import IssueState
 from workflow.core.model.hcp import HCPCatalog, HCPLevel
-from workflow.core.model.lifecycle import (
-    Lifecycle,
+from workflow.core.model.state_machine import (
     ReversibilityClass,
     StateClass,
+    StateMachine,
+    TransitionType,
 )
 from workflow.core.model.trust_grant import TrustGrant
 
@@ -44,8 +46,8 @@ class ValidationFinding:
         return f"{self.severity.value.upper()}{loc} {self.principle_cite}: {self.message}"
 
 
-def validate_workflow(
-    lifecycle: Lifecycle,
+def validate_state_machine(
+    state_machine: StateMachine,
     catalog: HCPCatalog | None,
     grants: dict[str, TrustGrant] | None = None,
 ) -> list[ValidationFinding]:
@@ -53,12 +55,15 @@ def validate_workflow(
     grants = grants or {}
     findings: list[ValidationFinding] = []
 
-    findings.extend(_check_irreversible_destinations_gated(lifecycle))
-    findings.extend(_check_terminal_taxonomy(lifecycle))
-    findings.extend(_check_reversibility_declared_on_legend_states(lifecycle))
+    findings.extend(_check_irreversible_destinations_gated(state_machine))
+    findings.extend(_check_terminal_taxonomy(state_machine))
+    findings.extend(_check_reversibility_declared_on_legend_states(state_machine))
+    findings.extend(_check_transition_type_compatibility(state_machine))
+    findings.extend(_check_working_states_are_claim_destinations(state_machine))
+    findings.extend(_check_level_keywords_not_on_diagram(state_machine))
 
     if catalog is not None:
-        findings.extend(_check_legend_catalog_sync(lifecycle, catalog))
+        findings.extend(_check_legend_catalog_sync(state_machine, catalog))
         findings.extend(_check_audit_irreversible(catalog))
         findings.extend(_check_block_on_timeout(catalog, grants))
         findings.extend(_check_agent_prepares_present(catalog))
@@ -68,11 +73,11 @@ def validate_workflow(
     return findings
 
 
-def validate_work_item_markers(
-    state: WorkItemState,
+def validate_issue_markers(
+    state: IssueState,
 ) -> list[ValidationFinding]:
     """Runtime claim-discipline check: at most one HITL gate is in flight on
-    a single work item at a time (`hitl-principles.md` principle 6)."""
+    a single issue at a time (`hitl-principles.md` principle 6)."""
     findings: list[ValidationFinding] = []
     in_flight: list[str] = []
     if state.awaiting_gate:
@@ -85,10 +90,10 @@ def validate_work_item_markers(
                 severity=Severity.ERROR,
                 principle_cite="hitl-principles.md#6",
                 message=(
-                    "Multiple HITL queue markers active on the same work item: "
+                    "Multiple HITL queue markers active on the same issue: "
                     + ", ".join(in_flight)
                 ),
-                location=state.work_item_id,
+                location=state.issue_id,
             )
         )
     # Claim singletons — at most one of reviewing/auditing/advising.
@@ -104,7 +109,7 @@ def validate_work_item_markers(
                 severity=Severity.ERROR,
                 principle_cite="hitl-principles.md#6",
                 message=("Multiple human-claim singletons active: " + ", ".join(active)),
-                location=state.work_item_id,
+                location=state.issue_id,
             )
         )
     return findings
@@ -114,11 +119,11 @@ def validate_work_item_markers(
 
 
 def _check_irreversible_destinations_gated(
-    lifecycle: Lifecycle,
+    state_machine: StateMachine,
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
-    for t in lifecycle.transitions:
-        dst_state = lifecycle.states.get(t.destination)
+    for t in state_machine.transitions:
+        dst_state = state_machine.states.get(t.destination)
         if dst_state is None:
             continue
         if dst_state.reversibility is ReversibilityClass.IRREVERSIBLE and not t.is_gated:
@@ -130,15 +135,15 @@ def _check_irreversible_destinations_gated(
                         f"Transition {t.source!r} → {t.destination!r} ({t.label!r}) "
                         "lands in an irreversible state without [hitl]."
                     ),
-                    location=lifecycle.source_path,
+                    location=state_machine.source_path,
                 )
             )
     return findings
 
 
-def _check_terminal_taxonomy(lifecycle: Lifecycle) -> list[ValidationFinding]:
+def _check_terminal_taxonomy(state_machine: StateMachine) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
-    for state in lifecycle.states.values():
+    for state in state_machine.states.values():
         if state.state_class is StateClass.TERMINAL and state.terminal_taxonomy is None:
             findings.append(
                 ValidationFinding(
@@ -148,20 +153,20 @@ def _check_terminal_taxonomy(lifecycle: Lifecycle) -> list[ValidationFinding]:
                         f"Terminal state {state.name!r} has no taxonomy tag. "
                         "Add `terminal (<tag>)` to the sink transition or a note."
                     ),
-                    location=lifecycle.source_path,
+                    location=state_machine.source_path,
                 )
             )
     return findings
 
 
 def _check_reversibility_declared_on_legend_states(
-    lifecycle: Lifecycle,
+    state_machine: StateMachine,
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     # Every gate in the legend that resolves to a state should have that
     # state's reversibility declared (either on the state or in the legend).
-    for gate, _rev in lifecycle.gates_in_legend.items():
-        state = lifecycle.states.get(gate)
+    for gate, _rev in state_machine.gates_in_legend.items():
+        state = state_machine.states.get(gate)
         if state is not None and state.reversibility is None:
             findings.append(
                 ValidationFinding(
@@ -171,21 +176,21 @@ def _check_reversibility_declared_on_legend_states(
                         f"Legend names gate {gate!r} but the state has no "
                         "reversibility class declared on the diagram."
                     ),
-                    location=lifecycle.source_path,
+                    location=state_machine.source_path,
                 )
             )
     return findings
 
 
 def _check_legend_catalog_sync(
-    lifecycle: Lifecycle, catalog: HCPCatalog
+    state_machine: StateMachine, catalog: HCPCatalog
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
-    legend_gates = set(lifecycle.gates_in_legend.keys())
+    legend_gates = set(state_machine.gates_in_legend.keys())
     catalog_gates = set(catalog.entries.keys())
     marker_gates = {
         t.destination if "→" not in t.label else t.destination
-        for t in lifecycle.transitions
+        for t in state_machine.transitions
         if t.is_gated
     }
 
@@ -203,7 +208,7 @@ def _check_legend_catalog_sync(
                         f"Legend-only: {sorted(legend_gates - catalog_gates)}, "
                         f"Catalog-only: {sorted(catalog_gates - legend_gates)}"
                     ),
-                    location=catalog.source_path or lifecycle.source_path,
+                    location=catalog.source_path or state_machine.source_path,
                 )
             )
     return findings
@@ -348,4 +353,217 @@ def _check_trust_grants(
                     location=grant.source_path,
                 )
             )
+    return findings
+
+
+def _check_transition_type_compatibility(state_machine: StateMachine) -> list[ValidationFinding]:
+    """Per state-machine-principles.md #2, each transition type has strict
+    source/destination state-class rules:
+
+    - CLAIM: resting → working
+    - ROLE_ACTION: working → resting | terminal
+    - EXTERNAL: resting → resting | terminal
+    - CROSS_PROCESS: resting → [*] | [*] → resting (handoffs between
+      processes, both endpoints are resting; one side is always [*])
+
+    `[*]` endpoints are sentinels, not states, so source/dest checks are
+    skipped when an endpoint is `[*]`. ERROR-level — these are hard
+    structural rules.
+    """
+    findings: list[ValidationFinding] = []
+    for t in state_machine.transitions:
+        src_state = state_machine.states.get(t.source) if t.source != "[*]" else None
+        dst_state = state_machine.states.get(t.destination) if t.destination != "[*]" else None
+
+        # CLAIM: resting → working
+        if t.transition_type is TransitionType.CLAIM:
+            if src_state is not None and src_state.state_class is not StateClass.RESTING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#2",
+                        message=(
+                            f"Claim transition {t.source!r} → {t.destination!r} ({t.label!r}) "
+                            f"must originate in a RESTING state; source is "
+                            f"{src_state.state_class.value}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            if dst_state is not None and dst_state.state_class is not StateClass.WORKING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#2",
+                        message=(
+                            f"Claim transition {t.source!r} → {t.destination!r} ({t.label!r}) "
+                            f"must land in a WORKING state; destination is "
+                            f"{dst_state.state_class.value}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+
+        # ROLE_ACTION: working → resting | terminal
+        elif t.transition_type is TransitionType.ROLE_ACTION:
+            if src_state is not None and src_state.state_class is not StateClass.WORKING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#2",
+                        message=(
+                            f"Role-action transition {t.source!r} → {t.destination!r} "
+                            f"({t.label!r}) must originate in a WORKING state; source is "
+                            f"{src_state.state_class.value}. The agent must claim before "
+                            f"acting (principle 3)."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            if dst_state is not None and dst_state.state_class is StateClass.WORKING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#2",
+                        message=(
+                            f"Role-action transition {t.source!r} → {t.destination!r} "
+                            f"({t.label!r}) must land in a RESTING or TERMINAL state; "
+                            f"destination is {dst_state.state_class.value}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+
+        # EXTERNAL: resting → resting | terminal.
+        # Note: `terminal_state → [*]` is the conventional sink marker for a
+        # terminal — visual, not a real transition. Skip class checks when the
+        # destination is `[*]` (the sink). When the source is `[*]` (entry),
+        # the destination must be RESTING.
+        elif t.transition_type is TransitionType.EXTERNAL:
+            if t.destination == "[*]":
+                pass  # sink marker; no class rule applies
+            else:
+                if src_state is not None and src_state.state_class is not StateClass.RESTING:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#2",
+                            message=(
+                                f"External transition {t.source!r} → {t.destination!r} "
+                                f"({t.label!r}) must originate in a RESTING state; "
+                                f"source is {src_state.state_class.value}."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
+                if dst_state is not None and dst_state.state_class is StateClass.WORKING:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#2",
+                            message=(
+                                f"External transition {t.source!r} → {t.destination!r} "
+                                f"({t.label!r}) must land in a RESTING or TERMINAL state; "
+                                f"destination is {dst_state.state_class.value}."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
+
+        # CROSS_PROCESS: one endpoint is [*]; the non-sentinel endpoint must be resting.
+        elif t.transition_type is TransitionType.CROSS_PROCESS:
+            non_sentinel = src_state if src_state is not None else dst_state
+            if non_sentinel is not None and non_sentinel.state_class is not StateClass.RESTING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#2",
+                        message=(
+                            f"Cross-process transition {t.source!r} → {t.destination!r} "
+                            f"({t.label!r}) must touch a RESTING state on the non-[*] "
+                            f"side; got {non_sentinel.state_class.value}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+
+    return findings
+
+
+def _check_working_states_are_claim_destinations(
+    state_machine: StateMachine,
+) -> list[ValidationFinding]:
+    """Per state-machine-principles.md #3, agents must claim before working.
+
+    Every WORKING state must be the destination of at least one CLAIM
+    transition. A working state with no incoming claim is unreachable via
+    the documented protocol — either the agent skips the claim (anti-pattern)
+    or the state's purpose is misclassified.
+
+    ERROR-level. Empty / skeletal workflows with no transitions yet are
+    exempt (the validator can't reason about future structure).
+    """
+    findings: list[ValidationFinding] = []
+    if not state_machine.transitions:
+        return findings
+    for state in state_machine.states.values():
+        if state.state_class is not StateClass.WORKING:
+            continue
+        claim_incoming = [
+            t
+            for t in state_machine.transitions
+            if t.destination == state.name and t.transition_type is TransitionType.CLAIM
+        ]
+        if not claim_incoming:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#3",
+                    message=(
+                        f"Working state {state.name!r} has no CLAIM transition into it. "
+                        f"Every working state must be entered via a `{{role}} claims …` "
+                        f"transition; the bounce-at-the-gate anti-pattern is forbidden."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+    return findings
+
+
+# Matches HITL level keywords used as standalone tokens (e.g.,
+# `level=block`, `block-level`, `audit cadence`). The leading boundary is
+# `\b`; the trailing context excludes false positives like the word `block`
+# inside larger identifiers. Case-insensitive.
+_LEVEL_KEYWORD_RE = re.compile(r"\b(block|audit)\b(?!\w)", re.IGNORECASE)
+
+
+def _check_level_keywords_not_on_diagram(state_machine: StateMachine) -> list[ValidationFinding]:
+    """Per hitl-principles.md #11.4 (and state-machine-principles.md #11),
+    HITL level information (`block`, `audit`) is a runtime property
+    declared in trust grants, never on the diagram. Notes that leak level
+    keywords couple the diagram to one team's policy.
+
+    Scans every state's note lines for standalone `block` or `audit`
+    tokens. WARNING-level — these may be incidental word choice (e.g., a
+    state literally named `block`), but the principle is strict so we
+    surface every match for human review.
+    """
+    findings: list[ValidationFinding] = []
+    for state in state_machine.states.values():
+        for line in state.notes:
+            for match in _LEVEL_KEYWORD_RE.finditer(line):
+                keyword = match.group(0).lower()
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.WARNING,
+                        principle_cite="state-machine-principles.md#11",
+                        message=(
+                            f"Note on state {state.name!r} mentions HITL level keyword "
+                            f"{keyword!r}: {line!r}. Level information belongs in trust "
+                            f"grants, not on the diagram."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+                break  # one finding per note line is enough
     return findings

@@ -15,14 +15,14 @@ from workflow.core.planner import Operation, OperationRequest
 def run(
     controller: Controller,
     *,
-    work_item_id: str,
-    question_from: str,
+    issue_id: str,
+    body: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
         operation=Operation.REQUEST_INPUT,
-        work_item_id=work_item_id,
-        body_path=question_from,
+        issue_id=issue_id,
+        body_text=body,
         actor=actor,
     )
     return dispatch(controller, request)

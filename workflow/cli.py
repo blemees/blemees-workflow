@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Any
 
 from workflow import __version__
-from workflow.backends.base import WorkflowBackend
+from workflow.backends.base import TrackerBackend
 from workflow.backends.github import GitHubBackend
-from workflow.config import WorkflowContext, load_workflow
+from workflow.config import Process, load_process
 from workflow.core.controller import Controller, OperationResult
 from workflow.core.operations import (
     advance as advance_op,
@@ -36,10 +36,10 @@ from workflow.core.operations import (
     audit as audit_op,
 )
 from workflow.core.operations import (
-    check as check_op,
+    claim as claim_op,
 )
 from workflow.core.operations import (
-    claim as claim_op,
+    confirm as confirm_op,
 )
 from workflow.core.operations import (
     reject as reject_op,
@@ -51,7 +51,7 @@ from workflow.core.operations import (
     request_input as request_input_op,
 )
 from workflow.core.operations import (
-    resolve as resolve_op,
+    respond as respond_op,
 )
 from workflow.core.operations import (
     review as review_op,
@@ -63,7 +63,7 @@ from workflow.core.operations import (
 # await_signal and record_action remain importable as internal primitives,
 # but are not exposed as CLI subcommands. `advance` dispatches into them
 # based on the HCP catalog.
-from workflow.core.validator import Severity, validate_workflow
+from workflow.core.validator import Severity, validate_state_machine
 from workflow.errors import (
     BackendError,
     ConfigError,
@@ -79,6 +79,43 @@ PROG = "workflow"
 
 # --------------------------------------------------------------------------- #
 # argparse type helpers
+
+
+def _add_body_args(parser: argparse.ArgumentParser, *, required: bool) -> None:
+    """Add the standard `--body` / `--body-from` mutually exclusive group.
+
+    Every command that posts a markdown body to the issue uses the same
+    pair: inline content via `--body "text"` or a file via
+    `--body-from path.md`. The group is `required=True` for commands where
+    the body is mandatory (reject, revoke, request-input, respond), and
+    `required=False` for commands where it's optional (advance, approve).
+    """
+    group = parser.add_mutually_exclusive_group(required=required)
+    group.add_argument("--body", default=None, help="Inline markdown content.")
+    group.add_argument(
+        "--body-from",
+        dest="body_from",
+        type=_path_existing_file,
+        default=None,
+        help="Path to a markdown file whose content becomes the body.",
+    )
+
+
+def _resolve_body(args: argparse.Namespace) -> str | None:
+    """Read the body text from either `--body` (inline) or `--body-from` (file).
+
+    Returns None when neither is set (optional cases). Errors via
+    `ConfigError` if the file can't be read.
+    """
+    if getattr(args, "body", None):
+        return str(args.body)
+    body_from = getattr(args, "body_from", None)
+    if body_from is None:
+        return None
+    try:
+        return Path(body_from).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"Could not read body file {body_from}: {exc}") from exc
 
 
 def _path_existing_file(value: str) -> Path:
@@ -106,19 +143,19 @@ def _path_existing_dir(value: str) -> Path:
 _TOP_DESCRIPTION = """Canonical operation mechanism for agent workflows.
 
 Agent-facing commands:
-  create                        — open a new work item in a given initial state
-  advance, claim, release       — lifecycle ownership and state changes
+  create                        — open a new issue in a given initial state
+  advance, claim, release       — workflow ownership and state changes
   request-input                 — recognized HITL (state-orthogonal pause)
 
 Human-facing commands:
   review, approve, reject       — pre-action HITL signals (block level)
-  audit, check, revoke          — post-action HITL signals (audit level)
-  advise, resolve               — recognized HITL responses
+  audit, confirm, revoke        — post-action HITL signals (audit level)
+  advise, respond               — recognized HITL responses
 
 Discovery and utility commands (anyone):
   inbox                         — show this agent's claimable items + actionable wip
-  search                        — find work items by state, claim, or HITL marker
-  view                          — inspect one work item's state and recent comments
+  search                        — find issues by state, claim, or HITL marker
+  view                          — inspect one issue's state and recent comments
   comment                       — post a free-form comment without advancing state
 
 The agent invokes `advance` for every transition; the tool consults the HCP
@@ -198,20 +235,20 @@ def _add_global_options(parser: argparse.ArgumentParser) -> None:
         "(defaults to cwd in that case). Env: AGENT_HOME.",
     )
     parser.add_argument(
-        "--workflows-dir",
-        dest="workflows_dir",
+        "--workflow-dir",
+        dest="workflow_dir",
         type=_path_existing_dir,
         default=(
-            Path(os.environ["WORKFLOWS_DIR"]).expanduser()
-            if os.environ.get("WORKFLOWS_DIR")
+            Path(os.environ["WORKFLOW_DIR"]).expanduser()
+            if os.environ.get("WORKFLOW_DIR")
             else None
         ),
         help="Directory containing the workflow files "
-        "(`*-lifecycle.mermaid`, `*-hcps.json`, `roles.json`). "
+        "(`*-states.json`, `*-hcps.json`, `roles.json`). "
         "If unset, discovered by walking up from cwd for a directory "
-        "with `*-lifecycle.mermaid` files, or for the legacy "
+        "with `*-states.json` files, or for the legacy "
         "`skills/workflows/shared/resources/` path. "
-        "Env: WORKFLOWS_DIR.",
+        "Env: WORKFLOW_DIR.",
     )
     parser.add_argument(
         "--grants-dir",
@@ -247,20 +284,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    # --- Lifecycle operations ---
+    # --- StateMachine operations ---
 
     p_advance = subparsers.add_parser(
         "advance",
-        help="Advance a work item to a target state.",
+        help="Advance an issue to a target state.",
         description=(
-            "Advance a work item to a target state. The tool finds the "
+            "Advance an issue to a target state. The tool finds the "
             "transition from the current state to --to and applies the right "
-            "behavior based on the lifecycle and HCP catalog: ungated "
+            "behavior based on the workflow and HCP catalog: ungated "
             "transitions change state immediately; block-gated transitions "
-            "pause for human signal (requires --packet-from); audit-gated "
-            "transitions change state atomically with the audit-pending "
-            "marker. The agent does not need to know which path applies — "
-            "the catalog decides."
+            "pause for human signal (requires --body or --body-from); "
+            "audit-gated transitions change state atomically with the "
+            "audit-pending marker. The agent does not need to know which "
+            "path applies — the catalog decides."
         ),
     )
     p_advance.add_argument(
@@ -269,47 +306,27 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Target state to advance to (e.g., ready_for_dev).",
     )
-    p_advance.add_argument("--issue", required=True, help="Work item identifier.")
-    p_advance.add_argument(
-        "--packet-from",
-        dest="packet_from",
-        type=_path_existing_file,
-        default=None,
-        help="Path to a markdown packet. Required when the transition is "
-        "block-gated; matches the catalog row's agent_prepares template.",
-    )
-    p_advance.add_argument(
-        "--notes-from",
-        dest="notes_from",
-        type=_path_existing_file,
-        default=None,
-        help="Path to a markdown notes file. Optional for ungated transitions; "
-        "used as the audit-comment body for audit-gated transitions.",
-    )
+    p_advance.add_argument("--issue", required=True, help="Issue identifier.")
+    _add_body_args(p_advance, required=False)
     p_advance.set_defaults(func=_do_advance)
 
     p_claim = subparsers.add_parser(
         "claim",
-        help="Take responsibility for a resting work item.",
+        help="Take responsibility for a resting issue.",
     )
     p_claim.add_argument("--issue", required=True)
     p_claim.add_argument(
-        "--role",
+        "--to",
+        dest="destination",
         default=None,
-        help="Role id taking the claim (e.g., pm). "
-        "Defaults to the agent-config `role` if not specified.",
-    )
-    p_claim.add_argument(
-        "--transition",
-        dest="transition_label",
-        default=None,
-        help="Optional claim transition label.",
+        help="Target working state. Optional when only one CLAIM transition "
+        "exists from the current state; required when multiple do.",
     )
     p_claim.set_defaults(func=_do_claim)
 
     p_release = subparsers.add_parser(
         "release",
-        help="Give up the claim on a work item.",
+        help="Give up the claim on an issue.",
     )
     p_release.add_argument("--issue", required=True)
     p_release.set_defaults(func=_do_release)
@@ -332,9 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--destination", default=None, help="Destination state (for verdict-style HCPs)."
     )
     p_approve.add_argument("--issue", required=True)
-    p_approve.add_argument(
-        "--comment-from", dest="comment_from", type=_path_existing_file, default=None
-    )
+    _add_body_args(p_approve, required=False)
     p_approve.set_defaults(func=_do_approve)
 
     p_reject = subparsers.add_parser(
@@ -343,9 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_reject.add_argument("--gate", required=True)
     p_reject.add_argument("--issue", required=True)
-    p_reject.add_argument(
-        "--feedback-from", dest="feedback_from", type=_path_existing_file, required=True
-    )
+    _add_body_args(p_reject, required=True)
     p_reject.set_defaults(func=_do_reject)
 
     # --- Catalogued — audit-level ---
@@ -357,13 +370,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument("--issue", required=True)
     p_audit.set_defaults(func=_do_audit)
 
-    p_check = subparsers.add_parser(
-        "check",
+    p_confirm = subparsers.add_parser(
+        "confirm",
         help="Human confirms an audit-level action post-hoc.",
     )
-    p_check.add_argument("--gate", required=True)
-    p_check.add_argument("--issue", required=True)
-    p_check.set_defaults(func=_do_check)
+    p_confirm.add_argument("--gate", required=True)
+    p_confirm.add_argument("--issue", required=True)
+    p_confirm.set_defaults(func=_do_confirm)
 
     p_revoke = subparsers.add_parser(
         "revoke",
@@ -371,9 +384,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_revoke.add_argument("--gate", required=True)
     p_revoke.add_argument("--issue", required=True)
-    p_revoke.add_argument(
-        "--concern-from", dest="concern_from", type=_path_existing_file, required=True
-    )
+    _add_body_args(p_revoke, required=True)
     p_revoke.set_defaults(func=_do_revoke)
 
     # --- Recognized ---
@@ -383,9 +394,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Agent recognizes an unanticipated HITL moment; pause for input.",
     )
     p_request_input.add_argument("--issue", required=True)
-    p_request_input.add_argument(
-        "--question-from", dest="question_from", type=_path_existing_file, required=True
-    )
+    _add_body_args(p_request_input, required=True)
     p_request_input.set_defaults(func=_do_request_input)
 
     p_advise = subparsers.add_parser(
@@ -395,23 +404,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_advise.add_argument("--issue", required=True)
     p_advise.set_defaults(func=_do_advise)
 
-    p_resolve = subparsers.add_parser(
-        "resolve",
+    p_respond = subparsers.add_parser(
+        "respond",
         help="Human provides input for a recognized HITL moment.",
     )
-    p_resolve.add_argument("--issue", required=True)
-    p_resolve.add_argument(
-        "--response-from", dest="response_from", type=_path_existing_file, required=True
-    )
-    p_resolve.set_defaults(func=_do_resolve)
+    p_respond.add_argument("--issue", required=True)
+    _add_body_args(p_respond, required=True)
+    p_respond.set_defaults(func=_do_respond)
 
     # --- Read / discovery commands ---
 
     p_create = subparsers.add_parser(
         "create",
-        help="Create a new work item in the given initial state.",
+        help="Create a new issue in the given initial state.",
         description=(
-            "Create a new work item. Requires a title and an initial state "
+            "Create a new issue. Requires a title and an initial state "
             "(--to STATE). The workflow is auto-resolved from --to via "
             "the registry (state names are unique). The new item is "
             "created atomically with its `state:<name>` label so it never "
@@ -423,19 +430,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--to",
         dest="initial_state",
         required=True,
-        help="Initial state for the new work item (e.g., raw). Determines "
+        help="Initial state for the new issue (e.g., raw). Determines "
         "which workflow the item belongs to.",
     )
     p_create.add_argument(
         "--title",
         required=True,
-        help="Title for the new work item.",
+        help="Title for the new issue.",
     )
     body_group = p_create.add_mutually_exclusive_group()
     body_group.add_argument(
         "--body",
         default=None,
-        help="Inline body for the new work item.",
+        help="Inline body for the new issue.",
     )
     body_group.add_argument(
         "--body-from",
@@ -475,11 +482,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_search = subparsers.add_parser(
         "search",
-        help="Search work items by framework filters (state, claim, HITL markers).",
+        help="Search issues by framework filters (state, claim, HITL markers).",
         description=(
-            "Search work items matching the given filters. Filters compose "
+            "Search issues matching the given filters. Filters compose "
             "with AND. Use `--awaiting-gate '*'` or `--audit-pending '*'` "
-            "to find every work item with any awaiting or audit-pending "
+            "to find every issue with any awaiting or audit-pending "
             "marker. For the agent's own work, use `inbox` instead."
         ),
     )
@@ -517,7 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_view = subparsers.add_parser(
         "view",
-        help="View a single work item's framework-relevant state and recent comments.",
+        help="View a single issue's framework-relevant state and recent comments.",
     )
     p_view.add_argument("--issue", required=True)
     p_view.add_argument(
@@ -538,20 +545,30 @@ def build_parser() -> argparse.ArgumentParser:
             "operation — no state change, no markers, no workflow resolution. "
             "Use it for status updates, investigation notes, async pings — "
             "anything that needs to be communicated but doesn't fit any of "
-            "the eleven framework operations or the lifecycle commands."
+            "the eleven framework operations or the workflow commands."
         ),
     )
     p_comment.add_argument("--issue", required=True)
-    body_group = p_comment.add_mutually_exclusive_group(required=True)
-    body_group.add_argument("--body", default=None, help="Comment body (inline string).")
-    body_group.add_argument(
-        "--body-from",
-        dest="body_from",
-        type=_path_existing_file,
-        default=None,
-        help="Path to a markdown file containing the comment body.",
-    )
+    _add_body_args(p_comment, required=True)
     p_comment.set_defaults(func=_do_comment)
+
+    p_edit = subparsers.add_parser(
+        "edit",
+        help="Edit an issue's title or body (no state change).",
+        description=(
+            "Edit the tracker's title or body for an issue. Does not change "
+            "workflow state, labels, or markers — those are managed by "
+            "advance/claim/release. Use this for typo fixes, scope "
+            "adjustments, or rewriting the description as understanding "
+            "evolves. At least one of --title, --body, --body-from is required."
+        ),
+    )
+    p_edit.add_argument("--issue", required=True)
+    p_edit.add_argument(
+        "--title", default=None, help="New title for the issue."
+    )
+    _add_body_args(p_edit, required=False)
+    p_edit.set_defaults(func=_do_edit)
 
     # --- Utility commands ---
 
@@ -560,6 +577,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate workflow artifacts against the framework principles.",
     )
     p_validate.set_defaults(func=_do_validate)
+
+    p_render = subparsers.add_parser(
+        "render-mermaid",
+        help="Emit a stateDiagram-v2 .mermaid visualization for a process.",
+        description=(
+            "Render the canonical <name>-states.json as a "
+            "stateDiagram-v2 .mermaid file. The mermaid is a generated "
+            "visualization, not the source of truth — authors edit JSON "
+            "and re-render. Writes <name>-states.mermaid alongside "
+            "the JSON by default; pass --stdout to print instead."
+        ),
+    )
+    p_render.add_argument(
+        "process",
+        nargs="?",
+        help="Process name to render. Omit to render every discovered process.",
+    )
+    p_render.add_argument(
+        "--stdout",
+        action="store_true",
+        default=False,
+        help="Print to stdout instead of writing alongside the JSON.",
+    )
+    p_render.set_defaults(func=_do_render_mermaid)
 
     p_doctor = subparsers.add_parser(
         "doctor",
@@ -597,7 +638,7 @@ def build_parser() -> argparse.ArgumentParser:
             "discovered workflows and create them on the configured backend "
             "repo. Idempotent: existing labels are skipped (their colors "
             "are NOT overwritten). Includes one `state:*` label per "
-            "lifecycle state, one `wip:*` per role in roles.json, the five "
+            "workflow state, one `wip:*` per role in roles.json, the five "
             "HITL singleton labels (`hitl:reviewing`, `hitl:auditing`, "
             "`hitl:advising`, `hitl:awaiting-input`, `hitl:resolved`), and "
             "one `hitl:awaiting-<gate>` / `hitl:audit-<gate>` per "
@@ -650,8 +691,8 @@ def main() -> None:
 def _ctx_obj_from_args(args: argparse.Namespace) -> dict:
     """Coerce parsed args into the dict shape downstream helpers expect.
 
-    Note: there is no `workflow_name` here. The framework's state-name
-    uniqueness invariant means each work item's workflow is uniquely
+    Note: there is no `process_name` here. The framework's state-name
+    uniqueness invariant means each issue's workflow is uniquely
     determined by its current state (resolved through the registry), and
     multi-workflow queries iterate every workflow in the registry. The
     agent never has a legitimate reason to override that.
@@ -663,7 +704,7 @@ def _ctx_obj_from_args(args: argparse.Namespace) -> dict:
         "json_output": args.json_output,
         "agent_home": args.agent_home,
         "agent_role": args.agent_role,
-        "workflows_dir": args.workflows_dir,
+        "workflow_dir": args.workflow_dir,
         "grants_dir": args.grants_dir,
     }
 
@@ -695,7 +736,7 @@ def _resolve_agent_role(ctx: dict) -> str | None:
     return None
 
 
-def _build_backend(ctx_obj: dict) -> WorkflowBackend:
+def _build_backend(ctx_obj: dict) -> TrackerBackend:
     """Construct the GitHub backend.
 
     Resolution order, applied independently to `repo` and `host`:
@@ -743,22 +784,22 @@ def _build_backend(ctx_obj: dict) -> WorkflowBackend:
 
 def _build_context(
     ctx_obj: dict,
-    workflow_name: str,
+    process_name: str,
     *,
     require_backend: bool = True,
-) -> WorkflowContext:
-    """Build a WorkflowContext for a named workflow.
+) -> Process:
+    """Build a Process for a named workflow.
 
-    `workflow_name` is required and identifies which `<name>-lifecycle.mermaid`
-    file under `workflows_dir` to load. Callers that resolved the workflow
+    `process_name` is required and identifies which `<name>-states.json`
+    file under `workflow_dir` to load. Callers that resolved the workflow
     via the registry pass it directly.
     """
-    backend: WorkflowBackend | None = None
+    backend: TrackerBackend | None = None
     if require_backend:
         backend = _build_backend(ctx_obj)
-    return load_workflow(
-        workflow_name=workflow_name,
-        workflows_dir=ctx_obj.get("workflows_dir"),
+    return load_process(
+        process_name=process_name,
+        workflow_dir=ctx_obj.get("workflow_dir"),
         grants_dir=ctx_obj.get("grants_dir"),
         backend=backend,
         agent_home=ctx_obj.get("agent_home"),
@@ -767,9 +808,9 @@ def _build_context(
 
 def _build_context_for_issue(
     ctx_obj: dict,
-    work_item_id: str,
+    issue_id: str,
     fallback_state: str | None = None,
-) -> WorkflowContext:
+) -> Process:
     """Build a workflow context for an operation on a specific issue.
 
     Always registry-driven:
@@ -793,48 +834,48 @@ def _build_context_for_issue(
     backend = _build_backend(ctx_obj)
     registry = build_registry(
         agent_home=ctx_obj.get("agent_home"),
-        workflows_dir=ctx_obj.get("workflows_dir"),
+        workflow_dir=ctx_obj.get("workflow_dir"),
         backend=backend,
         grants_dir=ctx_obj.get("grants_dir"),
     )
     if registry is None:
         raise ConfigError(
-            "No workflows directory found. Pass --workflows-dir, set "
-            "WORKFLOWS_DIR, or run from inside a directory whose tree "
-            "contains `*-lifecycle.mermaid` files."
+            "No workflows directory found. Pass --workflow-dir, set "
+            "WORKFLOW_DIR, or run from inside a directory whose tree "
+            "contains `*-states.json` files."
         )
 
-    workflow_name: str | None = None
+    process_name: str | None = None
     try:
-        item_state = backend.read_work_item(work_item_id)
+        item_state = backend.read_issue(issue_id)
         if item_state.state:
-            workflow_name = registry.find_workflow_for_state(item_state.state)
+            process_name = registry.find_process_for_state(item_state.state)
     except BackendError as exc:
-        # Don't fail here; let the controller's read_work_item fail more
+        # Don't fail here; let the controller's read_issue fail more
         # informatively when the operation runs. We only swallow the error
         # so we can try fallback_state.
-        logger.debug("Could not pre-read issue %s: %s", work_item_id, exc)
+        logger.debug("Could not pre-read issue %s: %s", issue_id, exc)
 
-    if workflow_name is None and fallback_state:
-        workflow_name = registry.find_workflow_for_state(fallback_state)
+    if process_name is None and fallback_state:
+        process_name = registry.find_process_for_state(fallback_state)
 
-    if workflow_name is None:
+    if process_name is None:
         raise ConfigError(
-            f"Cannot resolve workflow for issue {work_item_id!r}. The issue "
+            f"Cannot resolve workflow for issue {issue_id!r}. The issue "
             "must have a state that belongs to a discovered workflow "
             "(or, for `advance`, a destination state that does)."
         )
 
     # Build a context for the resolved workflow.
-    return _build_context(ctx_obj, require_backend=True, workflow_name=workflow_name)
+    return _build_context(ctx_obj, require_backend=True, process_name=process_name)
 
 
-def _build_controller(context: WorkflowContext, dry_run: bool) -> Controller:
+def _build_controller(context: Process, dry_run: bool) -> Controller:
     if context.backend is None:
         raise ConfigError("No backend configured for controller execution.")
     return Controller(
         backend=context.backend,
-        lifecycle=context.lifecycle,
+        state_machine=context.state_machine,
         catalog=context.catalog,
         grants=context.grants,
         dry_run=dry_run,
@@ -845,13 +886,137 @@ def _build_controller(context: WorkflowContext, dry_run: bool) -> Controller:
 # Output formatting
 
 
-def _print_result(result: OperationResult, *, json_output: bool) -> None:
+def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
+    """JSON-shaped projection of `AvailableTransition` records for an agent."""
+    out: list[dict[str, Any]] = []
+    for a in actions:
+        out.append(
+            {
+                "label": a.label,
+                "destination": a.destination,
+                "transition_type": a.transition_type.value,
+                "is_gated": a.is_gated,
+                "gate": a.gate_name,
+                "default_level": a.default_level.value if a.default_level else None,
+                "effective_level": a.effective_level.value if a.effective_level else None,
+                "grant_relaxed": a.grant_relaxed,
+                "triggering_role": a.triggering_role,
+                "agent_prepares": a.agent_prepares_path,
+                "destination_class": (
+                    a.destination_state_class.value if a.destination_state_class else None
+                ),
+                "destination_reversibility": (
+                    a.destination_reversibility.value if a.destination_reversibility else None
+                ),
+                "destination_terminal_taxonomy": (
+                    a.destination_terminal_taxonomy.value
+                    if a.destination_terminal_taxonomy
+                    else None
+                ),
+                "cross_process_kind": a.cross_process_kind,
+                "cross_process_other": a.cross_process_other,
+            }
+        )
+    return out
+
+
+def _print_next_actions(
+    actions: list[Any],
+    *,
+    current_state: str | None,
+    wip_from: str | None,
+) -> None:
+    """Human/agent-readable next-actions block.
+
+    Each entry leads with the literal `workflow advance` invocation the agent
+    would run, followed by gate / role / template details when relevant.
+    """
+    from workflow.core.model.hcp import HCPLevel
+    from workflow.core.model.state_machine import TransitionType
+
+    if not actions:
+        print("Next actions: (none)")
+        return
+
+    print("Next actions:")
+    # If the only options are CLAIM transitions, the agent is at a resting
+    # state — emit a single `claim` suggestion. Otherwise enumerate advances.
+    claim_actions = [a for a in actions if a.transition_type is TransitionType.CLAIM]
+    advance_actions = [a for a in actions if a.transition_type is not TransitionType.CLAIM]
+
+    if claim_actions and not advance_actions:
+        if len(claim_actions) == 1:
+            a = claim_actions[0]
+            print(f"  claim  # → {a.destination} ({a.label!r})")
+        else:
+            print("  claim --to <state>  # ambiguous; choose one:")
+            for a in claim_actions:
+                print(f"    --to {a.destination}  # {a.label!r}")
+        return
+
+    for a in advance_actions:
+        if a.transition_type is TransitionType.CROSS_PROCESS and a.destination == "[*]":
+            kind = a.cross_process_kind or "shared"
+            verb = "shared with" if kind == "shared" else "spawning into"
+            print(f"  (cross-process exit) {verb} {a.cross_process_other!r}")
+            print(f"    advance --to {a.destination}  # label: {a.label!r}")
+            continue
+
+        if a.is_gated:
+            lvl = a.effective_level.value if a.effective_level else "?"
+            tag = f"[HITL {lvl}]"
+            if a.grant_relaxed:
+                default = a.default_level.value if a.default_level else "?"
+                tag += f" (default {default}, trust grant applied)"
+        else:
+            tag = "[ungated]"
+
+        print(f"  advance --to {a.destination}  {tag}")
+        print(f"    label: {a.label!r}")
+        if a.is_gated:
+            if a.gate_name:
+                print(f"    gate: {a.gate_name}")
+            if a.triggering_role:
+                print(f"    triggering role: {a.triggering_role}")
+            if a.agent_prepares_path:
+                kind = "required" if a.effective_level is HCPLevel.BLOCK else "optional"
+                print(
+                    f"    --body-from <{a.agent_prepares_path}>  ({kind})"
+                )
+        dst_bits: list[str] = []
+        if a.destination_reversibility is not None:
+            dst_bits.append(a.destination_reversibility.value)
+        if a.destination_state_class is not None:
+            cls = a.destination_state_class.value
+            if a.destination_terminal_taxonomy is not None:
+                cls += f"/{a.destination_terminal_taxonomy.value}"
+            dst_bits.append(cls)
+        if dst_bits:
+            print(f"    destination: {', '.join(dst_bits)}")
+
+    if wip_from is not None:
+        print(f"  release  # returns to {wip_from!r}")
+
+
+def _print_result(
+    result: OperationResult,
+    *,
+    json_output: bool,
+    context: Any = None,
+) -> None:
+    """Render an operation result.
+
+    When `context` (a Process) is supplied and the post-state has a state,
+    the human-readable rendering ends with a `Next actions:` block enumerating
+    the agent's options. JSON output is unchanged (callers who want next
+    actions in JSON should use `view --json` for the structured form).
+    """
     if json_output:
         print(_json.dumps(_result_to_dict(result), indent=2, default=str))
         return
 
     op = result.operation.value
-    header = f"{op} on {result.work_item_id}"
+    header = f"{op} on {result.issue_id}"
     if result.dry_run:
         header += " (dry-run)"
     print(header)
@@ -891,6 +1056,24 @@ def _print_result(result: OperationResult, *, json_output: bool) -> None:
         for f in result.findings:
             print(f"  {f}")
 
+    # Show next actions if we have a process context and a known state.
+    if context is not None:
+        from workflow.core.inspector import available_transitions
+
+        state = result.post_state if result.post_state is not None else result.pre_state
+        if state is not None and state.state is not None:
+            actions = available_transitions(
+                context.state_machine,
+                context.catalog,
+                context.grants,
+                state.state,
+            )
+            if actions or state.wip_from is not None:
+                print("")
+                _print_next_actions(
+                    actions, current_state=state.state, wip_from=state.wip_from
+                )
+
 
 def _format_marker_change(change: Any) -> list[str]:
     out: list[str] = []
@@ -904,7 +1087,7 @@ def _format_marker_change(change: Any) -> list[str]:
 def _result_to_dict(result: OperationResult) -> dict:
     return {
         "operation": result.operation.value,
-        "work_item_id": result.work_item_id,
+        "issue_id": result.issue_id,
         "dry_run": result.dry_run,
         "pre_state": asdict(result.pre_state),
         "post_state": asdict(result.post_state) if result.post_state else None,
@@ -940,19 +1123,14 @@ def _do_advance(args: argparse.Namespace) -> int:
         # advance can fall back to args.destination if the issue has no state.
         context = _build_context_for_issue(ctx, args.issue, fallback_state=args.destination)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        body_path: str | None = None
-        if args.packet_from is not None:
-            body_path = str(args.packet_from)
-        elif args.notes_from is not None:
-            body_path = str(args.notes_from)
         result = advance_op.run(
             controller,
-            work_item_id=args.issue,
+            issue_id=args.issue,
             destination=args.destination,
-            body_path=body_path,
+            body_text=_resolve_body(args),
             actor=context.agent_role,
         )
-        _print_result(result, json_output=ctx["json_output"])
+        _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
         _handle_workflow_error(exc)
@@ -964,19 +1142,18 @@ def _do_claim(args: argparse.Namespace) -> int:
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        # If --role wasn't passed, fall back to the agent-config role.
-        role = args.role or context.agent_role
-        if not role:
+        if not context.agent_role:
             raise ConfigError(
-                "claim requires --role, or `role` configured in <agent-home>/.workflow/config.json."
+                "claim requires --agent-role, AGENT_ROLE env, or `agent-role` "
+                "in <agent-home>/.workflow/config.json."
             )
         result = claim_op.run(
             controller,
-            work_item_id=args.issue,
-            role=role,
-            transition_label=args.transition_label,
+            issue_id=args.issue,
+            role=context.agent_role,
+            destination=args.destination,
         )
-        _print_result(result, json_output=ctx["json_output"])
+        _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
         _handle_workflow_error(exc)
@@ -988,8 +1165,8 @@ def _do_release(args: argparse.Namespace) -> int:
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = release_op.run(controller, work_item_id=args.issue)
-        _print_result(result, json_output=ctx["json_output"])
+        result = release_op.run(controller, issue_id=args.issue)
+        _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
         _handle_workflow_error(exc)
@@ -1001,7 +1178,7 @@ def _do_review(args: argparse.Namespace) -> int:
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = review_op.run(controller, work_item_id=args.issue)
+        result = review_op.run(controller, issue_id=args.issue)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1014,13 +1191,12 @@ def _do_approve(args: argparse.Namespace) -> int:
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        comment_from: str | None = str(args.comment_from) if args.comment_from else None
         result = approve_op.run(
             controller,
-            work_item_id=args.issue,
+            issue_id=args.issue,
             gate=args.gate,
             destination=args.destination,
-            comment_from=comment_from,
+            body=_resolve_body(args),
         )
         _print_result(result, json_output=ctx["json_output"])
         return 0
@@ -1036,9 +1212,9 @@ def _do_reject(args: argparse.Namespace) -> int:
         controller = _build_controller(context, dry_run=ctx["dry_run"])
         result = reject_op.run(
             controller,
-            work_item_id=args.issue,
+            issue_id=args.issue,
             gate=args.gate,
-            feedback_from=str(args.feedback_from),
+            body=_resolve_body(args),
         )
         _print_result(result, json_output=ctx["json_output"])
         return 0
@@ -1052,7 +1228,7 @@ def _do_audit(args: argparse.Namespace) -> int:
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = audit_op.run(controller, work_item_id=args.issue)
+        result = audit_op.run(controller, issue_id=args.issue)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1060,12 +1236,12 @@ def _do_audit(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_check(args: argparse.Namespace) -> int:
+def _do_confirm(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = check_op.run(controller, work_item_id=args.issue, gate=args.gate)
+        result = confirm_op.run(controller, issue_id=args.issue, gate=args.gate)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1080,9 +1256,9 @@ def _do_revoke(args: argparse.Namespace) -> int:
         controller = _build_controller(context, dry_run=ctx["dry_run"])
         result = revoke_op.run(
             controller,
-            work_item_id=args.issue,
+            issue_id=args.issue,
             gate=args.gate,
-            concern_from=str(args.concern_from),
+            body=_resolve_body(args),
         )
         _print_result(result, json_output=ctx["json_output"])
         return 0
@@ -1098,10 +1274,10 @@ def _do_request_input(args: argparse.Namespace) -> int:
         controller = _build_controller(context, dry_run=ctx["dry_run"])
         result = request_input_op.run(
             controller,
-            work_item_id=args.issue,
-            question_from=str(args.question_from),
+            issue_id=args.issue,
+            body=_resolve_body(args),
         )
-        _print_result(result, json_output=ctx["json_output"])
+        _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
         _handle_workflow_error(exc)
@@ -1113,7 +1289,7 @@ def _do_advise(args: argparse.Namespace) -> int:
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = advise_op.run(controller, work_item_id=args.issue)
+        result = advise_op.run(controller, issue_id=args.issue)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1121,15 +1297,15 @@ def _do_advise(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_resolve(args: argparse.Namespace) -> int:
+def _do_respond(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = resolve_op.run(
+        result = respond_op.run(
             controller,
-            work_item_id=args.issue,
-            response_from=str(args.response_from),
+            issue_id=args.issue,
+            body=_resolve_body(args),
         )
         _print_result(result, json_output=ctx["json_output"])
         return 0
@@ -1140,7 +1316,7 @@ def _do_resolve(args: argparse.Namespace) -> int:
 
 def _list_for_role(
     ctx: dict,
-    backend: WorkflowBackend,
+    backend: TrackerBackend,
     role: str,
     limit: int,
 ) -> list:
@@ -1148,10 +1324,10 @@ def _list_for_role(
 
     Roles often participate in multiple workflows (a PM does refinement,
     postmortem, prioritization). The query uses the workflow registry to
-    aggregate inbox states from every workflow whose lifecycle declares
+    aggregate inbox states from every workflow whose workflow declares
     `claim-role={role}` on a resting state.
 
-    Two categories, deduplicated by work-item id:
+    Two categories, deduplicated by issue id:
 
     1. **Inbox** — items in resting states with `claim_role == role` and
        no current claim. Aggregated across all workflows.
@@ -1164,64 +1340,64 @@ def _list_for_role(
       - items where the agent is currently blocked on a human signal
       - items already claimed by another role
     """
-    from workflow.backends.base import WorkItemFilters
+    from workflow.backends.base import IssueFilters
     from workflow.config import build_registry
 
     seen: dict[str, Any] = {}
     inbox_states: set[str] = set()
 
     # Aggregate inbox states from every workflow in the registry whose
-    # lifecycle declares this role's claim_role on a resting state.
+    # workflow declares this role's claim_role on a resting state.
     registry = build_registry(
         agent_home=ctx.get("agent_home"),
-        workflows_dir=ctx.get("workflows_dir"),
+        workflow_dir=ctx.get("workflow_dir"),
         backend=None,
         grants_dir=ctx.get("grants_dir"),
     )
     if registry is None:
         raise ConfigError(
-            "No workflows directory found. Set WORKFLOWS_DIR or run inside "
-            "a directory whose tree contains `*-lifecycle.mermaid` files."
+            "No workflows directory found. Set WORKFLOW_DIR or run inside "
+            "a directory whose tree contains `*-states.json` files."
         )
-    for wf_name in registry.discovered_workflows():
+    for wf_name in registry.discovered_processes():
         try:
-            wf_context = registry.get_workflow(wf_name)
+            wf_context = registry.get_process(wf_name)
         except (ConfigError, Exception) as exc:
             logger.debug("Skipping workflow %r: %s", wf_name, exc)
             continue
-        inbox_states |= _states_claimed_by_role(wf_context.lifecycle, role)
+        inbox_states |= _states_claimed_by_role(wf_context.state_machine, role)
 
     # 1. Inbox: query the backend for each discovered inbox state.
     for state_name in inbox_states:
-        for item in backend.list_work_items(WorkItemFilters(state=state_name, limit=limit)):
-            if item.agent_claim is None and item.work_item_id not in seen:
-                seen[item.work_item_id] = item
+        for item in backend.list_issues(IssueFilters(state=state_name, limit=limit)):
+            if item.agent_claim is None and item.issue_id not in seen:
+                seen[item.issue_id] = item
 
     # 2. Actionable wip: wip:{role} AND no awaiting/audit/awaiting-input markers.
     # (This is workflow-agnostic — wip labels don't care about which workflow
     # the item belongs to.)
-    for item in backend.list_work_items(WorkItemFilters(claim_role=role, limit=limit)):
+    for item in backend.list_issues(IssueFilters(claim_role=role, limit=limit)):
         if (
             item.awaiting_gate is None
             and item.audit_pending is None
             and not item.awaiting_input
-            and item.work_item_id not in seen
+            and item.issue_id not in seen
         ):
-            seen[item.work_item_id] = item
+            seen[item.issue_id] = item
 
     return list(seen.values())
 
 
-def _states_claimed_by_role(lifecycle: Any, role: str) -> set[str]:
+def _states_claimed_by_role(state_machine: Any, role: str) -> set[str]:
     """Find resting states whose `claim_role` matches the given role.
 
-    `claim_role` is a structured field on `State`, declared in the lifecycle
+    `claim_role` is a structured field on `State`, declared in the workflow
     file via a note such as `note left of raw: claim-role=pm`. Role match is
     case-insensitive and ignores `{...}` placeholder braces.
     """
     role_normalized = role.strip("{}").lower()
     matches: set[str] = set()
-    for state in lifecycle.states.values():
+    for state in state_machine.states.values():
         if state.claim_role is None:
             continue
         if state.claim_role.strip("{}").lower() == role_normalized:
@@ -1230,7 +1406,7 @@ def _states_claimed_by_role(lifecycle: Any, role: str) -> set[str]:
 
 
 def _do_create(args: argparse.Namespace) -> int:
-    """Create a new work item in the given initial state.
+    """Create a new issue in the given initial state.
 
     The workflow is resolved from `--to` via the registry (state names are
     unique across the registry). If `--claim` is passed, the agent's role
@@ -1243,21 +1419,21 @@ def _do_create(args: argparse.Namespace) -> int:
     # 1. Resolve workflow + validate state via the registry.
     registry = build_registry(
         agent_home=ctx.get("agent_home"),
-        workflows_dir=ctx.get("workflows_dir"),
+        workflow_dir=ctx.get("workflow_dir"),
         backend=None,
         grants_dir=ctx.get("grants_dir"),
     )
     if registry is None:
         _handle_workflow_error(
             ConfigError(
-                "No workflows directory found. Set WORKFLOWS_DIR or run from "
-                "inside a tree containing `*-lifecycle.mermaid` files."
+                "No workflows directory found. Set WORKFLOW_DIR or run from "
+                "inside a tree containing `*-states.json` files."
             )
         )
         return 2
 
-    workflow_name = registry.find_workflow_for_state(args.initial_state)
-    if workflow_name is None:
+    process_name = registry.find_process_for_state(args.initial_state)
+    if process_name is None:
         _handle_workflow_error(
             ConfigError(f"State {args.initial_state!r} is not declared in any discovered workflow.")
         )
@@ -1295,7 +1471,7 @@ def _do_create(args: argparse.Namespace) -> int:
             print(
                 _json.dumps(
                     {
-                        "workflow": workflow_name,
+                        "workflow": process_name,
                         "initial_state": args.initial_state,
                         "title": args.title,
                         "labels": [f"state:{args.initial_state}", *extras],
@@ -1306,7 +1482,7 @@ def _do_create(args: argparse.Namespace) -> int:
                 )
             )
         else:
-            print(f"[dry-run] would create issue in workflow {workflow_name!r}:")
+            print(f"[dry-run] would create issue in workflow {process_name!r}:")
             print(f"  title:         {args.title}")
             print(f"  initial state: {args.initial_state}")
             if claim_role:
@@ -1321,37 +1497,99 @@ def _do_create(args: argparse.Namespace) -> int:
         _handle_workflow_error(exc)
         return 2
 
-    extra_labels = [f"wip:{claim_role}"] if claim_role else []
+    # Create at the initial state with no claim label. Claiming, if
+    # requested, runs as a second operation so the state machine moves
+    # resting → working properly (sets wip:<role> AND wip-from:<initial_state>).
     try:
-        new_id = backend.create_work_item(
+        new_id = backend.create_issue(
             title=args.title,
             body=body,
             state=args.initial_state,
-            extra_labels=extra_labels,
+            extra_labels=[],
         )
     except BackendError as exc:
         _handle_workflow_error(exc)
         return 2
 
-    if ctx["json_output"]:
-        print(
-            _json.dumps(
-                {
-                    "id": new_id,
-                    "workflow": workflow_name,
-                    "state": args.initial_state,
-                    "title": args.title,
-                    "claim": claim_role,
-                },
-                indent=2,
+    # 6. If --claim, immediately claim the new issue.
+    claim_result = None
+    claim_context = None
+    if claim_role:
+        try:
+            claim_context = _build_context_for_issue(ctx, new_id)
+            controller = _build_controller(claim_context, dry_run=False)
+            claim_result = claim_op.run(
+                controller,
+                issue_id=new_id,
+                role=claim_role,
             )
-        )
+        except WorkflowError as exc:
+            # Issue created but claim failed — surface the error; the user
+            # can run `workflow claim` manually.
+            print(
+                f"Created issue #{new_id} but claim failed: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+
+    if ctx["json_output"]:
+        payload: dict[str, Any] = {
+            "id": new_id,
+            "workflow": process_name,
+            "state": args.initial_state,
+            "title": args.title,
+            "claim": claim_role,
+        }
+        if claim_result and claim_result.post_state:
+            payload["state"] = claim_result.post_state.state
+            payload["wip_from"] = claim_result.post_state.wip_from
+        print(_json.dumps(payload, indent=2))
+        return 0
+
+    suffix = f", claimed by {claim_role}" if claim_role else ""
+    final_state = args.initial_state
+    if claim_result and claim_result.post_state and claim_result.post_state.state:
+        final_state = claim_result.post_state.state
+    print(
+        f"Created issue #{new_id} in {process_name!r} workflow, "
+        f"state {final_state!r}{suffix}."
+    )
+
+    # Show next actions for the agent's convenience. Use the post-claim
+    # state when --claim was used; otherwise show actions from the initial
+    # resting state (which will suggest a `claim`).
+    from workflow.core.inspector import available_transitions
+
+    if claim_result is not None and claim_context is not None:
+        post = claim_result.post_state
+        if post is not None and post.state is not None:
+            actions = available_transitions(
+                claim_context.state_machine,
+                claim_context.catalog,
+                claim_context.grants,
+                post.state,
+            )
+            if actions or post.wip_from is not None:
+                print("")
+                _print_next_actions(
+                    actions, current_state=post.state, wip_from=post.wip_from
+                )
     else:
-        suffix = f", claimed by {claim_role}" if claim_role else ""
-        print(
-            f"Created issue #{new_id} in {workflow_name!r} workflow, "
-            f"state {args.initial_state!r}{suffix}."
-        )
+        # No claim: show actions from the resting initial state.
+        try:
+            process = registry.get_process(process_name)
+        except WorkflowError:
+            process = None
+        if process is not None:
+            actions = available_transitions(
+                process.state_machine,
+                process.catalog,
+                process.grants,
+                args.initial_state,
+            )
+            if actions:
+                print("")
+                _print_next_actions(actions, current_state=args.initial_state, wip_from=None)
     return 0
 
 
@@ -1386,14 +1624,14 @@ def _do_inbox(args: argparse.Namespace) -> int:
         _handle_workflow_error(exc)
         return 2
 
-    return _emit_work_items(
+    return _emit_issues(
         items, ctx, empty_message=f"(no inbox items or actionable wip for {role!r})"
     )
 
 
 def _do_search(args: argparse.Namespace) -> int:
-    """Search work items by framework filters."""
-    from workflow.backends.base import WorkItemFilters
+    """Search issues by framework filters."""
+    from workflow.backends.base import IssueFilters
 
     ctx = _ctx_obj_from_args(args)
     try:
@@ -1403,7 +1641,7 @@ def _do_search(args: argparse.Namespace) -> int:
         return 2
 
     try:
-        filters = WorkItemFilters(
+        filters = IssueFilters(
             state=args.state,
             claim_role=args.claim_role,
             awaiting_gate=args.awaiting_gate,
@@ -1411,16 +1649,16 @@ def _do_search(args: argparse.Namespace) -> int:
             awaiting_input=args.awaiting_input,
             limit=args.limit,
         )
-        items = backend.list_work_items(filters)
+        items = backend.list_issues(filters)
     except (ConfigError, BackendError) as exc:
         _handle_workflow_error(exc)
         return 2
 
-    return _emit_work_items(items, ctx, empty_message="(no work items matched the filters)")
+    return _emit_issues(items, ctx, empty_message="(no issues matched the filters)")
 
 
-def _emit_work_items(items: list[Any], ctx: dict, *, empty_message: str = "(no work items)") -> int:
-    """Render a list of WorkItemState objects as JSON or a columnar table.
+def _emit_issues(items: list[Any], ctx: dict, *, empty_message: str = "(no issues)") -> int:
+    """Render a list of IssueState objects as JSON or a columnar table.
 
     Shared between inbox and search.
     """
@@ -1429,7 +1667,7 @@ def _emit_work_items(items: list[Any], ctx: dict, *, empty_message: str = "(no w
             _json.dumps(
                 [
                     {
-                        "id": item.work_item_id,
+                        "id": item.issue_id,
                         "state": item.state,
                         "claim": item.agent_claim,
                         "awaiting_gate": item.awaiting_gate,
@@ -1461,7 +1699,7 @@ def _emit_work_items(items: list[Any], ctx: dict, *, empty_message: str = "(no w
         title = item.extras.get("title", "")
         rows.append(
             (
-                f"#{item.work_item_id}",
+                f"#{item.issue_id}",
                 item.state or "-",
                 item.agent_claim or "-",
                 hitl_marker,
@@ -1521,13 +1759,118 @@ def _do_comment(args: argparse.Namespace) -> int:
 
     if ctx["json_output"]:
         print(_json.dumps({"issue": args.issue, "posted": True}, indent=2))
-    else:
-        print(f"Comment posted on #{args.issue}.")
+        return 0
+
+    print(f"Comment posted on #{args.issue}.")
+
+    # Resolve the workflow + next actions for the agent. Best-effort —
+    # `comment` works even on issues outside any discovered workflow, so
+    # failure to resolve is silent.
+    from workflow.core.inspector import available_transitions
+
+    try:
+        state = backend.read_issue(args.issue)
+        if state.state is not None:
+            context = _build_context_for_issue(ctx, args.issue)
+            actions = available_transitions(
+                context.state_machine,
+                context.catalog,
+                context.grants,
+                state.state,
+            )
+            if actions or state.wip_from is not None:
+                print("")
+                _print_next_actions(
+                    actions, current_state=state.state, wip_from=state.wip_from
+                )
+    except (BackendError, WorkflowError) as exc:
+        logger.debug("comment: could not resolve next actions: %s", exc)
+    return 0
+
+
+def _do_edit(args: argparse.Namespace) -> int:
+    """Edit an issue's title and/or body on the tracker. No workflow state
+    change. Independent of `comment` (which posts a new comment instead of
+    rewriting the issue's description)."""
+    ctx = _ctx_obj_from_args(args)
+    title = args.title
+    try:
+        body = _resolve_body(args)
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+
+    if title is None and body is None:
+        _handle_workflow_error(
+            ConfigError(
+                "edit requires at least one of --title, --body, --body-from."
+            )
+        )
+        return 2
+
+    if ctx["dry_run"]:
+        print(f"[dry-run] would edit #{args.issue}:")
+        if title is not None:
+            print(f"  title: {title}")
+        if body is not None:
+            print(f"  body:  {len(body)} character(s)")
+        return 0
+
+    try:
+        backend = _build_backend(ctx)
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+
+    try:
+        backend.edit_issue(args.issue, title=title, body=body)
+    except BackendError as exc:
+        _handle_workflow_error(exc)
+        return 2
+
+    if ctx["json_output"]:
+        payload: dict[str, Any] = {"issue": args.issue, "edited": True}
+        if title is not None:
+            payload["title"] = title
+        if body is not None:
+            payload["body_chars"] = len(body)
+        print(_json.dumps(payload, indent=2))
+        return 0
+
+    changed = []
+    if title is not None:
+        changed.append("title")
+    if body is not None:
+        changed.append("body")
+    print(f"Edited #{args.issue} ({', '.join(changed)}).")
+
+    # Show next actions for the agent (best-effort, like `comment`).
+    from workflow.core.inspector import available_transitions
+
+    try:
+        state = backend.read_issue(args.issue)
+        if state.state is not None:
+            context = _build_context_for_issue(ctx, args.issue)
+            actions = available_transitions(
+                context.state_machine,
+                context.catalog,
+                context.grants,
+                state.state,
+            )
+            if actions or state.wip_from is not None:
+                print("")
+                _print_next_actions(
+                    actions, current_state=state.state, wip_from=state.wip_from
+                )
+    except (BackendError, WorkflowError) as exc:
+        logger.debug("edit: could not resolve next actions: %s", exc)
     return 0
 
 
 def _do_view(args: argparse.Namespace) -> int:
-    """View one work item's framework-relevant state and recent comments."""
+    """View one issue's framework-relevant state and recent comments."""
+    from workflow.core.inspector import available_transitions
+
     ctx = _ctx_obj_from_args(args)
     try:
         backend = _build_backend(ctx)
@@ -1536,10 +1879,26 @@ def _do_view(args: argparse.Namespace) -> int:
         return 2
 
     try:
-        state = backend.read_work_item(args.issue)
+        state = backend.read_issue(args.issue)
     except BackendError as exc:
         _handle_workflow_error(exc)
         return 2
+
+    # Resolve the issue's process via the registry so we can enrich `view`
+    # with next-action info. Failure to resolve is non-fatal — `view` still
+    # shows the raw state.
+    actions: list[Any] = []
+    try:
+        context = _build_context_for_issue(ctx, args.issue)
+        if state.state is not None:
+            actions = available_transitions(
+                context.state_machine,
+                context.catalog,
+                context.grants,
+                state.state,
+            )
+    except WorkflowError as exc:
+        logger.debug("view: could not resolve process for %s: %s", args.issue, exc)
 
     # `args.comments` semantics: None → all comments, 0 → omit, N>0 → last N.
     comments: list[dict] = []
@@ -1558,9 +1917,10 @@ def _do_view(args: argparse.Namespace) -> int:
         print(
             _json.dumps(
                 {
-                    "id": state.work_item_id,
+                    "id": state.issue_id,
                     "state": state.state,
                     "claim": state.agent_claim,
+                    "wip_from": state.wip_from,
                     "awaiting_gate": state.awaiting_gate,
                     "reviewing": state.reviewing,
                     "audit_pending": state.audit_pending,
@@ -1568,6 +1928,7 @@ def _do_view(args: argparse.Namespace) -> int:
                     "awaiting_input": state.awaiting_input,
                     "advising": state.advising,
                     "title": state.extras.get("title"),
+                    "next_actions": _next_actions_to_dict(actions),
                     "comments": comments,
                 },
                 indent=2,
@@ -1577,11 +1938,12 @@ def _do_view(args: argparse.Namespace) -> int:
         return 0
 
     title = state.extras.get("title", "")
-    header = f"#{state.work_item_id}" + (f" — {title}" if title else "")
+    header = f"#{state.issue_id}" + (f" — {title}" if title else "")
     print(header)
     print("-" * len(header))
     print(f"state:           {state.state or '-'}")
     print(f"claim:           {state.agent_claim or '-'}")
+    print(f"wip from:        {state.wip_from or '-'}")
     print(f"awaiting gate:   {state.awaiting_gate or '-'}")
     print(f"audit pending:   {state.audit_pending or '-'}")
     print(f"awaiting input:  {'yes' if state.awaiting_input else 'no'}")
@@ -1593,6 +1955,10 @@ def _do_view(args: argparse.Namespace) -> int:
     elif state.advising:
         human_claim = "advising"
     print(f"human claim:     {human_claim or '-'}")
+
+    if actions or state.wip_from is not None:
+        print("")
+        _print_next_actions(actions, current_state=state.state, wip_from=state.wip_from)
 
     if comments:
         print("")
@@ -1608,10 +1974,52 @@ def _do_view(args: argparse.Namespace) -> int:
     return 0
 
 
+def _do_render_mermaid(args: argparse.Namespace) -> int:
+    """Emit mermaid visualization(s) for one or all discovered workflows."""
+    from workflow.config import build_registry
+    from workflow.core.emitter import emit_mermaid
+
+    ctx = _ctx_obj_from_args(args)
+    registry = build_registry(
+        agent_home=ctx.get("agent_home"),
+        workflow_dir=ctx.get("workflow_dir"),
+        backend=None,
+        grants_dir=ctx.get("grants_dir"),
+    )
+    if registry is None:
+        _handle_workflow_error(
+            ConfigError(
+                "No workflows directory found. Pass --workflow-dir or set "
+                "WORKFLOW_DIR."
+            )
+        )
+        return 2
+
+    requested = [args.process] if args.process else registry.discovered_processes()
+    for wf_name in requested:
+        try:
+            wf_context = registry.get_process(wf_name)
+        except WorkflowError as exc:
+            _handle_workflow_error(exc)
+            return 2
+        text = emit_mermaid(wf_context.state_machine)
+        if args.stdout:
+            print(f"# {wf_name}-states.mermaid")
+            print(text)
+            continue
+        if wf_context.workflow_dir is None:
+            print(text)
+            continue
+        out_path = wf_context.workflow_dir / f"{wf_name}-states.mermaid"
+        out_path.write_text(text, encoding="utf-8")
+        print(f"Rendered {out_path}")
+    return 0
+
+
 def _do_validate(args: argparse.Namespace) -> int:
     """Validate workflow artifacts against the framework principles.
 
-    Iterates every workflow in the registry (`--workflows-dir` / `WORKFLOWS_DIR`
+    Iterates every workflow in the registry (`--workflow-dir` / `WORKFLOW_DIR`
     / discovered by walking up from cwd) and reports per-workflow findings.
     """
     from workflow.config import build_registry
@@ -1622,29 +2030,29 @@ def _do_validate(args: argparse.Namespace) -> int:
 
     registry = build_registry(
         agent_home=ctx.get("agent_home"),
-        workflows_dir=ctx.get("workflows_dir"),
+        workflow_dir=ctx.get("workflow_dir"),
         backend=None,
         grants_dir=grants_dir,
     )
     if registry is None:
         _handle_workflow_error(
             ConfigError(
-                "No workflows directory found. Pass --workflows-dir, set "
-                "WORKFLOWS_DIR, or run from inside a directory whose tree "
-                "contains `*-lifecycle.mermaid` files."
+                "No workflows directory found. Pass --workflow-dir, set "
+                "WORKFLOW_DIR, or run from inside a directory whose tree "
+                "contains `*-states.json` files."
             )
         )
         return 2
 
     results: list[tuple[str, Any, Any, list]] = []
-    for wf_name in registry.discovered_workflows():
+    for wf_name in registry.discovered_processes():
         try:
-            wf_context = registry.get_workflow(wf_name)
+            wf_context = registry.get_process(wf_name)
         except (ConfigError, ParseError) as exc:
             logger.warning("Skipping workflow %r: %s", wf_name, exc)
             continue
-        findings = validate_workflow(wf_context.lifecycle, wf_context.catalog, wf_context.grants)
-        results.append((wf_name, wf_context.lifecycle, wf_context.catalog, findings))
+        findings = validate_state_machine(wf_context.state_machine, wf_context.catalog, wf_context.grants)
+        results.append((wf_name, wf_context.state_machine, wf_context.catalog, findings))
 
     return _emit_validate_result(results, json_output=json_output)
 
@@ -1662,7 +2070,7 @@ def _emit_validate_result(
                     "workflows": [
                         {
                             "name": name,
-                            "lifecycle": lifecycle.source_path,
+                            "workflow": workflow.source_path,
                             "hcp_catalog": catalog.source_path if catalog else None,
                             "findings": [
                                 {
@@ -1674,7 +2082,7 @@ def _emit_validate_result(
                                 for f in findings
                             ],
                         }
-                        for name, lifecycle, catalog, findings in results
+                        for name, workflow, catalog, findings in results
                     ]
                 },
                 indent=2,
@@ -1682,8 +2090,8 @@ def _emit_validate_result(
         )
     else:
         total_counts = {"error": 0, "warning": 0, "info": 0}
-        for name, _lifecycle, _catalog, findings in results:
-            header = f"workflow: {name}"
+        for name, _workflow, _catalog, findings in results:
+            header = f"process: {name}"
             print(header)
             print("-" * len(header))
             if not findings:
@@ -1698,7 +2106,7 @@ def _emit_validate_result(
             f"{total_counts['error']} error(s), "
             f"{total_counts['warning']} warning(s), "
             f"{total_counts['info']} info "
-            f"across {len(results)} workflow(s)."
+            f"across {len(results)} process(es)."
         )
 
     has_errors = any(
@@ -1740,22 +2148,22 @@ def _do_doctor(args: argparse.Namespace) -> int:
     print("")
     registry = build_registry(
         agent_home=ctx.get("agent_home"),
-        workflows_dir=ctx.get("workflows_dir"),
+        workflow_dir=ctx.get("workflow_dir"),
         grants_dir=ctx.get("grants_dir"),
     )
     if registry is None:
         issues.append(
             "registry: no workflows directory found "
-            "(set WORKFLOWS_DIR or cd into a tree containing "
-            "`*-lifecycle.mermaid` files)."
+            "(set WORKFLOW_DIR or cd into a tree containing "
+            "`*-states.json` files)."
         )
         print("registry: <not discovered>")
     else:
-        names = registry.discovered_workflows()
-        print(f"registry: {len(names)} workflow(s) discovered")
+        names = registry.discovered_processes()
+        print(f"registry: {len(names)} process(es) discovered")
         for wf_name in names:
             try:
-                wf_context = registry.get_workflow(wf_name)
+                wf_context = registry.get_process(wf_name)
             except WorkflowError as exc:
                 issues.append(f"workflow {wf_name}: {exc}")
                 print(f"  {wf_name}: ERROR — {exc}")
@@ -1764,7 +2172,7 @@ def _do_doctor(args: argparse.Namespace) -> int:
             grants = len(wf_context.grants)
             print(
                 f"  {wf_name}: "
-                f"{len(wf_context.lifecycle.states)} state(s), "
+                f"{len(wf_context.state_machine.states)} state(s), "
                 f"{gates} catalogued gate(s), "
                 f"{grants} trust grant(s)"
             )
@@ -1837,7 +2245,7 @@ def _do_init(args: argparse.Namespace) -> int:
     # the role so `{pm}` and `pm` both produce the same `pm`.
     #
     # Only `agent-role` is persisted by default: `repo`/`host`/`workflow`
-    # flags are per-invocation, and the path config keys (`workflows-dir`,
+    # flags are per-invocation, and the path config keys (`workflow-dir`,
     # `grants-dir`) are written separately when explicitly provided. The
     # file stays minimal so adding future agent-identity fields is
     # unambiguous.
@@ -1850,7 +2258,7 @@ def _do_init(args: argparse.Namespace) -> int:
                     {
                         "agent_home": str(target),
                         "config_path": str(config_path),
-                        "workflows_dir": str(workflows_path),
+                        "workflow_dir": str(workflows_path),
                         "grants_dir": str(grants_path),
                         "config": config,
                         "dry_run": True,
@@ -1884,7 +2292,7 @@ def _do_init(args: argparse.Namespace) -> int:
                 {
                     "agent_home": str(target),
                     "config_path": str(config_path),
-                    "workflows_dir": str(workflows_path),
+                    "workflow_dir": str(workflows_path),
                     "grants_dir": str(grants_path),
                     "config": config,
                 },
@@ -1908,7 +2316,7 @@ def _enumerate_required_labels(ctx: dict) -> set[str]:
 
     Sources, aggregated across every workflow in the registry:
 
-    - `state:<name>` for every state in every lifecycle.
+    - `state:<name>` for every state in every workflow.
     - `wip:<role_id>` for every role in roles.json.
     - The five HITL singleton labels (`hitl:reviewing`, `hitl:auditing`,
       `hitl:advising`, `hitl:awaiting-input`, `hitl:resolved`).
@@ -1937,25 +2345,29 @@ def _enumerate_required_labels(ctx: dict) -> set[str]:
 
     registry = build_registry(
         agent_home=ctx.get("agent_home"),
-        workflows_dir=ctx.get("workflows_dir"),
+        workflow_dir=ctx.get("workflow_dir"),
         backend=None,
         grants_dir=ctx.get("grants_dir"),
     )
     if registry is None:
         raise ConfigError(
-            "No workflows directory found. Set WORKFLOWS_DIR or run from "
-            "inside a tree containing `*-lifecycle.mermaid` files."
+            "No workflows directory found. Set WORKFLOW_DIR or run from "
+            "inside a tree containing `*-states.json` files."
         )
 
-    for wf_name in registry.discovered_workflows():
+    for wf_name in registry.discovered_processes():
         try:
-            wf_context = registry.get_workflow(wf_name)
+            wf_context = registry.get_process(wf_name)
         except WorkflowError as exc:
             logger.warning("Skipping workflow %r during label enumeration: %s", wf_name, exc)
             continue
 
-        for state_name in wf_context.lifecycle.states:
+        for state_name, state in wf_context.state_machine.states.items():
             labels.add(f"state:{state_name}")
+            # Every RESTING state may serve as the origin for a claim into a
+            # WORKING state — provision the `wip-from:<state>` marker.
+            if state.state_class.value == "resting":
+                labels.add(f"wip-from:{state_name}")
 
         if wf_context.catalog:
             for hcp in wf_context.catalog.entries.values():

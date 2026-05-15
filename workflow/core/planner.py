@@ -3,8 +3,8 @@
 The planner is where the framework's eleven-operation semantics live
 (`hitl-principles.md` § 5). Each branch:
 
-1. Validates preconditions against the current `WorkItemState` and the
-   lifecycle/catalog/grants.
+1. Validates preconditions against the current `IssueState` and the
+   workflow/catalog/grants.
 2. Produces the `MarkerChange` the backend should apply atomically.
 3. Optionally surfaces the audit-comment text.
 
@@ -18,11 +18,11 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
-from workflow.backends.base import MarkerChange, WorkItemState
+from workflow.backends.base import IssueState, MarkerChange
 from workflow.core.model.hcp import HCP, HCPCatalog
-from workflow.core.model.lifecycle import (
-    Lifecycle,
+from workflow.core.model.state_machine import (
     ReversibilityClass,
+    StateMachine,
     Transition,
     TransitionType,
 )
@@ -33,13 +33,13 @@ logger = logging.getLogger(__name__)
 
 
 class Operation(Enum):
-    """The eleven framework operations plus the three lifecycle operations.
+    """The eleven framework operations plus the three workflow operations.
 
     These names match `hitl-principles.md` principle 5 and the CLI sub-command
     names (with hyphens vs underscores normalized).
     """
 
-    # Lifecycle
+    # StateMachine
     ADVANCE = "advance"
     CLAIM = "claim"
     RELEASE = "release"
@@ -51,25 +51,25 @@ class Operation(Enum):
     # Catalogued — audit
     RECORD_ACTION = "record-action"
     AUDIT = "audit"
-    CHECK = "check"
+    CONFIRM = "confirm"
     REVOKE = "revoke"
     # Recognized
     REQUEST_INPUT = "request-input"
     ADVISE = "advise"
-    RESOLVE = "resolve"
+    RESPOND = "respond"
 
 
 @dataclass(frozen=True)
 class OperationRequest:
     operation: Operation
-    work_item_id: str
+    issue_id: str
     # Optional parameters used by various operations.
     transition_label: str | None = None
     gate: str | None = None
     destination: str | None = None
     role: str | None = None  # for claim
     actor: str | None = None  # who is invoking (role or handle)
-    body_path: str | None = None  # comment body file path
+    body_text: str | None = None  # comment body content (CLI reads --body/--body-from)
     extras: dict = field(default_factory=dict)
 
 
@@ -83,12 +83,12 @@ class OperationPlan:
 
 def plan_operation(
     request: OperationRequest,
-    state: WorkItemState,
-    lifecycle: Lifecycle,
+    state: IssueState,
+    state_machine: StateMachine,
     catalog: HCPCatalog | None = None,
     grants: dict[str, TrustGrant] | None = None,
 ) -> OperationPlan:
-    """Plan an operation against the current work-item state.
+    """Plan an operation against the current issue state.
 
     The agent-facing operations are `advance`, `claim`, `release`, and
     `request-input`. The planner's `advance` branch consults the catalog and
@@ -105,40 +105,76 @@ def plan_operation(
     grants = grants or {}
     match request.operation:
         case Operation.ADVANCE:
-            return _plan_advance(request, state, lifecycle, catalog, grants)
+            return _plan_advance(request, state, state_machine, catalog, grants)
         case Operation.CLAIM:
-            return _plan_claim(request, state, lifecycle)
+            return _plan_claim(request, state, state_machine)
         case Operation.RELEASE:
-            return _plan_release(request, state)
+            return _plan_release(request, state, state_machine)
         case Operation.AWAIT_SIGNAL:
             # Internal primitive — exposed for tests/composition; not a CLI command.
-            return _plan_await_signal(request, state, lifecycle, catalog)
+            return _plan_await_signal(request, state, state_machine, catalog)
         case Operation.REVIEW:
             return _plan_review(request, state)
         case Operation.APPROVE:
-            return _plan_approve(request, state, lifecycle, catalog)
+            return _plan_approve(request, state, state_machine, catalog)
         case Operation.REJECT:
             return _plan_reject(request, state, catalog)
         case Operation.RECORD_ACTION:
             # Internal primitive — exposed for tests/composition; not a CLI command.
-            return _plan_record_action(request, state, lifecycle, catalog)
+            return _plan_record_action(request, state, state_machine, catalog)
         case Operation.AUDIT:
             return _plan_audit(request, state)
-        case Operation.CHECK:
-            return _plan_check(request, state)
+        case Operation.CONFIRM:
+            return _plan_confirm(request, state)
         case Operation.REVOKE:
             return _plan_revoke(request, state, catalog)
         case Operation.REQUEST_INPUT:
             return _plan_request_input(request, state)
         case Operation.ADVISE:
             return _plan_advise(request, state)
-        case Operation.RESOLVE:
-            return _plan_resolve(request, state)
+        case Operation.RESPOND:
+            return _plan_respond(request, state)
         case _:
             raise OperationError(f"Unknown operation: {request.operation!r}")
 
 
-# ----- lifecycle operations -----
+# ----- workflow operations -----
+
+
+def _is_working_state(state_machine: StateMachine, name: str | None) -> bool:
+    """Return True iff `name` is a WORKING state in the state machine."""
+    if name is None:
+        return False
+    from workflow.core.model.state_machine import StateClass
+
+    state = state_machine.states.get(name)
+    return state is not None and state.state_class is StateClass.WORKING
+
+
+def _terminal_close_info(
+    state_machine: StateMachine, name: str | None
+) -> tuple[bool, str | None]:
+    """Whether advancing into `name` should close the tracker's issue.
+
+    Returns `(close_issue, close_reason)`. The decision is purely driven by
+    the destination state's authored `close_reason` field — present means
+    close with that reason, absent means leave the issue open.
+
+    This lets `<name>-states.json` author the close behavior per-state,
+    including the handoff-terminal pattern (terminal state with no
+    `close_reason` — the work continues elsewhere, so the tracker's issue
+    stays open).
+    """
+    if name is None or name == "[*]":
+        return False, None
+    from workflow.core.model.state_machine import StateClass
+
+    state = state_machine.states.get(name)
+    if state is None or state.state_class is not StateClass.TERMINAL:
+        return False, None
+    if state.close_reason is None:
+        return False, None
+    return True, state.close_reason
 
 
 def _require_role_match(
@@ -163,13 +199,13 @@ def _require_role_match(
 
 
 def _find_transition(
-    lifecycle: Lifecycle,
+    state_machine: StateMachine,
     source: str | None,
     label: str,
 ) -> Transition:
     candidates = [
         t
-        for t in lifecycle.transitions
+        for t in state_machine.transitions
         if t.label == label and (source is None or t.source == source)
     ]
     if not candidates:
@@ -185,7 +221,7 @@ def _find_transition(
 
 
 def _find_transition_by_destination(
-    lifecycle: Lifecycle,
+    state_machine: StateMachine,
     source: str | None,
     destination: str,
 ) -> Transition:
@@ -196,16 +232,16 @@ def _find_transition_by_destination(
 
     Raises OperationError if no matching transition exists, or if multiple
     edges share the same (source, destination) — that latter case is a
-    lifecycle-design smell and is surfaced explicitly.
+    workflow-design smell and is surfaced explicitly.
     """
     candidates = [
         t
-        for t in lifecycle.transitions
+        for t in state_machine.transitions
         if t.destination == destination and (source is None or t.source == source)
     ]
     if not candidates:
         outgoing = (
-            [t.destination for t in lifecycle.transitions if t.source == source]
+            [t.destination for t in state_machine.transitions if t.source == source]
             if source is not None
             else []
         )
@@ -217,15 +253,15 @@ def _find_transition_by_destination(
         labels = sorted({t.label for t in candidates})
         raise OperationError(
             f"Multiple transitions match {source!r} → {destination!r}: {labels}. "
-            "Lifecycle has duplicate (source, destination) edges — clean up the diagram."
+            "StateMachine has duplicate (source, destination) edges — clean up the diagram."
         )
     return candidates[0]
 
 
 def _plan_advance(
     request: OperationRequest,
-    state: WorkItemState,
-    lifecycle: Lifecycle,
+    state: IssueState,
+    state_machine: StateMachine,
     catalog: HCPCatalog | None,
     grants: dict[str, TrustGrant],
 ) -> OperationPlan:
@@ -245,7 +281,7 @@ def _plan_advance(
     """
     if not request.destination:
         raise OperationError("advance requires --to (destination state).")
-    transition = _find_transition_by_destination(lifecycle, state.state, request.destination)
+    transition = _find_transition_by_destination(state_machine, state.state, request.destination)
     if state.state is not None and transition.source != state.state:
         raise OperationError(
             f"Cannot advance to {request.destination!r}: current state is "
@@ -259,7 +295,7 @@ def _plan_advance(
         # Ungated direct advance. If it's a claim transition, validate the
         # actor's role against the source state's claim_role.
         if transition.transition_type is TransitionType.CLAIM:
-            source_state = lifecycle.states.get(transition.source)
+            source_state = state_machine.states.get(transition.source)
             if source_state is not None and source_state.claim_role:
                 _require_role_match(
                     actor=request.actor,
@@ -267,11 +303,19 @@ def _plan_advance(
                     context=f"claim transition into {transition.destination!r}",
                 )
 
+        # Per principle 1, leaving a working state clears the claim — the
+        # role no longer "owns" the issue once it's resting/terminal.
+        leaving_working = _is_working_state(state_machine, transition.source)
+        close, reason = _terminal_close_info(state_machine, transition.destination)
         change = MarkerChange(
             set_state=transition.destination,
             clear_awaiting_gate=True,
             clear_audit_pending=True,
             set_awaiting_input=False,
+            clear_agent_claim=leaving_working,
+            clear_wip_from=leaving_working,
+            close_issue=close,
+            close_reason=reason,
         )
         audit = (
             f"## state advance: {transition.source} → {transition.destination}\n\n"
@@ -310,7 +354,7 @@ def _plan_advance(
     if effective_level is HCPLevel.BLOCK:
         return _advance_block_gated(request, state, transition, hcp)
     else:  # AUDIT
-        return _advance_audit_gated(request, state, transition, hcp)
+        return _advance_audit_gated(request, state, transition, hcp, state_machine)
 
 
 def _find_hcp_for_transition(catalog: HCPCatalog | None, transition: Transition) -> HCP | None:
@@ -331,22 +375,18 @@ def _find_hcp_for_transition(catalog: HCPCatalog | None, transition: Transition)
 
 def _advance_block_gated(
     request: OperationRequest,
-    state: WorkItemState,
+    state: IssueState,
     transition: Transition,
     hcp: HCP,
 ) -> OperationPlan:
     """Block-gated advance: apply awaiting marker, hold claim, no state change."""
-    if not request.body_path:
+    if not request.body_text:
         prepares = hcp.agent_prepares_path or "(catalog: agent_prepares not set)"
         raise OperationError(
             f"Transition {transition.label!r} is gated at block level — provide "
-            f"--packet-from with content matching {prepares}."
+            f"--body (or --body-from) with content matching {prepares}."
         )
-    try:
-        with open(request.body_path, encoding="utf-8") as fh:
-            packet_body = fh.read()
-    except OSError as exc:
-        raise OperationError(f"Could not read packet body from {request.body_path}: {exc}") from exc
+    packet_body = request.body_text
     change = MarkerChange(set_awaiting_gate=hcp.gate_name)
     audit = (
         f"## await-signal: {hcp.gate_name}\n\n"
@@ -365,9 +405,10 @@ def _advance_block_gated(
 
 def _advance_audit_gated(
     request: OperationRequest,
-    state: WorkItemState,
+    state: IssueState,
     transition: Transition,
     hcp: HCP,
+    state_machine: StateMachine,
 ) -> OperationPlan:
     """Audit-gated advance: state changes + audit-pending marker, atomically."""
     if hcp.reversibility is ReversibilityClass.IRREVERSIBLE:
@@ -375,16 +416,17 @@ def _advance_audit_gated(
             f"Gate {hcp.gate_name!r} is at audit level but destination is "
             "irreversible — invalid grant per hitl-principles.md#4."
         )
-    notes: str | None = None
-    if request.body_path:
-        try:
-            with open(request.body_path, encoding="utf-8") as fh:
-                notes = fh.read()
-        except OSError as exc:
-            raise OperationError(f"Could not read notes from {request.body_path}: {exc}") from exc
+    notes = request.body_text
+    # Audit-gated advance always leaves a working state (per principle 2,
+    # role-action transitions originate in WORKING); clear the claim.
+    close, reason = _terminal_close_info(state_machine, transition.destination)
     change = MarkerChange(
         set_state=transition.destination,
         set_audit_pending=hcp.gate_name,
+        clear_agent_claim=True,
+        clear_wip_from=True,
+        close_issue=close,
+        close_reason=reason,
     )
     audit = (
         f"## record-action: {transition.source} → {transition.destination} "
@@ -402,40 +444,67 @@ def _advance_audit_gated(
 
 def _plan_claim(
     request: OperationRequest,
-    state: WorkItemState,
-    lifecycle: Lifecycle,
+    state: IssueState,
+    state_machine: StateMachine,
 ) -> OperationPlan:
     role = request.role or request.actor
     if not role:
-        raise OperationError("claim requires --role (or implicit actor).")
+        raise OperationError("claim requires an agent role.")
     if state.agent_claim and state.agent_claim != role:
         raise OperationError(
-            f"Work item already claimed by {state.agent_claim!r}; cannot claim as {role!r}."
+            f"Issue already claimed by {state.agent_claim!r}; cannot claim as {role!r}."
         )
     # Validate the claiming role matches the source state's claim_role.
     if state.state is not None:
-        source_state = lifecycle.states.get(state.state)
+        source_state = state_machine.states.get(state.state)
         if source_state is not None and source_state.claim_role:
             _require_role_match(
                 actor=role,
                 required=source_state.claim_role,
                 context=f"claiming {state.state!r}",
             )
-    # Optional transition: if a transition is named, plan its source check.
+
+    # Resolve the CLAIM transition. Per principle 3 a claim is always
+    # resting → working, so a CLAIM transition out of the current state must
+    # exist. If `destination` is explicit, look it up; otherwise auto-pick
+    # when exactly one exists.
     new_state = state.state
-    if request.transition_label:
-        transition = _find_transition(lifecycle, state.state, request.transition_label)
-        if transition.transition_type is not TransitionType.CLAIM:
+    transition = None
+    if state.state is not None:
+        claim_options = [
+            t
+            for t in state_machine.transitions
+            if t.source == state.state and t.transition_type is TransitionType.CLAIM
+        ]
+        if request.destination:
+            matches = [t for t in claim_options if t.destination == request.destination]
+            if not matches:
+                outgoing = sorted({t.destination for t in claim_options})
+                raise OperationError(
+                    f"No CLAIM transition from {state.state!r} to {request.destination!r}. "
+                    f"Available claim destinations: {outgoing or '(none)'}."
+                )
+            transition = matches[0]
+        elif len(claim_options) == 1:
+            transition = claim_options[0]
+        elif len(claim_options) > 1:
+            options = sorted({t.destination for t in claim_options})
             raise OperationError(
-                f"Transition {request.transition_label!r} is not a claim transition."
+                f"Multiple CLAIM transitions from {state.state!r}: {options}. "
+                f"Pass --to to disambiguate."
             )
-        new_state = transition.destination
+        if transition is not None:
+            new_state = transition.destination
+
+    # Record the origin so `release` can return the issue here.
+    origin = state.state
     change = MarkerChange(
         set_state=new_state if new_state != state.state else None,
         set_agent_claim=role,
+        set_wip_from=origin,
     )
-    audit = f"## claim: agent {role!r} claims work item" + (
-        f" via {request.transition_label!r}" if request.transition_label else ""
+    audit = f"## claim: agent {role!r} claims issue" + (
+        f" → {transition.destination!r}" if transition is not None else ""
     )
     return OperationPlan(
         operation=request.operation,
@@ -444,11 +513,43 @@ def _plan_claim(
     )
 
 
-def _plan_release(request: OperationRequest, state: WorkItemState) -> OperationPlan:
+def _plan_release(
+    request: OperationRequest,
+    state: IssueState,
+    state_machine: StateMachine,
+) -> OperationPlan:
     if not state.agent_claim:
         raise OperationError("Cannot release: no agent claim is active.")
-    change = MarkerChange(clear_agent_claim=True)
-    audit = f"## release: agent {state.agent_claim!r} releases work item"
+    if state.wip_from is None:
+        raise OperationError(
+            "Cannot release: no wip-from marker recorded. The issue must have "
+            "been claimed via `workflow claim` (which sets the origin) for "
+            "release to know where to return it."
+        )
+    # Sanity: a CLAIM transition from wip_from → current must exist. If not,
+    # the marker has drifted and we'd put the issue in an invalid state.
+    if state.state is not None:
+        valid = any(
+            t.source == state.wip_from
+            and t.destination == state.state
+            and t.transition_type is TransitionType.CLAIM
+            for t in state_machine.transitions
+        )
+        if not valid:
+            raise OperationError(
+                f"wip-from marker {state.wip_from!r} → {state.state!r} does "
+                f"not match any CLAIM transition. The marker has drifted; "
+                f"investigate before releasing."
+            )
+    change = MarkerChange(
+        set_state=state.wip_from,
+        clear_agent_claim=True,
+        clear_wip_from=True,
+    )
+    audit = (
+        f"## release: agent {state.agent_claim!r} releases issue "
+        f"→ {state.wip_from!r}"
+    )
     return OperationPlan(
         operation=request.operation,
         change=change,
@@ -471,8 +572,8 @@ def _require_gate(catalog: HCPCatalog | None, gate_name: str) -> HCP:
 
 def _plan_await_signal(
     request: OperationRequest,
-    state: WorkItemState,
-    lifecycle: Lifecycle,
+    state: IssueState,
+    state_machine: StateMachine,
     catalog: HCPCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
@@ -491,16 +592,8 @@ def _plan_await_signal(
             f"An audit is pending ({state.audit_pending!r}); cannot start a new gate."
         )
 
-    packet_body: str | None = None
-    if request.body_path:
-        try:
-            with open(request.body_path, encoding="utf-8") as fh:
-                packet_body = fh.read()
-        except OSError as exc:
-            raise OperationError(
-                f"Could not read packet body from {request.body_path}: {exc}"
-            ) from exc
-    elif hcp.agent_prepares_path:
+    packet_body = request.body_text
+    if packet_body is None and hcp.agent_prepares_path:
         logger.info(
             "await-signal for %r: no packet body provided; catalog points at %s",
             hcp.gate_name,
@@ -522,7 +615,7 @@ def _plan_await_signal(
     )
 
 
-def _plan_review(request: OperationRequest, state: WorkItemState) -> OperationPlan:
+def _plan_review(request: OperationRequest, state: IssueState) -> OperationPlan:
     if not state.awaiting_gate:
         raise OperationError("Cannot review: no catalogued gate is awaiting a signal.")
     if state.reviewing:
@@ -540,8 +633,8 @@ def _plan_review(request: OperationRequest, state: WorkItemState) -> OperationPl
 
 def _plan_approve(
     request: OperationRequest,
-    state: WorkItemState,
-    lifecycle: Lifecycle,
+    state: IssueState,
+    state_machine: StateMachine,
     catalog: HCPCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
@@ -567,11 +660,19 @@ def _plan_approve(
             raise OperationError(
                 f"Destination {destination!r} is not among the gate's options {hcp.destinations!r}."
             )
+    # Approve fires the gated transition; the agent who was holding the
+    # working state is now done, so clear the claim. The original source
+    # (the working state) was the agent's seat.
+    close, reason = _terminal_close_info(state_machine, destination)
     change = MarkerChange(
         set_state=destination,
         clear_awaiting_gate=True,
         set_reviewing=False,
         record_approval=destination,
+        clear_agent_claim=True,
+        clear_wip_from=True,
+        close_issue=close,
+        close_reason=reason,
     )
     audit = (
         f"## approve: gate {hcp.gate_name!r} → {destination}\n\nAuthorized via approve operation."
@@ -585,7 +686,7 @@ def _plan_approve(
 
 def _plan_reject(
     request: OperationRequest,
-    state: WorkItemState,
+    state: IssueState,
     catalog: HCPCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
@@ -595,15 +696,7 @@ def _plan_reject(
         raise OperationError(
             f"Cannot reject {hcp.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
         )
-    feedback: str | None = None
-    if request.body_path:
-        try:
-            with open(request.body_path, encoding="utf-8") as fh:
-                feedback = fh.read()
-        except OSError as exc:
-            raise OperationError(
-                f"Could not read feedback from {request.body_path}: {exc}"
-            ) from exc
+    feedback = request.body_text
     # State unchanged; clear queue and review markers; agent retains its claim
     # (principle 7).
     change = MarkerChange(
@@ -628,8 +721,8 @@ def _plan_reject(
 
 def _plan_record_action(
     request: OperationRequest,
-    state: WorkItemState,
-    lifecycle: Lifecycle,
+    state: IssueState,
+    state_machine: StateMachine,
     catalog: HCPCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
@@ -650,7 +743,7 @@ def _plan_record_action(
         if destination not in hcp.destinations:
             raise OperationError(f"Destination {destination!r} is not in {hcp.destinations!r}.")
     if request.transition_label:
-        transition = _find_transition(lifecycle, state.state, request.transition_label)
+        transition = _find_transition(state_machine, state.state, request.transition_label)
         if transition.destination != destination:
             raise OperationError(
                 f"transition destination {transition.destination!r} differs from "
@@ -658,9 +751,15 @@ def _plan_record_action(
             )
     if state.audit_pending and state.audit_pending != hcp.gate_name:
         raise OperationError(f"Another audit is pending ({state.audit_pending!r}).")
+    # Record-action leaves the working state (same shape as audit-gated advance).
+    close, reason = _terminal_close_info(state_machine, destination)
     change = MarkerChange(
         set_state=destination,
         set_audit_pending=hcp.gate_name,
+        clear_agent_claim=True,
+        clear_wip_from=True,
+        close_issue=close,
+        close_reason=reason,
     )
     audit = (
         f"## record-action: {state.state} → {destination} (gate {hcp.gate_name!r})\n\n"
@@ -673,7 +772,7 @@ def _plan_record_action(
     )
 
 
-def _plan_audit(request: OperationRequest, state: WorkItemState) -> OperationPlan:
+def _plan_audit(request: OperationRequest, state: IssueState) -> OperationPlan:
     if not state.audit_pending:
         raise OperationError("Cannot audit: no audit-pending marker is active.")
     if state.auditing:
@@ -689,7 +788,7 @@ def _plan_audit(request: OperationRequest, state: WorkItemState) -> OperationPla
     )
 
 
-def _plan_check(request: OperationRequest, state: WorkItemState) -> OperationPlan:
+def _plan_confirm(request: OperationRequest, state: IssueState) -> OperationPlan:
     if not request.gate:
         raise OperationError("check requires --gate.")
     if state.audit_pending != request.gate:
@@ -699,7 +798,7 @@ def _plan_check(request: OperationRequest, state: WorkItemState) -> OperationPla
     change = MarkerChange(
         clear_audit_pending=True,
         set_auditing=False,
-        record_check=request.gate,
+        record_confirm=request.gate,
     )
     audit = f"## check: {request.gate!r} confirmed post-hoc"
     return OperationPlan(
@@ -711,7 +810,7 @@ def _plan_check(request: OperationRequest, state: WorkItemState) -> OperationPla
 
 def _plan_revoke(
     request: OperationRequest,
-    state: WorkItemState,
+    state: IssueState,
     catalog: HCPCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
@@ -720,13 +819,7 @@ def _plan_revoke(
         raise OperationError(
             f"Cannot revoke {request.gate!r}: audit-pending is {state.audit_pending!r}."
         )
-    concern: str | None = None
-    if request.body_path:
-        try:
-            with open(request.body_path, encoding="utf-8") as fh:
-                concern = fh.read()
-        except OSError as exc:
-            raise OperationError(f"Could not read concern from {request.body_path}: {exc}") from exc
+    concern = request.body_text
     change = MarkerChange(
         clear_audit_pending=True,
         set_auditing=False,
@@ -752,25 +845,17 @@ def _plan_revoke(
 # ----- recognized operations -----
 
 
-def _plan_request_input(request: OperationRequest, state: WorkItemState) -> OperationPlan:
+def _plan_request_input(request: OperationRequest, state: IssueState) -> OperationPlan:
     if state.awaiting_input:
-        raise OperationError("Already awaiting input on this work item.")
+        raise OperationError("Already awaiting input on this issue.")
     if state.awaiting_gate or state.audit_pending:
         raise OperationError(
             "A catalogued gate is in flight; resolve it before request-input "
             "(hitl-principles.md#6)."
         )
-    question: str | None = None
-    if request.body_path:
-        try:
-            with open(request.body_path, encoding="utf-8") as fh:
-                question = fh.read()
-        except OSError as exc:
-            raise OperationError(
-                f"Could not read question from {request.body_path}: {exc}"
-            ) from exc
-    else:
-        raise OperationError("request-input requires --question-from.")
+    if not request.body_text:
+        raise OperationError("request-input requires --body or --body-from.")
+    question = request.body_text
     change = MarkerChange(set_awaiting_input=True)
     audit = (
         "## request-input\n\nAgent recognizes an unanticipated HITL moment; awaiting human input."
@@ -783,7 +868,7 @@ def _plan_request_input(request: OperationRequest, state: WorkItemState) -> Oper
     )
 
 
-def _plan_advise(request: OperationRequest, state: WorkItemState) -> OperationPlan:
+def _plan_advise(request: OperationRequest, state: IssueState) -> OperationPlan:
     if not state.awaiting_input:
         raise OperationError("Cannot advise: no awaiting-input marker active.")
     if state.advising:
@@ -799,24 +884,16 @@ def _plan_advise(request: OperationRequest, state: WorkItemState) -> OperationPl
     )
 
 
-def _plan_resolve(request: OperationRequest, state: WorkItemState) -> OperationPlan:
+def _plan_respond(request: OperationRequest, state: IssueState) -> OperationPlan:
     if not state.awaiting_input:
         raise OperationError("Cannot resolve: no awaiting-input marker active.")
-    response: str | None = None
-    if request.body_path:
-        try:
-            with open(request.body_path, encoding="utf-8") as fh:
-                response = fh.read()
-        except OSError as exc:
-            raise OperationError(
-                f"Could not read response from {request.body_path}: {exc}"
-            ) from exc
-    else:
-        raise OperationError("resolve requires --response-from.")
+    if not request.body_text:
+        raise OperationError("respond requires --body or --body-from.")
+    response = request.body_text
     change = MarkerChange(
         set_awaiting_input=False,
         set_advising=False,
-        record_resolution=True,
+        record_response=True,
     )
     audit = "## resolve: recognized HITL moment closed"
     return OperationPlan(

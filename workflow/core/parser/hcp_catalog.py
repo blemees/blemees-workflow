@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
-from workflow.core.model.lifecycle import ReversibilityClass
+from workflow.core.model.state_machine import ReversibilityClass
 from workflow.errors import ParseError
 
 logger = logging.getLogger(__name__)

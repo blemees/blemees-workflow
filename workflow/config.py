@@ -3,7 +3,7 @@
 ## Discovery model
 
 The tool operates against a **workflows directory** (where the canonical
-`*-lifecycle.mermaid`, `*-hcps.json`, and `roles.json` files live) and,
+`*-states.json`, `*-hcps.json`, and `roles.json` files live) and,
 separately, an **agent home** — a directory on the user's filesystem that
 represents one agent's identity. Each agent has its own home; configuration
 that lives there does not bleed across agents.
@@ -27,8 +27,8 @@ The agent home contains a `.workflow/` directory:
 
 ### Workflows directory discovery (priority order)
 
-1. Explicit `workflows_dir` param (typically from CLI `--workflows-dir`).
-2. `WORKFLOWS_DIR` env var.
+1. Explicit `workflow_dir` param (typically from CLI `--workflow-dir`).
+2. `WORKFLOW_DIR` env var.
 3. `<agent-home>/.workflow/workflows/` — workflows colocated with the agent.
 
 Discovery does NOT walk up cwd. Workflows are agent-scoped or
@@ -49,16 +49,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from workflow.backends.base import WorkflowBackend
+from workflow.backends.base import TrackerBackend
 from workflow.core.model.hcp import HCPCatalog
-from workflow.core.model.lifecycle import Lifecycle
 from workflow.core.model.role import RoleDirectory
+from workflow.core.model.state_machine import StateMachine
 from workflow.core.model.trust_grant import TrustGrant
 from workflow.core.parser import (
     load_team_grants,
     parse_hcp_catalog,
-    parse_lifecycle,
     parse_role_directory,
+    parse_state_machine,
 )
 from workflow.errors import ConfigError
 
@@ -71,14 +71,14 @@ _AGENT_WORKFLOWS_SUBDIR = "workflows"
 
 
 @dataclass
-class WorkflowContext:
-    workflow_name: str
-    lifecycle: Lifecycle
+class Process:
+    process_name: str
+    state_machine: StateMachine
     catalog: HCPCatalog | None = None
     role_directory: RoleDirectory | None = None
     grants: dict[str, TrustGrant] = field(default_factory=dict)
-    backend: WorkflowBackend | None = None
-    workflows_dir: Path | None = None  # dir containing *-lifecycle.mermaid files
+    backend: TrackerBackend | None = None
+    workflow_dir: Path | None = None  # dir containing *-states.json files
     agent_home: Path | None = None
     agent_config: dict[str, Any] = field(default_factory=dict)
     agent_role: str | None = None  # from agent_config["role"]; used for defaults and validation
@@ -153,8 +153,8 @@ def discover_workflows_dir(
 
     Resolution order:
 
-    1. `WORKFLOWS_DIR` env var — used directly if set.
-    2. Agent config `workflows-dir` key — relative paths anchored to the
+    1. `WORKFLOW_DIR` env var — used directly if set.
+    2. Agent config `workflow-dir` key — relative paths anchored to the
        agent home.
     3. `<agent-home>/.workflow/workflows/` — the default location when the
        config key is absent.
@@ -162,21 +162,21 @@ def discover_workflows_dir(
     Returns None if no source produces an existing directory. Discovery
     does NOT walk up cwd; workflows are agent-scoped, not checkout-scoped.
     """
-    env = os.environ.get("WORKFLOWS_DIR")
+    env = os.environ.get("WORKFLOW_DIR")
     if env:
         candidate = Path(env).expanduser().resolve()
         if candidate.is_dir():
             return candidate
-        logger.warning("WORKFLOWS_DIR=%s but directory does not exist.", env)
+        logger.warning("WORKFLOW_DIR=%s but directory does not exist.", env)
         return None
 
-    if agent_config and "workflows-dir" in agent_config:
-        resolved = _resolve_agent_path(agent_home, agent_config["workflows-dir"])
+    if agent_config and "workflow-dir" in agent_config:
+        resolved = _resolve_agent_path(agent_home, agent_config["workflow-dir"])
         if resolved is not None and resolved.is_dir():
             return resolved
         logger.warning(
-            "config workflows-dir=%r but resolved path does not exist.",
-            agent_config["workflows-dir"],
+            "config workflow-dir=%r but resolved path does not exist.",
+            agent_config["workflow-dir"],
         )
         return None
 
@@ -220,22 +220,22 @@ def discover_grants_dir(
     return default_grants_dir(agent_home)
 
 
-def load_workflow(
-    workflow_name: str | None = None,
-    workflows_dir: Path | None = None,
+def load_process(
+    process_name: str | None = None,
+    workflow_dir: Path | None = None,
     grants_dir: Path | None = None,
-    backend: WorkflowBackend | None = None,
+    backend: TrackerBackend | None = None,
     agent_home: Path | None = None,
-) -> WorkflowContext:
+) -> Process:
     """Resolve and parse the workflow's canonical artifacts.
 
-    `workflow_name` is the name of the workflow to load (e.g., `refinement`);
-    the corresponding files are read from `<workflows_dir>/<name>-lifecycle.mermaid`
-    and `<workflows_dir>/<name>-hcps.json`. `roles.json` is read from the
+    `process_name` is the name of the workflow to load (e.g., `refinement`);
+    the corresponding files are read from `<workflow_dir>/<name>-states.json`
+    and `<workflow_dir>/<name>-hcps.json`. `roles.json` is read from the
     same directory.
 
-    Discovery: if `workflows_dir` is not supplied, it is found via
-    `discover_workflows_dir` (env var `WORKFLOWS_DIR`, then walking up from
+    Discovery: if `workflow_dir` is not supplied, it is found via
+    `discover_workflows_dir` (env var `WORKFLOW_DIR`, then walking up from
     cwd). The agent home, if discovered, contributes defaults from
     `.workflow/config.json` and the default location for `trust-grants/`.
     """
@@ -248,36 +248,36 @@ def load_workflow(
     # the workflow per-invocation; --repo/--host are per-checkout; team
     # selection is subsumed by --grants-dir; only one backend exists.
 
-    workflows_dir = workflows_dir or discover_workflows_dir(
+    workflow_dir = workflow_dir or discover_workflows_dir(
         agent_home=agent_home, agent_config=agent_config
     )
-    if workflows_dir is None:
+    if workflow_dir is None:
         raise ConfigError(
-            "Cannot find a workflows directory. Pass --workflows-dir, set "
-            "WORKFLOWS_DIR, or run from inside a repo containing "
+            "Cannot find a workflows directory. Pass --workflow-dir, set "
+            "WORKFLOW_DIR, or run from inside a repo containing "
             "`skills/workflows/shared/resources/` (or a directory with "
-            "`*-lifecycle.mermaid` files)."
+            "`*-states.json` files)."
         )
-    if workflow_name is None:
-        raise ConfigError("load_workflow requires a workflow_name to resolve the lifecycle file.")
+    if process_name is None:
+        raise ConfigError("load_process requires a process_name to resolve the workflow file.")
 
-    lifecycle_path = workflows_dir / f"{workflow_name}-lifecycle.mermaid"
-    if not lifecycle_path.exists():
+    state_machine_path = workflow_dir / f"{process_name}-states.json"
+    if not state_machine_path.exists():
         raise ConfigError(
-            f"Lifecycle file not found: {lifecycle_path}. "
-            f"Expected `<workflows_dir>/{workflow_name}-lifecycle.mermaid`."
+            f"StateMachine file not found: {state_machine_path}. "
+            f"Expected `<workflow_dir>/{process_name}-states.json`."
         )
-    lifecycle = parse_lifecycle(lifecycle_path)
+    state_machine = parse_state_machine(state_machine_path)
 
     # HCP catalog (optional — pre-HITL workflows have none).
     catalog: HCPCatalog | None = None
-    hcp_catalog_path = workflows_dir / f"{workflow_name}-hcps.json"
+    hcp_catalog_path = workflow_dir / f"{process_name}-hcps.json"
     if hcp_catalog_path.exists():
         catalog = parse_hcp_catalog(hcp_catalog_path)
 
     # Role directory (optional, shared across workflows).
     role_directory: RoleDirectory | None = None
-    roles_path = workflows_dir / "roles.json"
+    roles_path = workflow_dir / "roles.json"
     if roles_path.exists():
         role_directory = parse_role_directory(roles_path)
 
@@ -296,14 +296,14 @@ def load_workflow(
     if isinstance(agent_role, str):
         agent_role = agent_role.strip("{}").strip() or None
 
-    return WorkflowContext(
-        workflow_name=workflow_name or (lifecycle.name or "unnamed"),
-        lifecycle=lifecycle,
+    return Process(
+        process_name=process_name or (state_machine.name or "unnamed"),
+        state_machine=state_machine,
         catalog=catalog,
         role_directory=role_directory,
         grants=grants,
         backend=backend,
-        workflows_dir=workflows_dir,
+        workflow_dir=workflow_dir,
         agent_home=agent_home,
         agent_config=agent_config,
         agent_role=agent_role,
@@ -330,117 +330,117 @@ def _resolve_agent_path(agent_home: Path | None, value: str) -> Path | None:
 # postmortem, prioritization; a developer works on inner-loop, hotfix, etc.).
 # The agent's config should not pin them to a single workflow; instead the
 # tool discovers all workflows in the repo and routes operations by the
-# state-name uniqueness invariant (no state name appears in two lifecycles).
+# state-name uniqueness invariant (no state name appears in two workflows).
 #
-# The registry lazily loads each workflow's lifecycle + catalog. Queries
+# The registry lazily loads each workflow's workflow + catalog. Queries
 # that span all workflows (e.g., `list --role`) iterate the registry.
 # Per-issue operations resolve the workflow from the issue's current state.
 
 
 @dataclass
-class WorkflowRegistry:
+class Workflow:
     """Discovered workflows in a workflows directory, indexed by name and state.
 
-    Lazy-loaded: each workflow's lifecycle and catalog are parsed on first
+    Lazy-loaded: each workflow's workflow and catalog are parsed on first
     access (or all-at-once via `load_all`). The state-to-workflow index is
     built incrementally as workflows load.
     """
 
-    workflows_dir: Path
+    workflow_dir: Path
     agent_home: Path | None = None
     agent_config: dict[str, Any] = field(default_factory=dict)
-    backend: WorkflowBackend | None = None
+    backend: TrackerBackend | None = None
     grants_dir: Path | None = None
-    _contexts: dict[str, WorkflowContext] = field(default_factory=dict)
-    _state_to_workflow: dict[str, str] = field(default_factory=dict)
-    _discovered_workflows: list[str] | None = None
+    _contexts: dict[str, Process] = field(default_factory=dict)
+    _state_to_process: dict[str, str] = field(default_factory=dict)
+    _discovered_processes: list[str] | None = None
 
-    def discovered_workflows(self) -> list[str]:
+    def discovered_processes(self) -> list[str]:
         """List every workflow name discoverable in the workflows directory."""
-        if self._discovered_workflows is None:
-            self._discovered_workflows = _discover_workflows(self.workflows_dir)
-        return list(self._discovered_workflows)
+        if self._discovered_processes is None:
+            self._discovered_processes = _discover_processes(self.workflow_dir)
+        return list(self._discovered_processes)
 
-    def get_workflow(self, name: str) -> WorkflowContext:
+    def get_process(self, name: str) -> Process:
         """Load (or return cached) context for the named workflow."""
         if name in self._contexts:
             return self._contexts[name]
-        context = load_workflow(
-            workflow_name=name,
-            workflows_dir=self.workflows_dir,
+        context = load_process(
+            process_name=name,
+            workflow_dir=self.workflow_dir,
             grants_dir=self.grants_dir,
             backend=self.backend,
             agent_home=self.agent_home,
         )
         self._contexts[name] = context
         # Update state-to-workflow index.
-        for state_name in context.lifecycle.states:
-            self._state_to_workflow.setdefault(state_name, name)
+        for state_name in context.state_machine.states:
+            self._state_to_process.setdefault(state_name, name)
         return context
 
-    def find_workflow_for_state(self, state_name: str) -> str | None:
-        """Return the workflow name whose lifecycle contains the given state,
+    def find_process_for_state(self, state_name: str) -> str | None:
+        """Return the workflow name whose workflow contains the given state,
         or None if no workflow does. Loads workflows on demand to populate
         the index."""
-        if state_name in self._state_to_workflow:
-            return self._state_to_workflow[state_name]
+        if state_name in self._state_to_process:
+            return self._state_to_process[state_name]
         # Force-load all undiscovered workflows.
-        for name in self.discovered_workflows():
+        for name in self.discovered_processes():
             if name not in self._contexts:
                 try:
-                    self.get_workflow(name)
+                    self.get_process(name)
                 except (ConfigError, Exception):
                     logger.debug("Skipping malformed workflow %r during state lookup.", name)
                     continue
-                if state_name in self._state_to_workflow:
-                    return self._state_to_workflow[state_name]
+                if state_name in self._state_to_process:
+                    return self._state_to_process[state_name]
         return None
 
-    def load_all(self) -> dict[str, WorkflowContext]:
+    def load_all(self) -> dict[str, Process]:
         """Eagerly load every discovered workflow. Returns the full map."""
-        for name in self.discovered_workflows():
+        for name in self.discovered_processes():
             if name not in self._contexts:
                 try:
-                    self.get_workflow(name)
+                    self.get_process(name)
                 except (ConfigError, Exception) as exc:
                     logger.warning("Failed to load workflow %r: %s", name, exc)
         return dict(self._contexts)
 
 
-def _discover_workflows(workflows_dir: Path) -> list[str]:
-    """Scan a directory for `*-lifecycle.mermaid` and return workflow names."""
-    if not workflows_dir.is_dir():
+def _discover_processes(workflow_dir: Path) -> list[str]:
+    """Scan a directory for `*-states.json` and return process names."""
+    if not workflow_dir.is_dir():
         return []
     names: list[str] = []
-    for path in sorted(workflows_dir.glob("*-lifecycle.mermaid")):
+    for path in sorted(workflow_dir.glob("*-states.json")):
         stem = path.stem
-        if stem.endswith("-lifecycle"):
-            names.append(stem[: -len("-lifecycle")])
+        if stem.endswith("-states"):
+            names.append(stem[: -len("-states")])
     return names
 
 
 def build_registry(
     agent_home: Path | None = None,
-    workflows_dir: Path | None = None,
-    backend: WorkflowBackend | None = None,
+    workflow_dir: Path | None = None,
+    backend: TrackerBackend | None = None,
     grants_dir: Path | None = None,
-) -> WorkflowRegistry | None:
+) -> Workflow | None:
     """Build a registry for the current invocation context.
 
-    Returns None if no `workflows_dir` can be discovered — multi-workflow
+    Returns None if no `workflow_dir` can be discovered — multi-workflow
     queries aren't possible without a workflow source tree.
     """
     agent_home = agent_home or discover_agent_home()
     agent_config = load_agent_config(agent_home) if agent_home is not None else {}
-    workflows_dir = workflows_dir or discover_workflows_dir(
+    workflow_dir = workflow_dir or discover_workflows_dir(
         agent_home=agent_home, agent_config=agent_config
     )
-    if workflows_dir is None:
+    if workflow_dir is None:
         return None
     if grants_dir is None:
         grants_dir = discover_grants_dir(agent_home=agent_home, agent_config=agent_config)
-    return WorkflowRegistry(
-        workflows_dir=workflows_dir,
+    return Workflow(
+        workflow_dir=workflow_dir,
         agent_home=agent_home,
         agent_config=agent_config,
         backend=backend,

@@ -1,6 +1,6 @@
 """Planner tests — one parametrized test per framework operation.
 
-Builds minimal lifecycle + catalog fixtures inline; exercises each operation's
+Builds minimal workflow + catalog fixtures inline; exercises each operation's
 planner branch with valid inputs and asserts the MarkerChange shape.
 """
 
@@ -10,13 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from workflow.backends.base import WorkItemState
+from workflow.backends.base import IssueState
 from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
-from workflow.core.model.lifecycle import (
-    Lifecycle,
+from workflow.core.model.state_machine import (
     ReversibilityClass,
     State,
     StateClass,
+    StateMachine,
+    TerminalTaxonomy,
     Transition,
     TransitionType,
 )
@@ -31,9 +32,9 @@ from workflow.errors import OperationError
 # Fixtures
 
 
-def _build_lifecycle() -> Lifecycle:
-    lifecycle = Lifecycle(name="t")
-    lifecycle.states = {
+def _build_workflow() -> StateMachine:
+    workflow = StateMachine(name="t")
+    workflow.states = {
         "raw": State(name="raw", state_class=StateClass.RESTING),
         "refining": State(name="refining", state_class=StateClass.WORKING),
         "ready_for_dev": State(
@@ -53,7 +54,7 @@ def _build_lifecycle() -> Lifecycle:
         ),
         "implementing": State(name="implementing", state_class=StateClass.WORKING),
     }
-    lifecycle.transitions = [
+    workflow.transitions = [
         Transition(
             source="raw",
             destination="refining",
@@ -73,7 +74,7 @@ def _build_lifecycle() -> Lifecycle:
             is_gated=True,
         ),
     ]
-    return lifecycle
+    return workflow
 
 
 def _build_catalog() -> HCPCatalog:
@@ -108,158 +109,288 @@ def _build_catalog() -> HCPCatalog:
 
 
 def test_plan_advance() -> None:
-    lifecycle = _build_lifecycle()
-    state = WorkItemState(work_item_id="1", state="raw", agent_claim="pm")
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="raw", agent_claim="pm")
     plan = plan_operation(
         OperationRequest(
             operation=Operation.ADVANCE,
-            work_item_id="1",
+            issue_id="1",
             destination="refining",
         ),
         state,
-        lifecycle,
+        workflow,
     )
     assert plan.change.set_state == "refining"
     assert "state advance" in plan.audit_comment
 
 
 def test_plan_advance_unknown_destination_errors() -> None:
-    lifecycle = _build_lifecycle()
-    state = WorkItemState(work_item_id="1", state="raw", agent_claim="pm")
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="raw", agent_claim="pm")
     with pytest.raises(OperationError, match="No transition"):
         plan_operation(
             OperationRequest(
                 operation=Operation.ADVANCE,
-                work_item_id="1",
+                issue_id="1",
                 destination="not_a_real_state",
             ),
             state,
-            lifecycle,
+            workflow,
         )
 
 
 def test_plan_claim() -> None:
-    lifecycle = _build_lifecycle()
-    state = WorkItemState(work_item_id="1", state="raw", agent_claim=None)
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="raw", agent_claim=None)
     plan = plan_operation(
         OperationRequest(
             operation=Operation.CLAIM,
-            work_item_id="1",
+            issue_id="1",
             role="pm",
         ),
         state,
-        lifecycle,
+        workflow,
     )
     assert plan.change.set_agent_claim == "pm"
+    # Claim records the origin so `release` can return the issue here.
+    assert plan.change.set_wip_from == "raw"
+    # The single CLAIM transition out of `raw` is auto-picked → `refining`.
+    assert plan.change.set_state == "refining"
 
 
 def test_plan_claim_already_claimed_errors() -> None:
-    lifecycle = _build_lifecycle()
-    state = WorkItemState(work_item_id="1", state="raw", agent_claim="someone-else")
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="raw", agent_claim="someone-else")
     with pytest.raises(OperationError):
         plan_operation(
             OperationRequest(
                 operation=Operation.CLAIM,
-                work_item_id="1",
+                issue_id="1",
                 role="pm",
             ),
             state,
-            lifecycle,
+            workflow,
         )
 
 
 def test_plan_release() -> None:
-    lifecycle = _build_lifecycle()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim="pm")
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm", wip_from="raw")
     plan = plan_operation(
-        OperationRequest(operation=Operation.RELEASE, work_item_id="1"),
+        OperationRequest(operation=Operation.RELEASE, issue_id="1"),
         state,
-        lifecycle,
+        workflow,
     )
     assert plan.change.clear_agent_claim is True
+    assert plan.change.clear_wip_from is True
+    assert plan.change.set_state == "raw"
+
+
+def test_plan_release_without_wip_from_errors() -> None:
+    """A working state with no origin marker can't determine where to return."""
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm", wip_from=None)
+    with pytest.raises(OperationError, match="wip-from"):
+        plan_operation(
+            OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+            state,
+            workflow,
+        )
+
+
+def test_terminal_advance_closes_issue_as_completed() -> None:
+    """Advancing into a terminal-shipped state plans close_issue with the
+    `completed` reason. The backend will close the GitHub issue."""
+    workflow = _build_workflow()
+    workflow.transitions.append(
+        Transition(
+            source="implementing",
+            destination="merged",
+            label="developer ships",
+            transition_type=TransitionType.ROLE_ACTION,
+        )
+    )
+    workflow.states["merged"] = State(
+        name="merged",
+        state_class=StateClass.TERMINAL,
+        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
+        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        close_reason="completed",
+    )
+    state = IssueState(
+        issue_id="1", state="implementing", agent_claim="developer", wip_from="ready_for_dev"
+    )
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.ADVANCE, issue_id="1", destination="merged"
+        ),
+        state,
+        workflow,
+    )
+    assert plan.change.close_issue is True
+    assert plan.change.close_reason == "completed"
+
+
+def test_terminal_without_close_reason_does_not_close_issue() -> None:
+    """A terminal with no `close_reason` is a handoff-style exit — the work
+    continues elsewhere on another process's diagram, so the tracker's
+    issue stays open."""
+    workflow = _build_workflow()
+    workflow.transitions.append(
+        Transition(
+            source="implementing",
+            destination="bounced",
+            label="developer bounces",
+            transition_type=TransitionType.ROLE_ACTION,
+        )
+    )
+    workflow.states["bounced"] = State(
+        name="bounced",
+        state_class=StateClass.TERMINAL,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        terminal_taxonomy=TerminalTaxonomy.ITERATED,
+        # No close_reason — handoff terminal, issue stays open.
+    )
+    state = IssueState(
+        issue_id="1", state="implementing", agent_claim="developer", wip_from="ready_for_dev"
+    )
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.ADVANCE, issue_id="1", destination="bounced"
+        ),
+        state,
+        workflow,
+    )
+    assert plan.change.close_issue is False
+
+
+def test_abandoned_terminal_closes_as_not_planned() -> None:
+    """Abandoned/deduplicated/aborted terminals close with `not planned`."""
+    workflow = _build_workflow()
+    workflow.transitions.append(
+        Transition(
+            source="implementing",
+            destination="wont",
+            label="developer abandons",
+            transition_type=TransitionType.ROLE_ACTION,
+        )
+    )
+    workflow.states["wont"] = State(
+        name="wont",
+        state_class=StateClass.TERMINAL,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        terminal_taxonomy=TerminalTaxonomy.ABANDONED,
+        close_reason="not planned",
+    )
+    state = IssueState(
+        issue_id="1", state="implementing", agent_claim="developer", wip_from="ready_for_dev"
+    )
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.ADVANCE, issue_id="1", destination="wont"
+        ),
+        state,
+        workflow,
+    )
+    assert plan.change.close_issue is True
+    assert plan.change.close_reason == "not planned"
+
+
+def test_plan_release_with_drifted_wip_from_errors() -> None:
+    """If wip_from points at a state with no CLAIM transition to current, error."""
+    workflow = _build_workflow()
+    state = IssueState(
+        issue_id="1", state="refining", agent_claim="pm", wip_from="ready_for_dev"
+    )
+    with pytest.raises(OperationError, match="drifted"):
+        plan_operation(
+            OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+            state,
+            workflow,
+        )
 
 
 def test_plan_release_without_claim_errors() -> None:
-    lifecycle = _build_lifecycle()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim=None)
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="refining", agent_claim=None)
     with pytest.raises(OperationError):
         plan_operation(
-            OperationRequest(operation=Operation.RELEASE, work_item_id="1"),
+            OperationRequest(operation=Operation.RELEASE, issue_id="1"),
             state,
-            lifecycle,
+            workflow,
         )
 
 
 def test_plan_await_signal() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
     plan = plan_operation(
         OperationRequest(
             operation=Operation.AWAIT_SIGNAL,
-            work_item_id="1",
+            issue_id="1",
             gate="ready_for_dev",
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.set_awaiting_gate == "ready_for_dev"
 
 
 def test_plan_await_signal_unknown_gate_errors() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
     with pytest.raises(OperationError):
         plan_operation(
             OperationRequest(
                 operation=Operation.AWAIT_SIGNAL,
-                work_item_id="1",
+                issue_id="1",
                 gate="not-a-real-gate",
             ),
             state,
-            lifecycle,
+            workflow,
             catalog,
         )
 
 
 def test_plan_review() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
         awaiting_gate="ready_for_dev",
     )
     plan = plan_operation(
-        OperationRequest(operation=Operation.REVIEW, work_item_id="1"),
+        OperationRequest(operation=Operation.REVIEW, issue_id="1"),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.set_reviewing is True
 
 
 def test_plan_review_without_awaiting_errors() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
     with pytest.raises(OperationError):
         plan_operation(
-            OperationRequest(operation=Operation.REVIEW, work_item_id="1"),
+            OperationRequest(operation=Operation.REVIEW, issue_id="1"),
             state,
-            lifecycle,
+            workflow,
             catalog,
         )
 
 
 def test_plan_approve_binary() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
         awaiting_gate="ready_for_dev",
@@ -268,11 +399,11 @@ def test_plan_approve_binary() -> None:
     plan = plan_operation(
         OperationRequest(
             operation=Operation.APPROVE,
-            work_item_id="1",
+            issue_id="1",
             gate="ready_for_dev",
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.set_state == "ready_for_dev"
@@ -281,10 +412,10 @@ def test_plan_approve_binary() -> None:
 
 
 def test_plan_approve_verdict_requires_destination() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="implementing",
         agent_claim="po",
         awaiting_gate="experiment-verdict",
@@ -293,20 +424,20 @@ def test_plan_approve_verdict_requires_destination() -> None:
         plan_operation(
             OperationRequest(
                 operation=Operation.APPROVE,
-                work_item_id="1",
+                issue_id="1",
                 gate="experiment-verdict",
             ),
             state,
-            lifecycle,
+            workflow,
             catalog,
         )
 
 
 def test_plan_approve_verdict_with_destination() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="implementing",
         agent_claim="po",
         awaiting_gate="experiment-verdict",
@@ -314,12 +445,12 @@ def test_plan_approve_verdict_with_destination() -> None:
     plan = plan_operation(
         OperationRequest(
             operation=Operation.APPROVE,
-            work_item_id="1",
+            issue_id="1",
             gate="experiment-verdict",
             destination="promoted",
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.set_state == "promoted"
@@ -327,12 +458,12 @@ def test_plan_approve_verdict_with_destination() -> None:
 
 
 def test_plan_reject(tmp_path: Path) -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
     feedback = tmp_path / "feedback.md"
     feedback.write_text("**HITL: rejected**\n\nReason.\n", encoding="utf-8")
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
         awaiting_gate="ready_for_dev",
@@ -340,12 +471,12 @@ def test_plan_reject(tmp_path: Path) -> None:
     plan = plan_operation(
         OperationRequest(
             operation=Operation.REJECT,
-            work_item_id="1",
+            issue_id="1",
             gate="ready_for_dev",
-            body_path=str(feedback),
+            body_text=feedback.read_text(encoding="utf-8"),
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     # State unchanged; gate cleared; rejection recorded.
@@ -357,21 +488,21 @@ def test_plan_reject(tmp_path: Path) -> None:
 
 
 def test_plan_record_action() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
     )
     plan = plan_operation(
         OperationRequest(
             operation=Operation.RECORD_ACTION,
-            work_item_id="1",
+            issue_id="1",
             gate="ready_for_dev",
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.set_state == "ready_for_dev"
@@ -379,46 +510,46 @@ def test_plan_record_action() -> None:
 
 
 def test_plan_record_action_irreversible_errors() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="implementing", agent_claim="po")
+    state = IssueState(issue_id="1", state="implementing", agent_claim="po")
     with pytest.raises(OperationError, match="reversible destination"):
         plan_operation(
             OperationRequest(
                 operation=Operation.RECORD_ACTION,
-                work_item_id="1",
+                issue_id="1",
                 gate="experiment-verdict",
                 destination="promoted",
             ),
             state,
-            lifecycle,
+            workflow,
             catalog,
         )
 
 
 def test_plan_audit() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="ready_for_dev",
         agent_claim=None,
         audit_pending="ready_for_dev",
     )
     plan = plan_operation(
-        OperationRequest(operation=Operation.AUDIT, work_item_id="1"),
+        OperationRequest(operation=Operation.AUDIT, issue_id="1"),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.set_auditing is True
 
 
 def test_plan_check() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="ready_for_dev",
         agent_claim=None,
         audit_pending="ready_for_dev",
@@ -426,25 +557,25 @@ def test_plan_check() -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.CHECK,
-            work_item_id="1",
+            operation=Operation.CONFIRM,
+            issue_id="1",
             gate="ready_for_dev",
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.clear_audit_pending is True
-    assert plan.change.record_check == "ready_for_dev"
+    assert plan.change.record_confirm == "ready_for_dev"
 
 
 def test_plan_revoke(tmp_path: Path) -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
     concern = tmp_path / "concern.md"
     concern.write_text("**HITL: revoked**\n\nReason.\n", encoding="utf-8")
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="ready_for_dev",
         agent_claim=None,
         audit_pending="ready_for_dev",
@@ -453,12 +584,12 @@ def test_plan_revoke(tmp_path: Path) -> None:
     plan = plan_operation(
         OperationRequest(
             operation=Operation.REVOKE,
-            work_item_id="1",
+            issue_id="1",
             gate="ready_for_dev",
-            body_path=str(concern),
+            body_text=concern.read_text(encoding="utf-8"),
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
     assert plan.change.clear_audit_pending is True
@@ -467,33 +598,33 @@ def test_plan_revoke(tmp_path: Path) -> None:
 
 
 def test_plan_request_input(tmp_path: Path) -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     question = tmp_path / "q.md"
     question.write_text("**HITL: agent needs input**\n\nQuestion.\n", encoding="utf-8")
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
     )
     plan = plan_operation(
         OperationRequest(
             operation=Operation.REQUEST_INPUT,
-            work_item_id="1",
-            body_path=str(question),
+            issue_id="1",
+            body_text=question.read_text(encoding="utf-8"),
         ),
         state,
-        lifecycle,
+        workflow,
     )
     assert plan.change.set_awaiting_input is True
     assert plan.packet_body is not None
 
 
 def test_plan_request_input_blocks_during_catalogued_gate(tmp_path: Path) -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     q = tmp_path / "q.md"
     q.write_text("x", encoding="utf-8")
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
         awaiting_gate="ready_for_dev",
@@ -502,36 +633,36 @@ def test_plan_request_input_blocks_during_catalogued_gate(tmp_path: Path) -> Non
         plan_operation(
             OperationRequest(
                 operation=Operation.REQUEST_INPUT,
-                work_item_id="1",
-                body_path=str(q),
+                issue_id="1",
+                body_text=q.read_text(encoding="utf-8"),
             ),
             state,
-            lifecycle,
+            workflow,
         )
 
 
 def test_plan_advise() -> None:
-    lifecycle = _build_lifecycle()
-    state = WorkItemState(
-        work_item_id="1",
+    workflow = _build_workflow()
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
         awaiting_input=True,
     )
     plan = plan_operation(
-        OperationRequest(operation=Operation.ADVISE, work_item_id="1"),
+        OperationRequest(operation=Operation.ADVISE, issue_id="1"),
         state,
-        lifecycle,
+        workflow,
     )
     assert plan.change.set_advising is True
 
 
 def test_plan_resolve(tmp_path: Path) -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     response = tmp_path / "r.md"
     response.write_text("**HITL: resolved**\n\nx\n", encoding="utf-8")
-    state = WorkItemState(
-        work_item_id="1",
+    state = IssueState(
+        issue_id="1",
         state="refining",
         agent_claim="pm",
         awaiting_input=True,
@@ -539,15 +670,15 @@ def test_plan_resolve(tmp_path: Path) -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.RESOLVE,
-            work_item_id="1",
-            body_path=str(response),
+            operation=Operation.RESPOND,
+            issue_id="1",
+            body_text=response.read_text(encoding="utf-8"),
         ),
         state,
-        lifecycle,
+        workflow,
     )
     assert plan.change.set_awaiting_input is False
-    assert plan.change.record_resolution is True
+    assert plan.change.record_response is True
 
 
 # --------------------------------------------------------------------------- #
@@ -563,33 +694,38 @@ def test_plan_resolve(tmp_path: Path) -> None:
             lambda lc, cat, paths: (
                 OperationRequest(
                     operation=Operation.ADVANCE,
-                    work_item_id="1",
+                    issue_id="1",
                     destination="refining",
                 ),
-                WorkItemState(work_item_id="1", state="raw", agent_claim="pm"),
+                IssueState(issue_id="1", state="raw", agent_claim="pm"),
             ),
         ),
         (
             Operation.CLAIM,
             lambda lc, cat, paths: (
-                OperationRequest(operation=Operation.CLAIM, work_item_id="1", role="pm"),
-                WorkItemState(work_item_id="1", state="raw", agent_claim=None),
+                OperationRequest(operation=Operation.CLAIM, issue_id="1", role="pm"),
+                IssueState(issue_id="1", state="raw", agent_claim=None),
             ),
         ),
         (
             Operation.RELEASE,
             lambda lc, cat, paths: (
-                OperationRequest(operation=Operation.RELEASE, work_item_id="1"),
-                WorkItemState(work_item_id="1", state="refining", agent_claim="pm"),
+                OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+                IssueState(
+                    issue_id="1",
+                    state="refining",
+                    agent_claim="pm",
+                    wip_from="raw",
+                ),
             ),
         ),
     ],
 )
-def test_lifecycle_operations_parametrized(operation, builder, tmp_path: Path) -> None:
-    lifecycle = _build_lifecycle()
+def test_workflow_operations_parametrized(operation, builder, tmp_path: Path) -> None:
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    request, state = builder(lifecycle, catalog, tmp_path)
-    plan = plan_operation(request, state, lifecycle, catalog)
+    request, state = builder(workflow, catalog, tmp_path)
+    plan = plan_operation(request, state, workflow, catalog)
     assert plan.operation is operation
     assert plan.audit_comment
 
@@ -602,21 +738,21 @@ def test_lifecycle_operations_parametrized(operation, builder, tmp_path: Path) -
 def test_advance_on_block_gated_transition_dispatches_to_await_signal(
     tmp_path: Path,
 ) -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
     packet = tmp_path / "ready-packet.md"
     packet.write_text("acceptance criteria…", encoding="utf-8")
 
     plan = plan_operation(
         OperationRequest(
             operation=Operation.ADVANCE,
-            work_item_id="1",
+            issue_id="1",
             destination="ready_for_dev",
-            body_path=str(packet),
+            body_text=packet.read_text(encoding="utf-8"),
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
 
@@ -630,36 +766,36 @@ def test_advance_on_block_gated_transition_dispatches_to_await_signal(
 
 
 def test_advance_on_block_gated_transition_without_packet_errors() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
 
     with pytest.raises(OperationError, match="block level"):
         plan_operation(
             OperationRequest(
                 operation=Operation.ADVANCE,
-                work_item_id="1",
+                issue_id="1",
                 destination="ready_for_dev",
             ),
             state,
-            lifecycle,
+            workflow,
             catalog,
         )
 
 
 def test_advance_on_ungated_transition_changes_state() -> None:
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="raw", agent_claim="pm")
+    state = IssueState(issue_id="1", state="raw", agent_claim="pm")
 
     plan = plan_operation(
         OperationRequest(
             operation=Operation.ADVANCE,
-            work_item_id="1",
+            issue_id="1",
             destination="refining",
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
 
@@ -674,16 +810,16 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
 ) -> None:
     """Audit-gated dispatch — synthesize a reversible-destination HCP at default audit."""
     from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
-    from workflow.core.model.lifecycle import (
-        Lifecycle,
+    from workflow.core.model.state_machine import (
         ReversibilityClass,
         State,
         StateClass,
+        StateMachine,
         Transition,
     )
 
-    lifecycle = Lifecycle(name="t")
-    lifecycle.states = {
+    workflow = StateMachine(name="t")
+    workflow.states = {
         "working": State(name="working", state_class=StateClass.WORKING),
         "logged": State(
             name="logged",
@@ -691,7 +827,7 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
             reversibility=ReversibilityClass.REVERSIBLE_FAST,
         ),
     }
-    lifecycle.transitions = [
+    workflow.transitions = [
         Transition(
             source="working",
             destination="logged",
@@ -712,15 +848,15 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
         agent_prepares_path="log-template.md",
     )
 
-    state = WorkItemState(work_item_id="1", state="working", agent_claim="developer")
+    state = IssueState(issue_id="1", state="working", agent_claim="developer")
     plan = plan_operation(
         OperationRequest(
             operation=Operation.ADVANCE,
-            work_item_id="1",
+            issue_id="1",
             destination="logged",
         ),
         state,
-        lifecycle,
+        workflow,
         catalog,
     )
 
@@ -737,20 +873,20 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
 
 def test_claim_role_must_match_source_state_claim_role() -> None:
     """An agent with role X can't claim a state whose claim_role is Y."""
-    from workflow.core.model.lifecycle import (
-        Lifecycle,
+    from workflow.core.model.state_machine import (
         State,
         StateClass,
+        StateMachine,
         Transition,
         TransitionType,
     )
 
-    lifecycle = Lifecycle(name="t")
-    lifecycle.states = {
+    workflow = StateMachine(name="t")
+    workflow.states = {
         "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
         "refining": State(name="refining", state_class=StateClass.WORKING),
     }
-    lifecycle.transitions = [
+    workflow.transitions = [
         Transition(
             source="raw",
             destination="refining",
@@ -758,36 +894,36 @@ def test_claim_role_must_match_source_state_claim_role() -> None:
             transition_type=TransitionType.CLAIM,
         ),
     ]
-    state = WorkItemState(work_item_id="1", state="raw", agent_claim=None)
+    state = IssueState(issue_id="1", state="raw", agent_claim=None)
 
     with pytest.raises(OperationError, match="Role mismatch"):
         plan_operation(
             OperationRequest(
                 operation=Operation.CLAIM,
-                work_item_id="1",
+                issue_id="1",
                 role="developer",  # wrong role for this state
             ),
             state,
-            lifecycle,
+            workflow,
         )
 
 
 def test_claim_role_match_succeeds() -> None:
     """Claiming with the correct role passes validation."""
-    from workflow.core.model.lifecycle import (
-        Lifecycle,
+    from workflow.core.model.state_machine import (
         State,
         StateClass,
+        StateMachine,
         Transition,
         TransitionType,
     )
 
-    lifecycle = Lifecycle(name="t")
-    lifecycle.states = {
+    workflow = StateMachine(name="t")
+    workflow.states = {
         "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
         "refining": State(name="refining", state_class=StateClass.WORKING),
     }
-    lifecycle.transitions = [
+    workflow.transitions = [
         Transition(
             source="raw",
             destination="refining",
@@ -795,12 +931,12 @@ def test_claim_role_match_succeeds() -> None:
             transition_type=TransitionType.CLAIM,
         ),
     ]
-    state = WorkItemState(work_item_id="1", state="raw", agent_claim=None)
+    state = IssueState(issue_id="1", state="raw", agent_claim=None)
 
     plan = plan_operation(
-        OperationRequest(operation=Operation.CLAIM, work_item_id="1", role="pm"),
+        OperationRequest(operation=Operation.CLAIM, issue_id="1", role="pm"),
         state,
-        lifecycle,
+        workflow,
     )
     assert plan.change.set_agent_claim == "pm"
 
@@ -808,20 +944,20 @@ def test_claim_role_match_succeeds() -> None:
 def test_advance_to_gated_destination_requires_role_match() -> None:
     """Firing a catalogued HCP requires the actor's role to match
     the catalog row's triggering_role."""
-    lifecycle = _build_lifecycle()
+    workflow = _build_workflow()
     catalog = _build_catalog()
-    state = WorkItemState(work_item_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
 
     with pytest.raises(OperationError, match="Role mismatch"):
         plan_operation(
             OperationRequest(
                 operation=Operation.ADVANCE,
-                work_item_id="1",
+                issue_id="1",
                 destination="ready_for_dev",
                 actor="developer",  # wrong role; gate's triggering_role is {pm}
-                body_path=None,
+                body_text=None,
             ),
             state,
-            lifecycle,
+            workflow,
             catalog,
         )

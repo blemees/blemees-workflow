@@ -26,24 +26,24 @@ def test_help(capsys: pytest.CaptureFixture) -> None:
 
 
 def test_validate_against_shipped_workflows(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     """Validate iterates every workflow in the directory. The shipped tree
     predates HITL, so we expect either no findings or warnings — no errors."""
-    rc = cli(["--workflows-dir", str(workflows_dir), "validate"])
+    rc = cli(["--workflow-dir", str(workflow_dir), "validate"])
     assert rc in (0, 1)
     output = capsys.readouterr().out
     assert output  # non-empty
-    # At least one shipped workflow is reported.
-    assert "workflow:" in output
+    # At least one shipped process is reported.
+    assert "process:" in output
 
 
 def test_validate_json_output(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    rc = cli(["--json", "--workflows-dir", str(workflows_dir), "validate"])
+    rc = cli(["--json", "--workflow-dir", str(workflow_dir), "validate"])
     assert rc in (0, 1)
     output = capsys.readouterr().out
     payload = json.loads(output)
@@ -57,15 +57,15 @@ def test_validate_json_output(
 
 
 def test_advance_dry_run_does_not_call_backend(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     """Dry-run plans the operation without invoking the backend's mutating
-    methods. We stub `read_work_item` and ensure `apply_marker_change` is
+    methods. We stub `read_issue` and ensure `apply_marker_change` is
     never called."""
     with (
         mock.patch(
-            "workflow.backends.github.GitHubBackend.read_work_item",
+            "workflow.backends.github.GitHubBackend.read_issue",
             return_value=_fake_state(state_name="raw"),
         ) as read_mock,
         mock.patch(
@@ -77,8 +77,8 @@ def test_advance_dry_run_does_not_call_backend(
                 "--dry-run",
                 "--repo",
                 "owner/test",
-                "--workflows-dir",
-                str(workflows_dir),
+                "--workflow-dir",
+                str(workflow_dir),
                 "advance",
                 "--to",
                 "refining",
@@ -95,11 +95,11 @@ def test_advance_dry_run_does_not_call_backend(
 
 
 def test_advance_unknown_destination_errors_clean(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     with mock.patch(
-        "workflow.backends.github.GitHubBackend.read_work_item",
+        "workflow.backends.github.GitHubBackend.read_issue",
         return_value=_fake_state(state_name="raw"),
     ):
         rc = cli(
@@ -107,8 +107,8 @@ def test_advance_unknown_destination_errors_clean(
                 "--dry-run",
                 "--repo",
                 "owner/test",
-                "--workflows-dir",
-                str(workflows_dir),
+                "--workflow-dir",
+                str(workflow_dir),
                 "advance",
                 "--to",
                 "definitely_not_a_real_state",
@@ -193,13 +193,13 @@ def test_comment_dry_run_does_not_call_backend(
 
 
 def test_doctor_runs(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     cli(
         [
-            "--workflows-dir",
-            str(workflows_dir),
+            "--workflow-dir",
+            str(workflow_dir),
             "doctor",
         ]
     )
@@ -461,24 +461,24 @@ def test_init_json_output(
     assert payload["config_path"].endswith("config.json")
     assert payload["agent_home"] == str(tmp_path)
     # Both default subdirectories are reported in the JSON output.
-    assert payload["workflows_dir"].endswith(".workflow/workflows")
+    assert payload["workflow_dir"].endswith(".workflow/workflows")
     assert payload["grants_dir"].endswith(".workflow/trust-grants")
 
 
 def test_create_dry_run_does_not_call_backend(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     """`create --dry-run` should print the plan without invoking the
-    backend's create_work_item method."""
+    backend's create_issue method."""
     with mock.patch(
-        "workflow.backends.github.GitHubBackend.create_work_item",
+        "workflow.backends.github.GitHubBackend.create_issue",
     ) as create_mock:
         rc = cli(
             [
                 "--dry-run",
-                "--workflows-dir",
-                str(workflows_dir),
+                "--workflow-dir",
+                str(workflow_dir),
                 "create",
                 "--to",
                 "raw",
@@ -495,15 +495,15 @@ def test_create_dry_run_does_not_call_backend(
 
 
 def test_create_unknown_state_errors_clean(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     """An initial state not present in any workflow fails fast and clean."""
     rc = cli(
         [
             "--dry-run",
-            "--workflows-dir",
-            str(workflows_dir),
+            "--workflow-dir",
+            str(workflow_dir),
             "create",
             "--to",
             "definitely_not_a_real_state",
@@ -517,20 +517,20 @@ def test_create_unknown_state_errors_clean(
 
 
 def test_create_invokes_backend_with_resolved_state(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     """A successful create returns the new id from the backend."""
     with mock.patch(
-        "workflow.backends.github.GitHubBackend.create_work_item",
+        "workflow.backends.github.GitHubBackend.create_issue",
         return_value="123",
     ) as create_mock:
         rc = cli(
             [
                 "--repo",
                 "owner/test",
-                "--workflows-dir",
-                str(workflows_dir),
+                "--workflow-dir",
+                str(workflow_dir),
                 "create",
                 "--to",
                 "raw",
@@ -550,25 +550,46 @@ def test_create_invokes_backend_with_resolved_state(
     assert kwargs["body"] == "Steps to reproduce: ..."
     assert kwargs["extra_labels"] == []
     assert "#123" in output
-    # Workflow was auto-resolved to refinement (state:raw belongs to refinement).
+    # StateMachine was auto-resolved to refinement (state:raw belongs to refinement).
     assert "refinement" in output
 
 
-def test_create_with_claim_adds_wip_label(
-    workflows_dir: Path,
+def test_create_with_claim_creates_then_claims(
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """`--claim` passes wip:<agent-role> as an extra label to the backend."""
-    with mock.patch(
-        "workflow.backends.github.GitHubBackend.create_work_item",
-        return_value="99",
-    ) as create_mock:
+    """`--claim` creates the issue at the resting initial state, then runs
+    a proper `claim` operation against it. This sets `wip:<role>` and
+    `wip-from:<initial_state>` atomically with moving to the working state —
+    no resting-state-with-wip-label invariant violation."""
+    from workflow.backends.base import IssueState
+
+    raw_state = IssueState(issue_id="99", state="raw", agent_claim=None, wip_from=None)
+    refining_state = IssueState(
+        issue_id="99",
+        state="refining",
+        agent_claim="pm",
+        wip_from="raw",
+    )
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.create_issue",
+            return_value="99",
+        ) as create_mock,
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_issue",
+            side_effect=[raw_state, raw_state, refining_state],
+        ),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.apply_marker_change"
+        ) as apply_mock,
+    ):
         rc = cli(
             [
                 "--repo",
                 "owner/test",
-                "--workflows-dir",
-                str(workflows_dir),
+                "--workflow-dir",
+                str(workflow_dir),
                 "--agent-role",
                 "pm",
                 "create",
@@ -581,12 +602,19 @@ def test_create_with_claim_adds_wip_label(
         )
 
     assert rc == 0
-    kwargs = create_mock.call_args.kwargs
-    assert kwargs["extra_labels"] == ["wip:pm"]
+    # Step 1: create_issue called with no wip label (initial state is resting).
+    create_kwargs = create_mock.call_args.kwargs
+    assert create_kwargs["extra_labels"] == []
+    # Step 2: claim marker change followed — moves state and sets wip + wip-from.
+    assert apply_mock.called
+    change = apply_mock.call_args.args[1]
+    assert change.set_state == "refining"
+    assert change.set_agent_claim == "pm"
+    assert change.set_wip_from == "raw"
 
 
 def test_create_with_claim_but_no_agent_role_errors(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -596,8 +624,8 @@ def test_create_with_claim_but_no_agent_role_errors(
         [
             "--repo",
             "owner/test",
-            "--workflows-dir",
-            str(workflows_dir),
+            "--workflow-dir",
+            str(workflow_dir),
             "create",
             "--to",
             "raw",
@@ -612,7 +640,7 @@ def test_create_with_claim_but_no_agent_role_errors(
 
 
 def test_setup_labels_dry_run_enumerates_without_calling_backend(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     """Dry-run prints the label set without contacting the backend.
@@ -625,8 +653,8 @@ def test_setup_labels_dry_run_enumerates_without_calling_backend(
         rc = cli(
             [
                 "--dry-run",
-                "--workflows-dir",
-                str(workflows_dir),
+                "--workflow-dir",
+                str(workflow_dir),
                 "setup-labels",
             ]
         )
@@ -643,7 +671,7 @@ def test_setup_labels_dry_run_enumerates_without_calling_backend(
         "hitl:resolved",
     ):
         assert fixed in output, f"expected {fixed} in dry-run output"
-    # State labels from the shipped refinement lifecycle.
+    # State labels from the shipped refinement workflow.
     assert "state:raw" in output
     # wip labels from roles.json.
     assert "wip:pm" in output
@@ -651,15 +679,15 @@ def test_setup_labels_dry_run_enumerates_without_calling_backend(
 
 
 def test_setup_labels_json_dry_run(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     rc = cli(
         [
             "--json",
             "--dry-run",
-            "--workflows-dir",
-            str(workflows_dir),
+            "--workflow-dir",
+            str(workflow_dir),
             "setup-labels",
         ]
     )
@@ -674,7 +702,7 @@ def test_setup_labels_json_dry_run(
 
 
 def test_setup_labels_creates_only_missing(
-    workflows_dir: Path,
+    workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
     """A label that already exists on the repo is skipped; missing ones are
@@ -695,8 +723,8 @@ def test_setup_labels_creates_only_missing(
             [
                 "--repo",
                 "owner/test",
-                "--workflows-dir",
-                str(workflows_dir),
+                "--workflow-dir",
+                str(workflow_dir),
                 "setup-labels",
             ]
         )
@@ -717,10 +745,70 @@ def test_setup_labels_creates_only_missing(
 
 
 def _fake_state(state_name: str = "raw", agent_claim: str | None = None):
-    from workflow.backends.base import WorkItemState
+    from workflow.backends.base import IssueState
 
-    return WorkItemState(
-        work_item_id="123",
+    return IssueState(
+        issue_id="123",
         state=state_name,
         agent_claim=agent_claim,
     )
+
+
+def test_edit_invokes_backend_with_title_and_body(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """edit calls TrackerBackend.edit_issue with title and body content."""
+    from workflow.backends.base import IssueState
+
+    state_after = IssueState(issue_id="42", state="raw", agent_claim=None, wip_from=None)
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.edit_issue",
+        ) as edit_mock,
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_issue",
+            return_value=state_after,
+        ),
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "edit",
+                "--issue",
+                "42",
+                "--title",
+                "New title",
+                "--body",
+                "New body content",
+            ]
+        )
+
+    assert rc == 0
+    kwargs = edit_mock.call_args.kwargs
+    assert kwargs["title"] == "New title"
+    assert kwargs["body"] == "New body content"
+
+
+def test_edit_without_title_or_body_errors(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """edit refuses when neither --title nor --body / --body-from is given."""
+    rc = cli(
+        [
+            "--repo",
+            "owner/test",
+            "--workflow-dir",
+            str(workflow_dir),
+            "edit",
+            "--issue",
+            "42",
+        ]
+    )
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "at least one of --title" in err

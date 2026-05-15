@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from workflow.core.model.lifecycle import ReversibilityClass
+from workflow.core.model.state_machine import ReversibilityClass
 
 
 class HCPType(Enum):

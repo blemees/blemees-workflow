@@ -1,7 +1,7 @@
-"""check — human confirms an audit-level action post-hoc.
+"""resolve — human provides input for a recognized HITL moment.
 
-Per `hitl-principles.md` principle 11. Clears the audit queue for the work
-item; no remediation triggered.
+Per `hitl-principles.md` principles 5 and 11. Clears the awaiting-input
+marker; the agent reads the response and decides the next action.
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ from workflow.core.planner import Operation, OperationRequest
 def run(
     controller: Controller,
     *,
-    work_item_id: str,
-    gate: str,
+    issue_id: str,
+    body: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.CHECK,
-        work_item_id=work_item_id,
-        gate=gate,
+        operation=Operation.RESPOND,
+        issue_id=issue_id,
+        body_text=body,
         actor=actor,
     )
     return dispatch(controller, request)

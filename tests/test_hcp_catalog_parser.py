@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from workflow.core.model.hcp import HCPLevel, HCPType
-from workflow.core.model.lifecycle import ReversibilityClass
+from workflow.core.model.state_machine import ReversibilityClass
 from workflow.core.parser.hcp_catalog import parse_hcp_catalog
 from workflow.errors import ParseError
 

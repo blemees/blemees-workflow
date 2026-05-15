@@ -18,7 +18,7 @@ from workflow.core.planner import Operation, OperationRequest
 def run(
     controller: Controller,
     *,
-    work_item_id: str,
+    issue_id: str,
     gate: str,
     transition_label: str | None = None,
     destination: str | None = None,
@@ -26,7 +26,7 @@ def run(
 ) -> OperationResult:
     request = OperationRequest(
         operation=Operation.RECORD_ACTION,
-        work_item_id=work_item_id,
+        issue_id=issue_id,
         gate=gate,
         transition_label=transition_label,
         destination=destination,

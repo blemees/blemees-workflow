@@ -1,4 +1,4 @@
-"""release — agent gives up the claim on a work item.
+"""release — agent gives up the claim on an issue.
 
 Symmetric to `claim`. Used when the agent voluntarily steps off the item;
 the resting state is preserved (release is not an advance).
@@ -14,12 +14,12 @@ from workflow.core.planner import Operation, OperationRequest
 def run(
     controller: Controller,
     *,
-    work_item_id: str,
+    issue_id: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
         operation=Operation.RELEASE,
-        work_item_id=work_item_id,
+        issue_id=issue_id,
         actor=actor,
     )
     return dispatch(controller, request)

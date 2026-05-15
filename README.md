@@ -2,7 +2,7 @@
 
 The canonical operation mechanism for agent-driven state-machine workflows.
 
-This tool implements the framework defined in [`agent-workflow-skill-creator`](../../skills/operator/agent-workflow-skill-creator/). It reads the framework's authoritative artifacts — lifecycle `.mermaid` files, process docs with HCP catalog rows, trust grants, role mappings — and exposes them as a set of operations agents and humans invoke against work items on the backing issue tracker.
+This tool implements the framework defined in [`agent-workflow-skill-creator`](../../skills/operator/agent-workflow-skill-creator/). It reads the framework's authoritative artifacts — workflow `.mermaid` files, process docs with HCP catalog rows, trust grants, role mappings — and exposes them as a set of operations agents and humans invoke against work items on the backing issue tracker.
 
 The tool is backend-neutral by design. Today it ships with a GitHub backend; future backends (GitLab, Jira, Linear) implement the same operation surface against their respective trackers.
 
@@ -51,14 +51,14 @@ workflow setup-labels                                          # creates state:*
 workflow create --to raw --title "Fix login bug"               # open a new work item in an initial state
 workflow inbox                                                 # claimable items + actionable wip for the configured role
 workflow search --state ready_for_dev --awaiting-gate '*'      # arbitrary filter combinations
-workflow advance --to ready_for_dev --issue 123 --packet-from packet.md
+workflow advance --to ready_for_dev --issue 123 --body-from packet.md
 workflow approve --gate ready_for_dev --issue 123
-workflow reject --gate ready_for_dev --issue 123 --feedback-from feedback.md
-workflow request-input --issue 123 --question-from question.md
-workflow resolve --issue 123 --response-from response.md
+workflow reject --gate ready_for_dev --issue 123 --body-from feedback.md
+workflow request-input --issue 123 --body-from question.md
+workflow respond --issue 123 --body-from response.md
 ```
 
-The tool resolves the workflow's canonical artifacts at startup from a single `--workflows-dir` (or discovery), validates the contract, and dispatches the operation against the configured backend.
+The tool resolves the workflow's canonical artifacts at startup from a single `--workflow-dir` (or discovery), validates the contract, and dispatches the operation against the configured backend.
 
 ## The framework's eleven operations
 
@@ -66,7 +66,7 @@ Three groups. See `hitl-principles.md` § 5 for full semantics.
 
 **Lifecycle:**
 
-- `advance` — move a work item to a new state.
+- `advance` — move an issue to a new state.
 - `claim` — agent takes responsibility for a resting state.
 - `release` — agent gives up the claim.
 
@@ -81,14 +81,14 @@ Three groups. See `hitl-principles.md` § 5 for full semantics.
 
 - `record-action` — agent acts atomically; queue for retroactive review.
 - `audit` — human claims post-action audit.
-- `check` — human confirms post-hoc.
+- `confirm` — human confirms post-hoc.
 - `revoke` — human triggers remediation.
 
 **Recognized HITL:**
 
 - `request-input` — agent invokes for an unanticipated moment.
 - `advise` — human claims response.
-- `resolve` — human provides input.
+- `respond` — human provides input.
 
 ## Configuration
 
@@ -110,7 +110,7 @@ invocations. The recognized keys are:
 
 - `agent-role` (required for most operations) — the agent's role id, used
   as the default actor for `claim`, `list`, etc.
-- `workflows-dir` (optional) — override for where workflow files live;
+- `workflow-dir` (optional) — override for where workflow files live;
   relative paths anchored to the agent home. Defaults to
   `<agent-home>/.workflow/workflows/`.
 - `grants-dir` (optional) — override for the trust-grants directory;
@@ -145,7 +145,7 @@ first:
 | Agent role | `--agent-role` | `AGENT_ROLE` | `agent-role` | — |
 | Repo | `--repo` | `WORKFLOW_REPO` | — | parse `git remote get-url origin` |
 | Host (GHES) | `--host` | `WORKFLOW_GH_HOST` | — | parse `git remote get-url origin` |
-| Workflows dir | `--workflows-dir` | `WORKFLOWS_DIR` | `workflows-dir` | `<agent-home>/.workflow/workflows/` |
+| Workflows dir | `--workflow-dir` | `WORKFLOW_DIR` | `workflow-dir` | `<agent-home>/.workflow/workflows/` |
 | Grants dir | `--grants-dir` | `GRANTS_DIR` | `grants-dir` | `<agent-home>/.workflow/trust-grants/` |
 
 The config-key column is only populated for fields that legitimately belong
@@ -156,7 +156,7 @@ keys allow pointing at shared / team-wide locations without setting env
 vars per invocation.
 
 Config keys with relative path values are anchored to the agent home (so
-`{"workflows-dir": "../shared/workflows"}` resolves relative to the
+`{"workflow-dir": "../shared/workflows"}` resolves relative to the
 `.workflow/` parent).
 
 ### GitHub Enterprise Server (GHES)
@@ -194,9 +194,14 @@ If `--grants-dir` is not supplied, the tool defaults to `<agent-home>/.workflow/
 ### Canonical artifact file names
 
 The tool reads structured data only — no markdown parsing. Every file lives
-directly in the `--workflows-dir`:
+directly in the `--workflow-dir`:
 
-- `<workflow>-lifecycle.mermaid` — the state diagram (one per workflow).
+- `<workflow>-states.json` — the canonical state-machine definition (one
+  per workflow). The `<workflow>-states.mermaid` file alongside it is a
+  **generated** visualization regenerated by `workflow render-states`. See
+  [`docs/workflow-authoring.md`](docs/workflow-authoring.md) for the schema
+  and authoring rules, and [`docs/state-machine-principles.md`](docs/state-machine-principles.md)
+  for the design principles.
 - `<workflow>-hcps.json` — the HCP catalog (one per workflow; optional —
   absence means no catalogued HCPs).
 - `roles.json` — the role directory (shared across workflows).
@@ -226,7 +231,7 @@ directory might look like:
 ```json
 {
   "agent-role": "pm",
-  "workflows-dir": "../shared/workflows",
+  "workflow-dir": "../shared/workflows",
   "grants-dir": "../shared/grants/refinement"
 }
 ```
@@ -240,19 +245,19 @@ the agent home.
 workflow/
   cli.py                       # argparse / click entry — one sub-command per operation
   core/
-    model/                     # dataclasses: Lifecycle, State, Transition, HCP, TrustGrant, Role
+    model/                     # dataclasses: StateMachine, State, Transition, HCP, TrustGrant, Role
     parser/                    # mermaid, process doc, trust grant, roles parsers
     validator.py               # cross-reference checks + static rules
     planner.py                 # operation → marker change set
     controller.py              # operation orchestration
     operations/                # one module per framework operation
   backends/
-    base.py                    # WorkflowBackend protocol
+    base.py                    # TrackerBackend protocol
     github.py                  # GitHub implementation (uses gh CLI)
 tests/
 ```
 
-The core is backend-agnostic. The `backends/` layer is the only place that talks to a specific tracker. To support a new backend, implement the `WorkflowBackend` protocol; nothing in `core/` changes.
+The core is backend-agnostic. The `backends/` layer is the only place that talks to a specific tracker. To support a new backend, implement the `TrackerBackend` protocol; nothing in `core/` changes.
 
 ## Development
 

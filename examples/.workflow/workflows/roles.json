@@ -1,0 +1,18 @@
+{
+  "roles": {
+    "pm": {
+      "name": "Product Manager",
+      "responsibility": "Owns refinement; turns raw issues into ready-for-dev tickets or closes them as won't-fix",
+      "processes": ["refinement (owner)"],
+      "wakes_on": ["new raw issues", "bounce-backs from developer"],
+      "does_not": ["decide architecture", "implement tickets"]
+    },
+    "developer": {
+      "name": "Developer",
+      "responsibility": "Picks up ready tickets, implements them, and lands them on main",
+      "processes": ["inner loop (owner)"],
+      "wakes_on": ["new picked_up tickets", "revisions requested on staged PRs"],
+      "does_not": ["scope tickets", "decide whether a bug is won't-fix"]
+    }
+  }
+}

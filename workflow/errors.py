@@ -25,7 +25,7 @@ class BackendError(WorkflowError):
     """Raised when a backend invocation fails.
 
     Examples: `gh` CLI returns a non-zero exit code, the API rejects the
-    label change, the work item is unreadable. Backend-specific causes are
+    label change, the issue is unreadable. Backend-specific causes are
     wrapped in this exception.
     """
 
@@ -33,7 +33,7 @@ class BackendError(WorkflowError):
 class ConfigError(WorkflowError):
     """Raised when artifact resolution or configuration loading fails.
 
-    Examples: a lifecycle file referenced via CLI doesn't exist; the
+    Examples: a workflow file referenced via CLI doesn't exist; the
     workflow repo root cannot be discovered; a trust grant directory is
     malformed at the directory level.
     """

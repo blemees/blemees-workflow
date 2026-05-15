@@ -1,0 +1,33 @@
+{
+  "process": "inner-loop",
+  "hcps": [
+    {
+      "gate_name": "merge_to_main",
+      "transition": {
+        "source": "merging",
+        "destinations": ["merged"]
+      },
+      "triggering_role": "developer",
+      "type": "judgment",
+      "reversibility": "reversible-slow",
+      "allowed_levels": ["block", "audit"],
+      "default_level": "block",
+      "agent_prepares": "merge-packet-template.md",
+      "rationale": "Code review is the canonical pre-merge gate. Reversible-slow (revert PR is possible but disruptive), so block-by-default. Teams with strong CI and high autonomy can earn audit via trust grant."
+    },
+    {
+      "gate_name": "bounce_back",
+      "transition": {
+        "source": "implementing",
+        "destinations": ["bounced_back"]
+      },
+      "triggering_role": "developer",
+      "type": "judgment",
+      "reversibility": "reversible-fast",
+      "allowed_levels": ["block", "audit"],
+      "default_level": "audit",
+      "agent_prepares": "bounce-back-note-template.md",
+      "rationale": "When the developer judges that the refined packet is wrong, kick it back. Reversible-fast (PM can immediately re-refine) so audit-by-default. The PM reviews retroactively to catch bounce-back patterns."
+    }
+  ]
+}

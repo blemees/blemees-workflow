@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 
-from workflow.backends.base import MarkerChange, WorkItemFilters
+from workflow.backends.base import IssueFilters, MarkerChange
 from workflow.backends.github import GitHubBackend
 from workflow.errors import BackendError
 
@@ -30,7 +30,7 @@ def _proc(stdout: str = "", returncode: int = 0, stderr: str = "") -> mock.Mock:
     return m
 
 
-def test_create_work_item_invokes_gh_issue_create_with_state_label() -> None:
+def test_create_issue_invokes_gh_issue_create_with_state_label() -> None:
     backend = GitHubBackend(repo="owner/repo")
     # gh issue create prints the URL of the new issue on stdout.
     new_issue_url = "https://github.com/owner/repo/issues/42\n"
@@ -43,7 +43,7 @@ def test_create_work_item_invokes_gh_issue_create_with_state_label() -> None:
         "workflow.backends.github.subprocess.run",
         side_effect=_fake_run_factory(responses),
     ) as patched:
-        new_id = backend.create_work_item(
+        new_id = backend.create_issue(
             title="Fix the login bug",
             body="Steps to reproduce: ...",
             state="raw",
@@ -61,7 +61,7 @@ def test_create_work_item_invokes_gh_issue_create_with_state_label() -> None:
     assert "state:raw" in label_val
 
 
-def test_create_work_item_with_claim_adds_wip_label() -> None:
+def test_create_issue_with_claim_adds_wip_label() -> None:
     backend = GitHubBackend(repo="owner/repo")
     # Two ensure_label calls (state:raw, wip:pm) then gh issue create.
     responses = [
@@ -73,7 +73,7 @@ def test_create_work_item_with_claim_adds_wip_label() -> None:
         "workflow.backends.github.subprocess.run",
         side_effect=_fake_run_factory(responses),
     ) as patched:
-        new_id = backend.create_work_item(
+        new_id = backend.create_issue(
             title="New thing",
             body="",
             state="raw",
@@ -88,7 +88,7 @@ def test_create_work_item_with_claim_adds_wip_label() -> None:
     assert "wip:pm" in label_val
 
 
-def test_create_work_item_raises_on_unexpected_gh_output() -> None:
+def test_create_issue_raises_on_unexpected_gh_output() -> None:
     backend = GitHubBackend(repo="owner/repo")
     # gh succeeded but returned nothing parseable.
     responses = [
@@ -102,10 +102,10 @@ def test_create_work_item_raises_on_unexpected_gh_output() -> None:
         ),
         pytest.raises(BackendError),
     ):
-        backend.create_work_item(title="X", body="", state="raw")
+        backend.create_issue(title="X", body="", state="raw")
 
 
-def test_read_work_item_translates_labels() -> None:
+def test_read_issue_translates_labels() -> None:
     backend = GitHubBackend(repo="owner/repo")
     issue_payload = {
         "number": 1,
@@ -123,7 +123,7 @@ def test_read_work_item_translates_labels() -> None:
         "workflow.backends.github.subprocess.run",
         return_value=_proc(stdout=json.dumps(issue_payload)),
     ) as patched:
-        state = backend.read_work_item("1")
+        state = backend.read_issue("1")
 
     assert state.state == "refining"
     assert state.agent_claim == "pm"
@@ -277,7 +277,7 @@ def test_resolve_role_returns_none_by_default() -> None:
     assert backend.resolve_role("pm") is None
 
 
-def test_list_work_items_translates_filters_to_label_flags() -> None:
+def test_list_issues_translates_filters_to_label_flags() -> None:
     backend = GitHubBackend(repo="owner/repo")
     fake_response = [
         {
@@ -293,8 +293,8 @@ def test_list_work_items_translates_filters_to_label_flags() -> None:
         "workflow.backends.github.subprocess.run",
         return_value=_proc(stdout=json.dumps(fake_response)),
     ) as patched:
-        results = backend.list_work_items(
-            WorkItemFilters(state="refining", claim_role="pm", limit=20)
+        results = backend.list_issues(
+            IssueFilters(state="refining", claim_role="pm", limit=20)
         )
 
     cmd = patched.call_args[0][0]
@@ -308,15 +308,15 @@ def test_list_work_items_translates_filters_to_label_flags() -> None:
     # Limit is respected.
     assert "--limit" in cmd
     assert cmd[cmd.index("--limit") + 1] == "20"
-    # Result is parsed into WorkItemState with the title in extras.
+    # Result is parsed into IssueState with the title in extras.
     assert len(results) == 1
-    assert results[0].work_item_id == "7"
+    assert results[0].issue_id == "7"
     assert results[0].state == "refining"
     assert results[0].agent_claim == "pm"
     assert results[0].extras.get("title") == "Some issue"
 
 
-def test_list_work_items_wildcard_awaiting_post_filters() -> None:
+def test_list_issues_wildcard_awaiting_post_filters() -> None:
     """`--awaiting-gate '*'` can't be expressed in a single gh label filter;
     the backend fetches and post-filters in Python."""
     backend = GitHubBackend(repo="owner/repo")
@@ -339,21 +339,21 @@ def test_list_work_items_wildcard_awaiting_post_filters() -> None:
         "workflow.backends.github.subprocess.run",
         return_value=_proc(stdout=json.dumps(fake_response)),
     ):
-        results = backend.list_work_items(WorkItemFilters(awaiting_gate="*"))
+        results = backend.list_issues(IssueFilters(awaiting_gate="*"))
 
     # Only the one with an awaiting marker comes through.
     assert len(results) == 1
-    assert results[0].work_item_id == "1"
+    assert results[0].issue_id == "1"
     assert results[0].awaiting_gate == "ready_for_dev"
 
 
-def test_list_work_items_returns_empty_for_no_matches() -> None:
+def test_list_issues_returns_empty_for_no_matches() -> None:
     backend = GitHubBackend(repo="owner/repo")
     with mock.patch(
         "workflow.backends.github.subprocess.run",
         return_value=_proc(stdout="[]"),
     ):
-        results = backend.list_work_items(WorkItemFilters(state="refining"))
+        results = backend.list_issues(IssueFilters(state="refining"))
     assert results == []
 
 
@@ -362,31 +362,31 @@ def test_list_work_items_returns_empty_for_no_matches() -> None:
 # protocol; mocking subprocess.run lets us exercise it end-to-end).
 
 
-def _fake_registry(lifecycle, name="test"):
-    """Build a mock registry that returns the given lifecycle from get_workflow."""
+def _fake_registry(workflow, name="test"):
+    """Build a mock registry that returns the given workflow from get_process."""
     registry = mock.Mock()
-    registry.discovered_workflows.return_value = [name]
-    registry.get_workflow.return_value = mock.Mock(lifecycle=lifecycle, catalog=None)
+    registry.discovered_processes.return_value = [name]
+    registry.get_process.return_value = mock.Mock(state_machine=workflow, catalog=None)
     return registry
 
 
 def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
     from workflow.cli import _list_for_role
-    from workflow.core.model.lifecycle import (
-        Lifecycle,
+    from workflow.core.model.state_machine import (
         State,
         StateClass,
+        StateMachine,
         Transition,
         TransitionType,
     )
 
-    lifecycle = Lifecycle(name="t")
-    lifecycle.states = {
+    workflow = StateMachine(name="t")
+    workflow.states = {
         # `claim_role` is the structured signal that 'raw' is in pm's inbox.
         "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
         "refining": State(name="refining", state_class=StateClass.WORKING),
     }
-    lifecycle.transitions = [
+    workflow.transitions = [
         Transition(
             source="raw",
             destination="refining",
@@ -427,11 +427,11 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
         },
     ]
 
-    # Mock build_registry to return a registry with our test lifecycle.
+    # Mock build_registry to return a registry with our test workflow.
     with (
         mock.patch(
             "workflow.config.build_registry",
-            return_value=_fake_registry(lifecycle),
+            return_value=_fake_registry(workflow),
         ),
         mock.patch(
             "workflow.backends.github.subprocess.run",
@@ -450,7 +450,7 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
             limit=50,
         )
 
-    ids = sorted(item.work_item_id for item in results)
+    ids = sorted(item.issue_id for item in results)
     # 10 (raw, unclaimed): in inbox.
     # 20 (wip:pm, no HITL): actionable wip.
     # 11 (wip:reviewer): excluded — wrong claim role.
@@ -460,22 +460,22 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
 
 def test_list_for_role_no_inbox_states_when_no_claim_role_matches() -> None:
     """If no state's `claim_role` matches the queried role, the role has no
-    inbox in this lifecycle — only the wip filter contributes."""
+    inbox in this workflow — only the wip filter contributes."""
     from workflow.cli import _list_for_role
-    from workflow.core.model.lifecycle import (
-        Lifecycle,
+    from workflow.core.model.state_machine import (
         State,
         StateClass,
+        StateMachine,
         Transition,
         TransitionType,
     )
 
-    lifecycle = Lifecycle(name="t")
-    lifecycle.states = {
+    workflow = StateMachine(name="t")
+    workflow.states = {
         # claim_role is pm; developer queries get nothing from the inbox.
         "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
     }
-    lifecycle.transitions = [
+    workflow.transitions = [
         Transition(
             source="raw",
             destination="refining",
@@ -488,7 +488,7 @@ def test_list_for_role_no_inbox_states_when_no_claim_role_matches() -> None:
     with (
         mock.patch(
             "workflow.config.build_registry",
-            return_value=_fake_registry(lifecycle),
+            return_value=_fake_registry(workflow),
         ),
         mock.patch(
             "workflow.backends.github.subprocess.run",
@@ -507,17 +507,16 @@ def test_list_for_role_no_inbox_states_when_no_claim_role_matches() -> None:
     assert results == []
 
 
-def test_registry_discovers_all_workflows(workflows_dir) -> None:
-    """The registry finds every `*-lifecycle.mermaid` in the workflows dir."""
+def test_registry_discovers_all_workflows(workflow_dir) -> None:
+    """The registry finds every `*-states.json` in the workflows dir."""
     from workflow.config import build_registry
 
-    r = build_registry(workflows_dir=workflows_dir)
+    r = build_registry(workflow_dir=workflow_dir)
     assert r is not None
-    names = r.discovered_workflows()
-    # The repo currently ships at least these workflows.
+    names = r.discovered_processes()
+    # The example ships refinement + inner-loop.
     assert "refinement" in names
     assert "inner-loop" in names
-    assert "experimentation" in names
 
 
 def test_gh_invocation_passes_through_host_as_env_var() -> None:
@@ -528,7 +527,7 @@ def test_gh_invocation_passes_through_host_as_env_var() -> None:
         "workflow.backends.github.subprocess.run",
         return_value=_proc(stdout=json.dumps({"number": 1, "labels": []})),
     ) as patched:
-        backend.read_work_item("1")
+        backend.read_issue("1")
 
     _, kwargs = patched.call_args
     env = kwargs.get("env")
@@ -547,7 +546,7 @@ def test_gh_invocation_inherits_env_when_no_host_set() -> None:
         "workflow.backends.github.subprocess.run",
         return_value=_proc(stdout=json.dumps({"number": 1, "labels": []})),
     ) as patched:
-        backend.read_work_item("1")
+        backend.read_issue("1")
 
     _, kwargs = patched.call_args
     # env=None means the subprocess inherits the parent's environment intact.
@@ -736,17 +735,17 @@ def test_ensure_label_handles_already_exists_from_gh() -> None:
     assert "state:raw" in backend._known_labels
 
 
-def test_registry_find_workflow_for_state(workflows_dir) -> None:
-    """find_workflow_for_state resolves a state to its owning workflow.
+def test_registry_find_workflow_for_state(workflow_dir) -> None:
+    """find_process_for_state resolves a state to its owning workflow.
 
     The framework's state-name uniqueness invariant means each state belongs
     to exactly one workflow."""
     from workflow.config import build_registry
 
-    r = build_registry(workflows_dir=workflows_dir)
+    r = build_registry(workflow_dir=workflow_dir)
     assert r is not None
     # 'refining' is a refinement-workflow state.
-    found = r.find_workflow_for_state("refining")
+    found = r.find_process_for_state("refining")
     assert found == "refinement", f"expected refinement, got {found!r}"
 
 
@@ -757,19 +756,19 @@ def test_discover_workflows_dir_uses_agent_home(tmp_path) -> None:
     agent_home = tmp_path / "agent"
     agent_workflows = agent_home / ".workflow" / "workflows"
     agent_workflows.mkdir(parents=True)
-    (agent_workflows / "stub-lifecycle.mermaid").write_text("stateDiagram-v2\n")
+    (agent_workflows / "stub-states.mermaid").write_text("stateDiagram-v2\n")
 
     found = discover_workflows_dir(agent_home=agent_home)
     assert found == agent_workflows
 
 
 def test_discover_workflows_dir_returns_none_without_agent_or_env(tmp_path, monkeypatch) -> None:
-    """Without WORKFLOWS_DIR env and without an agent-home/.workflow/workflows/
+    """Without WORKFLOW_DIR env and without an agent-home/.workflow/workflows/
     directory, discovery returns None. There's no cwd walk-up fallback —
     workflows are agent-scoped, not checkout-scoped."""
     from workflow.config import discover_workflows_dir
 
-    monkeypatch.delenv("WORKFLOWS_DIR", raising=False)
+    monkeypatch.delenv("WORKFLOW_DIR", raising=False)
 
     # Agent home with no workflows/ subdir.
     agent_home = tmp_path / "agent"
@@ -781,11 +780,11 @@ def test_discover_workflows_dir_returns_none_without_agent_or_env(tmp_path, monk
 
 
 def test_discover_workflows_dir_honors_config_key(tmp_path, monkeypatch) -> None:
-    """The `workflows-dir` key in agent config wins over the default
+    """The `workflow-dir` key in agent config wins over the default
     `<agent-home>/.workflow/workflows/` location."""
     from workflow.config import discover_workflows_dir
 
-    monkeypatch.delenv("WORKFLOWS_DIR", raising=False)
+    monkeypatch.delenv("WORKFLOW_DIR", raising=False)
 
     agent_home = tmp_path / "agent"
     # The default location also exists (would be picked up otherwise).
@@ -794,7 +793,7 @@ def test_discover_workflows_dir_honors_config_key(tmp_path, monkeypatch) -> None
     # But config points elsewhere.
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    config = {"workflows-dir": str(elsewhere)}
+    config = {"workflow-dir": str(elsewhere)}
 
     found = discover_workflows_dir(agent_home=agent_home, agent_config=config)
     assert found == elsewhere
@@ -804,12 +803,12 @@ def test_discover_workflows_dir_resolves_relative_config_path(tmp_path, monkeypa
     """Relative paths in the config key are anchored to the agent home."""
     from workflow.config import discover_workflows_dir
 
-    monkeypatch.delenv("WORKFLOWS_DIR", raising=False)
+    monkeypatch.delenv("WORKFLOW_DIR", raising=False)
 
     agent_home = tmp_path / "agent"
     target = agent_home / "shared" / "workflows"
     target.mkdir(parents=True)
-    config = {"workflows-dir": "shared/workflows"}
+    config = {"workflow-dir": "shared/workflows"}
 
     found = discover_workflows_dir(agent_home=agent_home, agent_config=config)
     assert found == target.resolve()
@@ -851,7 +850,7 @@ def test_discover_grants_dir_env_var_wins_over_config(tmp_path, monkeypatch) -> 
 
 
 def test_discover_workflows_dir_respects_env_var(tmp_path, monkeypatch) -> None:
-    """WORKFLOWS_DIR env var beats agent-home discovery."""
+    """WORKFLOW_DIR env var beats agent-home discovery."""
     from workflow.config import discover_workflows_dir
 
     # Set up an agent-home workflows dir (would be discovered if env unset).
@@ -861,7 +860,7 @@ def test_discover_workflows_dir_respects_env_var(tmp_path, monkeypatch) -> None:
     # And a separate env-pointed dir.
     env_dir = tmp_path / "elsewhere"
     env_dir.mkdir()
-    monkeypatch.setenv("WORKFLOWS_DIR", str(env_dir))
+    monkeypatch.setenv("WORKFLOW_DIR", str(env_dir))
 
     found = discover_workflows_dir(agent_home=agent_home)
     assert found == env_dir.resolve()

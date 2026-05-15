@@ -48,20 +48,8 @@ def test_parse_roles_directory() -> None:
 
 def test_parse_real_roles_file(roles_path: Path) -> None:
     directory = parse_role_directory(roles_path)
-    # Every workflow's role must be present.
-    expected = {
-        "product-owner",
-        "pm",
-        "architect",
-        "designer",
-        "security",
-        "developer",
-        "reviewer",
-        "qa",
-        "release-manager",
-        "incident-commander",
-        "responder",
-    }
+    # The example role directory ships the two roles its workflows reference.
+    expected = {"pm", "developer"}
     assert expected <= set(directory.roles.keys())
 
 

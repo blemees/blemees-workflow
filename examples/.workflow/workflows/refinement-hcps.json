@@ -1,0 +1,33 @@
+{
+  "process": "refinement",
+  "hcps": [
+    {
+      "gate_name": "ready_for_dev",
+      "transition": {
+        "source": "refining",
+        "destinations": ["ready_for_dev"]
+      },
+      "triggering_role": "pm",
+      "type": "judgment",
+      "reversibility": "reversible-slow",
+      "allowed_levels": ["block", "audit"],
+      "default_level": "block",
+      "agent_prepares": "ready-packet-template.md",
+      "rationale": "PM judges whether the ticket is well-scoped enough to hand to a developer. Reversible (the dev can bounce it back) but slow (work has started), so block-by-default until a team earns audit via trust grant."
+    },
+    {
+      "gate_name": "wont_fix",
+      "transition": {
+        "source": "refining",
+        "destinations": ["wont_fix"]
+      },
+      "triggering_role": "pm",
+      "type": "judgment",
+      "reversibility": "reversible-fast",
+      "allowed_levels": ["block", "audit"],
+      "default_level": "audit",
+      "agent_prepares": "wont-fix-note-template.md",
+      "rationale": "Low-stakes triage call; closing a wont-fix is reversible-fast (reopen the issue), so audit-by-default. Teams who want every wont-fix to pause for review can tighten back to block via trust grant."
+    }
+  ]
+}

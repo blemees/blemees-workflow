@@ -1,25 +1,25 @@
 """Core data model — dataclasses produced by parsers, consumed by validator and operations.
 
-Re-exports the public types so callers can `from workflow.core.model import Lifecycle`
+Re-exports the public types so callers can `from workflow.core.model import StateMachine`
 without picking specific submodules.
 """
 
 from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
-from workflow.core.model.lifecycle import (
-    Lifecycle,
+from workflow.core.model.role import Role, RoleDirectory
+from workflow.core.model.state_machine import (
     ReversibilityClass,
     State,
     StateClass,
+    StateMachine,
     TerminalTaxonomy,
     Transition,
     TransitionType,
 )
-from workflow.core.model.role import Role, RoleDirectory
 from workflow.core.model.trust_grant import Evidence, TrustGrant, TrustGrantParameters
 
 __all__ = [
-    # Lifecycle
-    "Lifecycle",
+    # StateMachine
+    "StateMachine",
     "ReversibilityClass",
     "State",
     "StateClass",

@@ -1,4 +1,4 @@
-"""Eleven framework operations + the three lifecycle helpers.
+"""Eleven framework operations + the three workflow helpers.
 
 Each submodule exposes a `run(request, controller) -> OperationResult`
 function that constructs the planner request (if needed) and dispatches to
@@ -12,30 +12,30 @@ from workflow.core.operations import (
     approve,
     audit,
     await_signal,
-    check,
     claim,
+    confirm,
     record_action,
     reject,
     release,
     request_input,
-    resolve,
+    respond,
     review,
     revoke,
 )
 
 __all__ = [
     "advance",
+    "advise",
     "approve",
     "audit",
-    "advise",
     "await_signal",
-    "check",
     "claim",
+    "confirm",
     "record_action",
     "reject",
     "release",
     "request_input",
-    "resolve",
+    "respond",
     "review",
     "revoke",
 ]

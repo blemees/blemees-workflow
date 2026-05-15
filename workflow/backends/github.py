@@ -1,4 +1,4 @@
-"""GitHub backend — implements the `WorkflowBackend` protocol via the `gh` CLI.
+"""GitHub backend — implements the `TrackerBackend` protocol via the `gh` CLI.
 
 Per `backends/github-encoding.md`:
 
@@ -24,7 +24,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from workflow.backends.base import MarkerChange, WorkItemFilters, WorkItemState
+from workflow.backends.base import IssueFilters, IssueState, MarkerChange
 from workflow.errors import BackendError
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 _LABEL_COLORS = {
     "state": "1f6feb",  # blue
     "wip": "fbca04",  # yellow
+    "wip-from": "fef2c0",  # pale yellow — adjacent to wip
     "hitl": "8957e5",  # purple
 }
 
@@ -163,8 +164,8 @@ class GitHubBackend:
 
     # ----- backend protocol -----
 
-    def list_work_items(self, filters: WorkItemFilters) -> list[WorkItemState]:
-        """List work items by translating filters to `gh issue list` flags.
+    def list_issues(self, filters: IssueFilters) -> list[IssueState]:
+        """List issues by translating filters to `gh issue list` flags.
 
         The translation:
 
@@ -175,7 +176,7 @@ class GitHubBackend:
         - `filters.awaiting_input` (True → `--label hitl:awaiting-input`; False → exclude)
         - `filters.limit` → `--limit N`
 
-        Returns `WorkItemState` objects derived from each result's labels. For
+        Returns `IssueState` objects derived from each result's labels. For
         wildcard awaiting / audit filters that `gh` can't express with a single
         label match, the backend filters in Python after fetching.
         """
@@ -207,7 +208,7 @@ class GitHubBackend:
         except json.JSONDecodeError as exc:
             raise BackendError(f"gh returned non-JSON for issue list: {exc}") from exc
 
-        results: list[WorkItemState] = []
+        results: list[IssueState] = []
         for entry in data:
             number = str(entry.get("number", ""))
             labels = [lbl.get("name", "") for lbl in (entry.get("labels") or [])]
@@ -221,7 +222,7 @@ class GitHubBackend:
             if filters.awaiting_input is False and state.awaiting_input:
                 continue
 
-            # Title isn't on WorkItemState; we stash it in `extras` so the CLI
+            # Title isn't on IssueState; we stash it in `extras` so the CLI
             # can display it without re-fetching. `extras` is a dict (mutable
             # even on the frozen dataclass).
             if entry.get("title"):
@@ -230,7 +231,7 @@ class GitHubBackend:
 
         return results
 
-    def create_work_item(
+    def create_issue(
         self,
         title: str,
         body: str,
@@ -298,11 +299,11 @@ class GitHubBackend:
             )
         return url.rsplit("/", 1)[-1]
 
-    def read_work_item(self, work_item_id: str) -> WorkItemState:
+    def read_issue(self, issue_id: str) -> IssueState:
         result = self._gh(
             "issue",
             "view",
-            str(work_item_id),
+            str(issue_id),
             "--repo",
             self.repo,
             "--json",
@@ -311,19 +312,19 @@ class GitHubBackend:
         try:
             data = json.loads(result)
         except json.JSONDecodeError as exc:
-            raise BackendError(f"gh returned non-JSON for issue {work_item_id}: {exc}") from exc
+            raise BackendError(f"gh returned non-JSON for issue {issue_id}: {exc}") from exc
 
         labels = [lbl.get("name", "") for lbl in (data.get("labels") or [])]
-        return self._labels_to_state(work_item_id, labels)
+        return self._labels_to_state(issue_id, labels)
 
     def apply_marker_change(
         self,
-        work_item_id: str,
+        issue_id: str,
         change: MarkerChange,
         audit_comment: str | None = None,
     ) -> None:
         # Compute the add/remove label deltas from the change.
-        current = self.read_work_item(work_item_id)
+        current = self.read_issue(issue_id)
         add, remove = self._marker_change_to_labels(current, change)
 
         # Ensure any labels we're about to add exist on the repo.
@@ -333,7 +334,7 @@ class GitHubBackend:
         # Post the audit comment FIRST per the encoding doc's ordering
         # guarantee (§ 3): validate guards → emit audit comment → swap labels.
         if audit_comment:
-            self.post_comment(work_item_id, audit_comment)
+            self.post_comment(issue_id, audit_comment)
 
         # Apply add + remove in a single `gh` invocation — per `gh`'s docs and
         # the encoding doc, this maps to GraphQL's `replaceLabels` mutation.
@@ -341,7 +342,7 @@ class GitHubBackend:
             args: list[str] = [
                 "issue",
                 "edit",
-                str(work_item_id),
+                str(issue_id),
                 "--repo",
                 self.repo,
             ]
@@ -355,11 +356,15 @@ class GitHubBackend:
         if change.set_agent_claim:
             role_handle = self.resolve_role(change.set_agent_claim)
             if role_handle:
-                self.assign(work_item_id, role_handle)
+                self.assign(issue_id, role_handle)
         if change.clear_agent_claim:
-            self.unassign(work_item_id)
+            self.unassign(issue_id)
 
-    def post_comment(self, work_item_id: str, body: str) -> None:
+        # Close the issue when the advance lands on a terminal-done state.
+        if change.close_issue:
+            self.close_issue(issue_id, reason=change.close_reason)
+
+    def post_comment(self, issue_id: str, body: str) -> None:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -372,7 +377,7 @@ class GitHubBackend:
             self._gh(
                 "issue",
                 "comment",
-                str(work_item_id),
+                str(issue_id),
                 "--repo",
                 self.repo,
                 "--body-file",
@@ -384,11 +389,11 @@ class GitHubBackend:
             except OSError:
                 pass
 
-    def read_comments(self, work_item_id: str, since: str | None = None) -> list[dict]:
+    def read_comments(self, issue_id: str, since: str | None = None) -> list[dict]:
         result = self._gh(
             "issue",
             "view",
-            str(work_item_id),
+            str(issue_id),
             "--repo",
             self.repo,
             "--json",
@@ -397,7 +402,7 @@ class GitHubBackend:
         try:
             data = json.loads(result)
         except json.JSONDecodeError as exc:
-            raise BackendError(f"gh returned non-JSON for issue {work_item_id}: {exc}") from exc
+            raise BackendError(f"gh returned non-JSON for issue {issue_id}: {exc}") from exc
         comments = data.get("comments") or []
         if since is not None:
             comments = [c for c in comments if c.get("createdAt", "") >= since]
@@ -421,11 +426,11 @@ class GitHubBackend:
         )
         return None
 
-    def assignee(self, work_item_id: str) -> str | None:
+    def assignee(self, issue_id: str) -> str | None:
         result = self._gh(
             "issue",
             "view",
-            str(work_item_id),
+            str(issue_id),
             "--repo",
             self.repo,
             "--json",
@@ -434,41 +439,97 @@ class GitHubBackend:
         try:
             data = json.loads(result)
         except json.JSONDecodeError as exc:
-            raise BackendError(f"gh returned non-JSON for issue {work_item_id}: {exc}") from exc
+            raise BackendError(f"gh returned non-JSON for issue {issue_id}: {exc}") from exc
         assignees = data.get("assignees") or []
         if not assignees:
             return None
         return assignees[0].get("login")
 
-    def assign(self, work_item_id: str, handle: str) -> None:
+    def assign(self, issue_id: str, handle: str) -> None:
         self._gh(
             "issue",
             "edit",
-            str(work_item_id),
+            str(issue_id),
             "--repo",
             self.repo,
             "--add-assignee",
             handle,
         )
 
-    def unassign(self, work_item_id: str) -> None:
-        current = self.assignee(work_item_id)
+    def unassign(self, issue_id: str) -> None:
+        current = self.assignee(issue_id)
         if current:
             self._gh(
                 "issue",
                 "edit",
-                str(work_item_id),
+                str(issue_id),
                 "--repo",
                 self.repo,
                 "--remove-assignee",
                 current,
             )
 
+    def edit_issue(
+        self,
+        issue_id: str,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> None:
+        """Edit the issue's title and/or body via `gh issue edit`.
+
+        The body is passed via `--body-file` (a temp file) so newlines and
+        markdown formatting survive shell escaping. Either or both of title
+        and body may be set — neither is also valid (no-op), but the CLI
+        rejects that case before reaching here.
+        """
+        if title is None and body is None:
+            return
+        args: list[str] = ["issue", "edit", str(issue_id), "--repo", self.repo]
+        if title is not None:
+            args += ["--title", title]
+        if body is None:
+            self._gh(*args)
+            return
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".md",
+            delete=False,
+        ) as tmp:
+            tmp.write(body)
+            tmp_path = tmp.name
+        try:
+            self._gh(*args, "--body-file", tmp_path)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def close_issue(self, issue_id: str, reason: str | None = None) -> None:
+        """Close the GitHub issue via `gh issue close`.
+
+        `reason` is passed through as `--reason completed` or `--reason "not
+        planned"` (GitHub's two valid values). Unrecognised reasons are
+        omitted; gh defaults to `completed` in that case.
+        """
+        args: list[str] = [
+            "issue",
+            "close",
+            str(issue_id),
+            "--repo",
+            self.repo,
+        ]
+        if reason in ("completed", "not planned"):
+            args += ["--reason", reason]
+        self._gh(*args)
+
     # ----- internals -----
 
-    def _labels_to_state(self, work_item_id: str, labels: list[str]) -> WorkItemState:
+    def _labels_to_state(self, issue_id: str, labels: list[str]) -> IssueState:
         state: str | None = None
         agent_claim: str | None = None
+        wip_from: str | None = None
         awaiting_gate: str | None = None
         audit_pending: str | None = None
         reviewing = False
@@ -480,6 +541,10 @@ class GitHubBackend:
             label = raw.strip()
             if label.startswith("state:"):
                 state = label[len("state:") :]
+                continue
+            # `wip-from:` is checked before `wip:` because both share a prefix.
+            if label.startswith("wip-from:"):
+                wip_from = label[len("wip-from:") :]
                 continue
             if label.startswith("wip:"):
                 agent_claim = label[len("wip:") :]
@@ -504,10 +569,11 @@ class GitHubBackend:
             # signal markers approved-/rejected-/checked-/revoked-* are
             # transient and don't translate to state.
 
-        return WorkItemState(
-            work_item_id=str(work_item_id),
+        return IssueState(
+            issue_id=str(issue_id),
             state=state,
             agent_claim=agent_claim,
+            wip_from=wip_from,
             awaiting_gate=awaiting_gate,
             reviewing=reviewing,
             audit_pending=audit_pending,
@@ -518,7 +584,7 @@ class GitHubBackend:
 
     def _marker_change_to_labels(
         self,
-        current: WorkItemState,
+        current: IssueState,
         change: MarkerChange,
     ) -> tuple[set[str], set[str]]:
         add: set[str] = set()
@@ -537,6 +603,14 @@ class GitHubBackend:
             if current.agent_claim and current.agent_claim != change.set_agent_claim:
                 remove.add(f"wip:{current.agent_claim}")
             add.add(f"wip:{change.set_agent_claim}")
+
+        # Origin marker (the resting state we came from on claim).
+        if change.clear_wip_from and current.wip_from:
+            remove.add(f"wip-from:{current.wip_from}")
+        if change.set_wip_from:
+            if current.wip_from and current.wip_from != change.set_wip_from:
+                remove.add(f"wip-from:{current.wip_from}")
+            add.add(f"wip-from:{change.set_wip_from}")
 
         # Awaiting gate.
         if change.clear_awaiting_gate and current.awaiting_gate:
@@ -579,11 +653,11 @@ class GitHubBackend:
             add.add(f"hitl:approved-{change.record_approval}")
         if change.record_rejection:
             add.add(f"hitl:rejected-{change.record_rejection}")
-        if change.record_check:
-            add.add(f"hitl:checked-{change.record_check}")
+        if change.record_confirm:
+            add.add(f"hitl:checked-{change.record_confirm}")
         if change.record_revoke:
             add.add(f"hitl:revoked-{change.record_revoke}")
-        if change.record_resolution:
+        if change.record_response:
             add.add("hitl:resolved")
 
         # Sanity: never add and remove the same label.

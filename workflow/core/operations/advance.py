@@ -1,14 +1,14 @@
-"""advance — move a work item to a new state via a known transition.
+"""advance — move an issue to a new state via a known transition.
 
 The user-facing entry point for state changes. The planner consults the HCP
 catalog and team trust grants and dispatches internally:
 
 - Ungated transition → straightforward state change.
 - Block-gated → applies awaiting marker, holds the agent's claim, no state
-  change. Requires `body_path` pointing at a packet matching the catalog's
+  change. Requires `body_text` pointing at a packet matching the catalog's
   `agent_prepares` template.
 - Audit-gated → state change atomically with the audit-pending marker.
-  `body_path`, if provided, becomes the audit-comment body.
+  `body_text`, if provided, becomes the audit-comment body.
 
 The agent never has to know which path applies; it just calls `advance`.
 """
@@ -23,16 +23,16 @@ from workflow.core.planner import Operation, OperationRequest
 def run(
     controller: Controller,
     *,
-    work_item_id: str,
+    issue_id: str,
     destination: str,
-    body_path: str | None = None,
+    body_text: str | None = None,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
         operation=Operation.ADVANCE,
-        work_item_id=work_item_id,
+        issue_id=issue_id,
         destination=destination,
-        body_path=body_path,
+        body_text=body_text,
         actor=actor,
     )
     return dispatch(controller, request)

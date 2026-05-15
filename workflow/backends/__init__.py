@@ -2,21 +2,21 @@
 operations and markers into concrete actions on a specific tracker.
 
 Implementing a new backend means writing a class that satisfies the
-`WorkflowBackend` protocol in `base.py`. Nothing in `workflow.core` changes.
+`TrackerBackend` protocol in `base.py`. Nothing in `workflow.core` changes.
 """
 
 from workflow.backends.base import (
+    IssueFilters,
+    IssueState,
     MarkerChange,
-    WorkflowBackend,
-    WorkItemFilters,
-    WorkItemState,
+    TrackerBackend,
 )
 from workflow.backends.github import GitHubBackend
 
 __all__ = [
     "MarkerChange",
-    "WorkflowBackend",
-    "WorkItemFilters",
-    "WorkItemState",
+    "TrackerBackend",
+    "IssueFilters",
+    "IssueState",
     "GitHubBackend",
 ]

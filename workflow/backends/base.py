@@ -12,17 +12,21 @@ from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
-class WorkItemState:
-    """A snapshot of a work item's framework-relevant markers, read from the backend.
+class IssueState:
+    """A snapshot of an issue's framework-relevant markers, read from the backend.
 
     The structure is abstract — concrete backends map it from labels (GitHub),
     custom fields (Jira), tags (Linear), etc. The core never sees the backend's
-    raw representation; it only reads `WorkItemState`.
+    raw representation; it only reads `IssueState`.
     """
 
-    work_item_id: str
-    state: str | None  # current lifecycle state name
+    issue_id: str
+    state: str | None  # current workflow state name
     agent_claim: str | None  # role_id holding the agent claim, if any
+    # Origin marker — the resting state we claimed from. Recorded on `claim`
+    # so `release` knows where to return the issue to. Eliminates the need
+    # for the user to specify a destination on release.
+    wip_from: str | None = None
     # Catalogued-block markers
     awaiting_gate: str | None = None  # gate_name currently awaiting signal
     reviewing: bool = False  # singleton: a human has claimed pre-action review
@@ -38,7 +42,7 @@ class WorkItemState:
 
 @dataclass(frozen=True)
 class MarkerChange:
-    """A planned change to the work item's marker set.
+    """A planned change to the issue's marker set.
 
     The planner produces a list of these; the controller executes them
     atomically via the backend. The backend translates abstract names to
@@ -48,6 +52,8 @@ class MarkerChange:
     set_state: str | None = None  # new state name, if state advances
     set_agent_claim: str | None = None  # new agent role, or empty to clear
     clear_agent_claim: bool = False
+    set_wip_from: str | None = None  # origin resting state, set on claim
+    clear_wip_from: bool = False  # cleared on release / advance out of working
     set_awaiting_gate: str | None = None
     clear_awaiting_gate: bool = False
     set_reviewing: bool | None = None
@@ -59,14 +65,20 @@ class MarkerChange:
     # Outcome markers (audit-trace labels in GitHub encoding; signal events elsewhere)
     record_approval: str | None = None  # destination approved
     record_rejection: str | None = None  # gate rejected
-    record_check: str | None = None  # destination checked post-hoc
+    record_confirm: str | None = None  # destination checked post-hoc
     record_revoke: str | None = None  # destination revoked
-    record_resolution: bool = False  # recognized HCP resolved
+    record_response: bool = False  # recognized HCP resolved
+    # Issue lifecycle on the tracker. Set when advancing into a terminal
+    # state whose taxonomy means "done" (not `iterated`, which is a
+    # cross-process handoff). The tracker closes the issue with the
+    # provided reason ("completed" / "not planned" for GitHub).
+    close_issue: bool = False
+    close_reason: str | None = None
 
 
 @dataclass(frozen=True)
-class WorkItemFilters:
-    """Filters for `list_work_items`.
+class IssueFilters:
+    """Filters for `list_issues`.
 
     Each filter is optional; backends apply them as AND constraints. The
     semantics are framework-level (state, claim, gate markers); each backend
@@ -82,7 +94,7 @@ class WorkItemFilters:
 
 
 @runtime_checkable
-class WorkflowBackend(Protocol):
+class TrackerBackend(Protocol):
     """The contract a backend implementation satisfies.
 
     Operations in `workflow.core.operations` call these methods. Each backend
@@ -92,16 +104,16 @@ class WorkflowBackend(Protocol):
 
     name: str  # short identifier, e.g., "github"
 
-    def create_work_item(
+    def create_issue(
         self,
         title: str,
         body: str,
         state: str,
         extra_labels: list[str] | None = None,
     ) -> str:
-        """Create a new work item in the given initial state.
+        """Create a new issue in the given initial state.
 
-        Returns the new work item's id (a string — issue number for github,
+        Returns the new issue's id (a string — issue number for github,
         whatever the backend uses elsewhere). The backend MUST attach the
         framework's `state:<name>` marker atomically with creation so the
         item never exists without a state, and SHOULD attach any
@@ -110,12 +122,12 @@ class WorkflowBackend(Protocol):
         """
         ...
 
-    def read_work_item(self, work_item_id: str) -> WorkItemState:
-        """Fetch the work item's current framework-relevant markers."""
+    def read_issue(self, issue_id: str) -> IssueState:
+        """Fetch the issue's current framework-relevant markers."""
         ...
 
-    def list_work_items(self, filters: WorkItemFilters) -> list[WorkItemState]:
-        """List work items matching the filters.
+    def list_issues(self, filters: IssueFilters) -> list[IssueState]:
+        """List issues matching the filters.
 
         Filters compose with AND. Empty / None filters match everything. Each
         backend translates the abstract filters to its native query syntax.
@@ -124,7 +136,7 @@ class WorkflowBackend(Protocol):
 
     def apply_marker_change(
         self,
-        work_item_id: str,
+        issue_id: str,
         change: MarkerChange,
         audit_comment: str | None = None,
     ) -> None:
@@ -135,13 +147,13 @@ class WorkflowBackend(Protocol):
         """
         ...
 
-    def post_comment(self, work_item_id: str, body: str) -> None:
+    def post_comment(self, issue_id: str, body: str) -> None:
         """Post a comment without changing markers. Used for packets and
         question bodies that accompany await-signal / request-input."""
         ...
 
-    def read_comments(self, work_item_id: str, since: str | None = None) -> list[dict]:
-        """Read comments on the work item. Each comment is a dict with at
+    def read_comments(self, issue_id: str, since: str | None = None) -> list[dict]:
+        """Read comments on the issue. Each comment is a dict with at
         least `author`, `body`, `created_at` keys."""
         ...
 
@@ -150,16 +162,42 @@ class WorkflowBackend(Protocol):
         backend handle (e.g., a GitHub username). Returns None if unmapped."""
         ...
 
-    def assignee(self, work_item_id: str) -> str | None:
+    def assignee(self, issue_id: str) -> str | None:
         """Return the current assignee handle, or None if unassigned."""
         ...
 
-    def assign(self, work_item_id: str, handle: str) -> None:
-        """Assign the work item to the named handle. Used by `claim`."""
+    def assign(self, issue_id: str, handle: str) -> None:
+        """Assign the issue to the named handle. Used by `claim`."""
         ...
 
-    def unassign(self, work_item_id: str) -> None:
-        """Clear the work item's assignment. Used by `release`."""
+    def unassign(self, issue_id: str) -> None:
+        """Clear the issue's assignment. Used by `release`."""
+        ...
+
+    def edit_issue(
+        self,
+        issue_id: str,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> None:
+        """Edit the issue's title and/or body on the tracker.
+
+        Independent of workflow state — neither labels nor markers change.
+        At least one of `title` or `body` must be provided; both is allowed.
+        The CLI's `edit` command surfaces this for typo fixes and scope
+        adjustments that don't fit into a state transition.
+        """
+        ...
+
+    def close_issue(self, issue_id: str, reason: str | None = None) -> None:
+        """Close the issue on the tracker.
+
+        Called when an operation advances into a terminal state whose
+        taxonomy means "done" (everything except `iterated`, which is a
+        cross-process handoff). `reason` is a backend-specific hint —
+        GitHub accepts `completed` or `not planned`; other backends may
+        ignore the argument.
+        """
         ...
 
     def list_labels(self) -> list[str]:

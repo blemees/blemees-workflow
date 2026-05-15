@@ -1,0 +1,28 @@
+stateDiagram-v2
+    %% Cross-process interfaces:
+    %%   Entry (shared): ready_for_dev from process refinement
+    %%
+
+    %% HITL gates (canonical: inner-loop-hcps.json):
+    %%   bounce_back    reversible-fast
+    %%   merge_to_main  reversible-slow
+    %%
+
+    [*] --> ready_for_dev: from process refinement
+    ready_for_dev --> implementing: developer claims ready_for_dev
+    implementing --> staged: developer opens PR
+    implementing --> bounced_back: developer bounces [hitl]
+    staged --> implementing: developer claims revisions
+    staged --> merging: developer claims merge
+    merging --> merged: merge to main [hitl]
+    staged --> cancelling: developer claims to cancel
+    cancelling --> abandoned_dev: developer abandons
+    merged --> [*]: terminal (shipped)
+    bounced_back --> [*]: terminal (iterated)
+    abandoned_dev --> [*]: terminal (abandoned)
+
+    note left of ready_for_dev: claim-role=developer, reversible-slow
+    note right of staged: claim-role=developer
+    note right of merged: reversible-slow
+    note right of bounced_back: reversible-fast
+    note right of abandoned_dev: reversible-fast

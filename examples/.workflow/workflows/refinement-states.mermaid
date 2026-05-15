@@ -1,0 +1,18 @@
+stateDiagram-v2
+    %% Cross-process interfaces:
+    %%   Exit  (shared): ready_for_dev to process inner-loop
+    %%
+
+    %% HITL gates (canonical: refinement-hcps.json):
+    %%   ready_for_dev  reversible-slow
+    %%   wont_fix       reversible-fast
+    %%
+
+    [*] --> raw: issue created (external)
+    raw --> refining: PM claims raw
+    refining --> ready_for_dev: PM marks ready [hitl]
+    refining --> wont_fix: PM marks wont-fix [hitl]
+    ready_for_dev --> [*]: to process inner-loop
+    wont_fix --> [*]: terminal (abandoned)
+
+    note left of raw: claim-role=pm
