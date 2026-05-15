@@ -1,0 +1,43 @@
+---
+title: Backport Lifecycle
+config:
+    layout: elk
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> ready_for_backport: from process incident-response (IC determines backport required)
+
+    ready_for_backport --> cherry_picking: developer claims backport
+    cherry_picking --> backport_pr_review: developer opens backport PR (to process pr-review)
+
+    backport_pr_review --> backport_merged: from process pr-review (backport PR merged to release branch)
+
+    backport_merged --> patch_releasing: patch release triggered (to process release, IC bypass of release gate)
+    patch_releasing --> backported: from process release (patch deployed to production)
+
+    backported --> [*]: terminal (shipped)
+
+    note right of ready_for_backport
+        Entry: IC determines that main has diverged from the production release tag, so the hotfix on main is not sufficient. A backport is scoped to the affected older release branch.
+    end note
+
+    note right of cherry_picking
+        Working. Developer cherry-picks the hotfix commit(s) onto the release branch, resolves conflicts, and opens a backport PR.
+    end note
+
+    note right of backport_pr_review
+        Resting. The backport PR runs through the pr-lifecycle diagram like any other PR — reviewer feedback, QA, merge conflicts all happen there without advancing this diagram's state. The backport only advances to backport_merged when the PR is merged.
+    end note
+
+    note right of backport_merged
+        Resting. Backport is on the release branch but not yet deployed. Hand off to release lifecycle as a patch release (v{major}.{minor}.{patch+1}).
+    end note
+
+    note right of patch_releasing
+        Resting. Release lifecycle handles the patch train. Because a backport is always tied to an active incident mitigation, the IC authorizes bypass of the release gate (same authority as the main-branch hotfix).
+    end note
+
+    note right of backported
+        Terminal (shipped). Patch release is live on the older version. If multiple release branches need backports, each is its own backport lifecycle instance.
+    end note

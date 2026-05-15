@@ -1,0 +1,59 @@
+---
+title: Incident Response Lifecycle
+config:
+    layout: elk
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> declared: alert / report triggers incident (external)
+
+    declared --> triaging: IC claims incident
+
+    triaging --> needs_diagnosis: IC assigns severity, assigns responder
+
+    state "Diagnosis" as diagnosis_group {
+        needs_diagnosis --> diagnosing: responder claims diagnosis
+        diagnosing --> cause_identified: responder reports root cause
+    }
+
+    state "Mitigation" as mitigation_group {
+        cause_identified --> mitigating: IC claims incident for mitigation
+        mitigating --> needs_verification: IC requests verification (to process mitigation)
+        needs_verification --> verifying: responder claims verification
+        verifying --> cause_identified: responder reports mitigation failed
+    }
+
+    verifying --> stabilized: responder confirms production stable
+
+    stabilized --> [*]: terminal (stabilized) — spawns postmortem (to process postmortem)
+
+    note right of declared
+        IC posts initial status update.
+        Notifies PM at SEV-2+.
+        Notifies PO at SEV-1.
+    end note
+
+    note right of triaging
+        IC and responder must be different agents. Diagnosing and coordinating simultaneously produces bad outcomes.
+    end note
+
+    note right of diagnosing
+        Consulting (architect, security) is informal during incidents. The responder stays in diagnosing while the IC coordinates consultant input via comments. No state change — the responder never hands off ownership, they get parallel assist.
+    end note
+
+    note right of mitigating
+        IC decides strategy (rollback, flag toggle, or hotfix) and creates the necessary work items on the mitigation lifecycle. See mitigation-lifecycle for strategy-specific states.
+    end note
+
+    note right of cause_identified
+        Mitigation failure loops back here, not to needs_diagnosis. Root cause is known — the strategy failed, not the diagnosis.
+    end note
+
+    note right of verifying
+        Responder documents root cause as part of verification. By stabilized, root cause is already on the incident.
+    end note
+
+    note right of stabilized
+        Terminal (stabilized). Production is stable; the incident is closed on this diagram. A new postmortem work item is spawned on the postmortem lifecycle. Follow-up issues are filed from that process, not this one.
+    end note

@@ -1,0 +1,90 @@
+---
+title: Refinement Lifecycle
+config:
+    layout: elk
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> raw: issue created
+    [*] --> ready_bounced: from process inner-loop
+
+    raw --> refining: PM claims raw
+
+    refining --> duplicate: PM marks duplicate
+    refining --> wont_fix: PM marks won't-fix
+
+    refining --> consult_requested: PM requests consult
+    consult_requested --> consulting: consultant claims consult
+
+    consulting --> consult_complete: consultant posts findings
+    consult_complete --> refining: PM claims consult feedback
+
+    consulting --> spiking: consultant creates spike sub-issue
+    spiking --> consulting: consultant claims spike findings
+
+    refining --> ready_for_dev: PM marks ready (feat/bug/chore)
+    refining --> ready_for_experiment: PM marks ready (exp)
+
+    ready_for_dev --> [*]: to process inner-loop
+    ready_for_experiment --> [*]: to process inner-loop
+
+    ready_bounced --> refining: PM claims bounced issue
+
+    refining --> deprioritized: PM parks issue
+    ready_for_dev --> deprioritized: PM parks issue
+    ready_for_experiment --> deprioritized: PM parks issue
+
+    deprioritized --> refining: PM claims to re-refine (staleness check)
+    deprioritized --> wont_fix: PM kills parked issue
+
+    duplicate --> [*]: terminal (deduplicated)
+    wont_fix --> [*]: terminal (abandoned)
+
+    note right of raw
+        Entry: issue created by anyone.
+        Exits: ready_for_dev, ready_for_experiment, deprioritized, duplicate, wont_fix.
+
+        Cross-process legend:
+        • Entry shared states: ready_bounced (from inner-loop).
+        • Exit shared states: ready_for_dev, ready_for_experiment (to inner-loop).
+        • Spawned work items (external, not shared): spike sub-issue is created during consulting and starts as ready_for_spike on the inner-loop diagram.
+    end note
+
+    note right of consulting
+        Consultant is the working owner. They may either post findings directly or commission a spike sub-issue to gather more info. Spike is a separate issue that enters the inner loop as ready_for_spike.
+    end note
+
+    note right of spiking
+        Parent issue is resting while the spike is worked. Creating a spike has the side effect of spawning a new work item on the inner-loop diagram (ready_for_spike); that spawned item is not a shared-state handoff because it is a new issue, not the parent.
+
+        The consultant polls for their spike's completion and re-claims the parent when findings are posted. The claim is a normal claim transition — the external trigger (spike completes) doesn't bypass the claim-before-work rule.
+    end note
+
+    note right of ready_bounced
+        Shared resting state with inner-loop. A developer in inner-loop.implementing decided the issue wasn't actually ready and bounced it back. PM claims to re-refine.
+        This is the "iterated" terminal path from inner-loop's perspective — but the work item is not terminal, it re-enters refinement.
+    end note
+
+    note right of ready_for_dev
+        Shared resting state with inner-loop. Queue for inner-loop developer polling. Claim SLA: hours.
+        Owned by inner-loop once a developer claims.
+
+        Prioritization is continuous and attribute-based: PM maintains queue order via priority labels and rank. Re-ranking does not change state; pulling from the top is the existing transition to inner-loop.
+    end note
+
+    note right of ready_for_experiment
+        Shared resting state with inner-loop. Same as ready_for_dev but feeds the experimentation process after release. Claim SLA: hours.
+    end note
+
+    note right of deprioritized
+        Resting. Issue was refined (or mid-refinement) and PM has decided it should not be worked on now — priorities shifted, the underlying need receded, or a better approach emerged. Semi-terminal: the item is out of the pullable queue but not closed.
+
+        Re-entry always routes through refining, not directly back to ready. The PM claims, runs a staleness check (is the problem still real? is the AC still right? have dependencies changed?), and either flips back to ready quickly (if still valid) or re-refines properly (if stale). This guards against the failure mode where a parked item returns with outdated assumptions and a developer picks it up.
+
+        Kill from parked goes to wont_fix (single terminal — same semantic as killed during refining).
+    end note
+
+    note right of wont_fix
+        Terminal (abandoned). Covers all "we're not doing this" outcomes regardless of origin state — killed during refining, or killed from deprioritized. Always includes a reason and a reopen condition.
+    end note

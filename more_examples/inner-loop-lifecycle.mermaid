@@ -1,0 +1,87 @@
+---
+title: Inner Loop Lifecycle
+config:
+    layout: elk
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> ready_for_dev: from process refinement
+    [*] --> ready_for_experiment: from process refinement
+    [*] --> ready_for_spike: from process refinement
+    [*] --> ready_for_hotfix: from process mitigation
+
+    state "Feature / Bug / Chore" as dev_group {
+        ready_for_dev --> implementing: developer claims issue
+        implementing --> ready_bounced: developer bounces ticket
+        implementing --> pr_review: developer requests PR review
+        pr_review --> staged: from process pr-review (PR merged)
+    }
+
+    state "Experiment" as exp_group {
+        ready_for_experiment --> implementing_experiment: developer claims experiment
+        implementing_experiment --> pr_review_experiment: developer requests PR review
+        pr_review_experiment --> staged_experiment: from process pr-review (PR merged)
+    }
+
+    state "Spike" as spike_group {
+        ready_for_spike --> implementing_spike: developer claims spike
+        implementing_spike --> spike_completed: developer posts spike findings
+    }
+
+    state "Hotfix" as hotfix_group {
+        ready_for_hotfix --> implementing_hotfix: developer claims hotfix
+        implementing_hotfix --> pr_review_hotfix: developer requests PR review
+        pr_review_hotfix --> staged_hotfix: from process pr-review (PR merged)
+    }
+
+    ready_bounced --> [*]: to process refinement
+
+    staged --> [*]: to process release (standard train)
+    staged_experiment --> [*]: to process release (standard train)
+    staged_hotfix --> [*]: to process release (hotfix patch train)
+    spike_completed --> [*]: to process refinement
+
+    note right of ready_for_dev
+        Cross-process legend:
+        • Entry shared states: ready_for_dev, ready_for_experiment (from refinement); ready_for_hotfix (from mitigation). Same work item continues from the other diagram.
+        • Entry spawn events: ready_for_spike (from refinement — consultant spawns a new spike sub-issue). Starts fresh on this diagram.
+        • Exit shared state: ready_bounced (to refinement). Same issue re-enters refinement.
+        • Exit spawn events: spike_completed notifies the parent issue's consultant on refinement; no new work item.
+        • Exit external handoffs: staged / staged_experiment / staged_hotfix → release lifecycle. These are external because the release lifecycle tracks a different unit of work (the release train), and the issue is merely a member of the train.
+    end note
+
+    note right of implementing
+        Developer opens a draft PR at claim time, not at code-complete. CI runs against draft while coding.
+        See pr-lifecycle for the PR's own states (draft, needs_review, reviewing, needs_qa, merging).
+    end note
+
+    note right of pr_review
+        Resting on this diagram. The ticket stays here for the entire PR review + QA + merge cycle — changes requested, QA fails, re-review, merge conflicts all happen within the PR lifecycle without advancing the ticket's state. The ticket only advances to staged when the PR is merged.
+
+        This keeps principle 6 clean: PR review mechanics live on pr-lifecycle.mermaid, not here.
+    end note
+
+    note right of ready_bounced
+        Shared resting state with refinement. Developer claimed ready_for_dev/experiment/hotfix, evaluated, and decided the issue is not ready. They do NOT bounce from the resting queue — they claim first, then bounce (principle 3).
+    end note
+
+    note right of staged
+        "Staged" = PR merged to main. NOT yet in production. The issue is added to the currently-accumulating release train. See release-lifecycle for what happens next.
+    end note
+
+    note right of staged_hotfix
+        Merging a hotfix PR triggers the release lifecycle to open a hotfix patch train (single-issue train). IC bypasses the release gate.
+    end note
+
+    note right of spike_completed
+        Spike's deliverable is the findings comment. No release, no deploy, no user impact. Returns to refinement so the parent issue's consultant can claim.
+    end note
+
+    note right of ready_for_spike
+        Spawn event (not shared): the consultant on refinement creates a new spike sub-issue. The spike starts its lifecycle here on inner-loop — refinement does not render ready_for_spike. The parent issue rests on refinement in `spiking` during this time.
+    end note
+
+    note right of ready_for_hotfix
+        Shared resting state with mitigation. IC created the hotfix issue during an incident. Hotfix skips refinement — scope is defined by the IC on creation. Claim SLA: minutes.
+    end note

@@ -1,0 +1,53 @@
+---
+title: Progressive Rollout Lifecycle
+config:
+    layout: elk
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> soaking: from process release (first stage activated)
+
+    soaking --> ready_for_stage_analysis: soak window elapses (time)
+
+    ready_for_stage_analysis --> analyzing: on-call claims stage analysis
+
+    analyzing --> soaking: on-call advances to next stage
+    analyzing --> complete: on-call confirms final stage healthy
+    analyzing --> holding: on-call pauses rollout
+    analyzing --> killing: on-call claims to kill rollout
+
+    holding --> analyzing: on-call re-claims held rollout
+
+    killing --> kill_switched: on-call disables flag, files compensating bug
+
+    complete --> [*]: terminal (shipped) — release lifecycle resumes at monitoring
+    kill_switched --> [*]: terminal (reverted) — release lifecycle transitions to rolling_back
+
+    note right of soaking
+        Resting. Flag is at the current stage percentage (e.g., 1%, 10%, 50%). No agent active; the system is gathering data during the soak window.
+    end note
+
+    note right of analyzing
+        Working. On-call reviews metrics for the current stage: error rates, latency, business KPIs. Outcomes: advance, complete, hold, or kill.
+    end note
+
+    note right of soaking
+        Advancing to the next stage (say, 10% → 50%) moves back to soaking with the new percentage active. Stage progression is: 1% → 10% → 50% → 100% by default, configurable per release.
+    end note
+
+    note right of holding
+        Resting. On-call paused due to ambiguous signal; no advance, no kill. Used when metrics are concerning but not clearly bad. Typically resolved within hours.
+    end note
+
+    note right of killing
+        Working. On-call is executing the kill: flag off, compensating bug filed, release lifecycle notified. This is a fast state — usually minutes.
+    end note
+
+    note right of complete
+        Terminal (shipped). Rollout reached 100% and the final stage soak was clean. Hand back to release lifecycle for final monitoring.
+    end note
+
+    note right of kill_switched
+        Terminal (reverted). Flag is disabled; no users see the change. The release lifecycle transitions to rolling_back. A compensating bug enters refinement as a new raw issue.
+    end note

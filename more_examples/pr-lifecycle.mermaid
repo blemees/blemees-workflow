@@ -1,0 +1,62 @@
+---
+title: PR Lifecycle
+config:
+    layout: elk
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> draft: from process inner-loop (developer opens draft PR at ticket claim)
+
+    draft --> needs_review: developer marks PR ready for review
+
+    state "Review Cycle" as review_cycle {
+        needs_review --> reviewing: reviewer claims PR
+
+        reviewing --> needs_qa: reviewer approves PR
+        reviewing --> qa_passed: reviewer approves hotfix PR (QA skipped, IC discretion)
+
+        reviewing --> changes_requested: reviewer requests changes
+        changes_requested --> fixing_review: developer claims PR for fixes
+
+        fixing_review --> needs_review: developer re-requests review
+        fixing_qa --> needs_review: developer re-requests review
+    }
+
+    state "QA Cycle" as qa_cycle {
+        needs_qa --> verifying: QA claims PR
+        verifying --> qa_passed: QA posts pass verdict
+
+        verifying --> qa_failed: QA posts fail verdict
+        qa_failed --> fixing_qa: developer claims PR for fixes
+    }
+
+    qa_passed --> merging: developer claims and merges
+    merging --> staged: verified staging deploy
+    merging --> needs_review: merge conflict or failed staging deploy
+
+    staged --> [*]: terminal (shipped to staging) — signals to process inner-loop (ticket advances to staged)
+
+    note right of draft
+        Developer opens draft PR when they claim the ticket on the inner-loop diagram — not when code is done. CI runs against draft while busy implementing.
+    end note
+
+    note right of reviewing
+        Reviewer is the working owner. Outcomes: approve (normal PR) → needs_qa, approve (hotfix PR, IC discretion) → qa_passed, or request changes → changes_requested.
+    end note
+
+    note right of merging
+        If merge conflicts require significant resolution or staging deploy fails, loop back through full review cycle.
+    end note
+
+    note right of fixing_qa
+        QA fixes always go back through review, not directly to QA. All new code must be reviewer-approved before QA verification.
+    end note
+
+    note left of qa_passed
+        Reviewer can approve directly to qa_passed, skipping QA only for hotfix PRs at IC discretion during active incidents. All PRs (hotfix, experiment, normal) use "Refs #N" on the footer, never "Closes #N" — issues close at the `released` terminal of the release lifecycle (including hotfix issues, on their patch train), not at merge. Experiments are the only exception: experiment issues close at verdict on the experimentation lifecycle.
+    end note
+
+    note right of staged
+        Terminal for this PR. The underlying ticket continues on the inner-loop diagram (transitions to staged) and eventually joins a release train.
+    end note

@@ -1,0 +1,55 @@
+---
+title: Experimentation Lifecycle
+config:
+    layout: elk
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> measuring: from process release (experiment released to production)
+
+    measuring --> measurement_complete: measurement window elapses (time)
+    measuring --> aborting: PO claims to abort
+
+    aborting --> aborted: PO publishes abort reason
+
+    measurement_complete --> analyzing: PO claims experiment for analysis
+
+    analyzing --> measuring: PO extends experiment, resets window
+    analyzing --> promoted: PO promotes experiment to feature
+    analyzing --> killed: PO kills experiment
+    analyzing --> iterated: PO requests experiment iteration
+
+    promoted --> [*]: terminal (shipped) — PO files promotion chore
+    killed --> [*]: terminal (abandoned) — PO files cleanup chore
+    iterated --> [*]: terminal (iterated) — PO files new experiment issue
+    aborted --> [*]: terminal (aborted) — PO files cleanup chore
+
+    note right of measuring
+        Resting. Experiment flag is live at its target percentage; data is accumulating. The release lifecycle has already completed for this experiment — this is post-release tracking.
+        Entry: release-lifecycle transitions to released AND the issue is type:experiment.
+    end note
+
+    note right of aborting
+        Working. PO claimed a live experiment to pull it. Used when the experiment is clearly misbehaving in production (hurting users, invalidating data, or blocked by an incident). Distinct from killed, which happens after analysis.
+    end note
+
+    note right of analyzing
+        Working. PO reviews measurement results against the experiment's success criteria. Outcomes: extend (more data), promote (ship to all), kill (clean up, no ship), iterate (new experiment), in rare cases abort directly if new information emerges.
+    end note
+
+    note right of promoted
+        Terminal (shipped). Experiment proved value; PO files a chore issue to remove the flag and make the treatment the default. Users on treatment continue to see it until the chore ships.
+    end note
+
+    note right of killed
+        Terminal (abandoned). Experiment did not prove value; PO files a chore issue to remove the code path. Users revert to control.
+    end note
+
+    note right of iterated
+        Terminal (iterated). Experiment produced useful signal but requires a different design. PO files a new experiment issue that enters refinement. The original issue is closed.
+    end note
+
+    note right of aborted
+        Terminal (aborted). Experiment was pulled mid-flight. PO files a chore for cleanup and a postmortem-style note on what was learned.
+    end note
