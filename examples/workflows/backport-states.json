@@ -1,0 +1,39 @@
+{
+  "name": "backport",
+  "canonical_catalog_path": "backport-hcps.json",
+  "states": {
+    "ready_for_backport": {
+      "class": "resting",
+      "claim_role": "developer",
+      "reversibility": "reversible-slow"
+    },
+    "cherry_picking": {
+      "class": "working"
+    },
+    "backport_pr_review": {
+      "class": "resting"
+    },
+    "backport_merged": {
+      "class": "resting"
+    },
+    "patch_releasing": {
+      "class": "resting"
+    },
+    "backported": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    }
+  },
+  "transitions": [
+    {"source": "[*]", "destination": "ready_for_backport", "type": "cross_process", "label": "from process incident-response (IC determines backport required)", "kind": "spawn", "process": "incident-response"},
+
+    {"source": "ready_for_backport", "destination": "cherry_picking", "type": "claim", "label": "developer claims backport"},
+    {"source": "cherry_picking", "destination": "backport_pr_review", "type": "role_action", "label": "developer opens backport PR (spawns PR on process pr-review)"},
+
+    {"source": "backport_pr_review", "destination": "backport_merged", "type": "external", "label": "from process pr-review (backport PR merged to release branch)"},
+    {"source": "backport_merged", "destination": "patch_releasing", "type": "external", "label": "patch release triggered (spawns patch train on process release, IC bypass of release gate)"},
+    {"source": "patch_releasing", "destination": "backported", "type": "external", "label": "from process release (patch deployed to production)"}
+  ]
+}

@@ -63,10 +63,67 @@ def test_empty_id_rejected() -> None:
 
 
 def test_parses_real_example_directory() -> None:
-    """The example workflow ships an issue-types.json with bug, feature, task."""
+    """The example workflow ships an issue-types.json with the work-type set
+    plus the pre-defined pr type."""
     from pathlib import Path
 
-    path = Path(__file__).resolve().parents[1] / "examples" / ".workflow" / "workflows" / "issue-types.json"
+    path = Path(__file__).resolve().parents[1] / "examples" / "workflows" / "issue-types.json"
     directory = parse_issue_type_directory(path)
-    assert {"bug", "feature", "task"} <= set(directory.types.keys())
+    assert {"bug", "feature", "hotfix", "chore", "spike", "experiment", "pr"} <= set(
+        directory.types.keys()
+    )
     assert directory.get("bug").github_issue_type == "Bug"
+    assert directory.get("bug").github_entity == "issue"
+    pr = directory.get("pr")
+    assert pr.github_entity == "pull_request"
+    assert pr.github_issue_type is None
+
+
+def test_github_entity_defaults_to_issue() -> None:
+    data = {"types": {"bug": {"name": "Bug", "description": "A defect."}}}
+    directory = parse_issue_type_directory(json.dumps(data))
+    assert directory.get("bug").github_entity == "issue"
+
+
+def test_github_entity_pull_request_accepted() -> None:
+    data = {
+        "types": {
+            "pr": {
+                "name": "Pull Request",
+                "description": "Proposed change.",
+                "github_entity": "pull_request",
+            }
+        }
+    }
+    directory = parse_issue_type_directory(json.dumps(data))
+    assert directory.get("pr").github_entity == "pull_request"
+
+
+def test_github_entity_invalid_value_rejected() -> None:
+    bad = {
+        "types": {
+            "x": {
+                "name": "X",
+                "description": "Y",
+                "github_entity": "discussion",
+            }
+        }
+    }
+    with pytest.raises(ParseError, match="github_entity"):
+        parse_issue_type_directory(json.dumps(bad))
+
+
+def test_pull_request_with_github_issue_type_rejected() -> None:
+    """PRs aren't a native GitHub Issue Type — combining the two is a misconfig."""
+    bad = {
+        "types": {
+            "pr": {
+                "name": "PR",
+                "description": "x",
+                "github_entity": "pull_request",
+                "github_issue_type": "PR",
+            }
+        }
+    }
+    with pytest.raises(ParseError, match="pull_request"):
+        parse_issue_type_directory(json.dumps(bad))

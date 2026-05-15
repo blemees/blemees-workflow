@@ -131,24 +131,54 @@ def test_gates_in_legend_built_from_hitl_transitions() -> None:
 
 
 def test_parses_real_refinement_workflow(refinement_workflow_path: Path) -> None:
+    """The shipped refinement example parses, declares its issue types,
+    and carries cross-process transitions to inner-loop (shared) plus an
+    entry from inner-loop for bounced issues."""
     workflow = parse_state_machine(refinement_workflow_path)
     assert workflow.name == "refinement"
     assert "raw" in workflow.states
     assert "ready_for_dev" in workflow.states
-    assert "ready_for_dev" in workflow.gates_in_legend
-    assert "wont_fix" in workflow.gates_in_legend
+    assert "ready_bounced" in workflow.states
+    assert "wont_fix" in workflow.states
+    assert "duplicate" in workflow.states
+    assert set(workflow.issue_types) >= {"bug", "feature"}
     cross = [t for t in workflow.transitions if t.transition_type is TransitionType.CROSS_PROCESS]
-    assert len(cross) == 1
-    assert cross[0].cross_process_kind == "shared"
-    assert cross[0].cross_process_other == "inner-loop"
+    # At minimum: entry from inner-loop, exit to inner-loop (×2 — ready_for_dev + ready_for_experiment).
+    assert len(cross) >= 3
+    targets = {t.cross_process_other for t in cross}
+    assert "inner-loop" in targets
+
+
+def test_pr_process_declares_pr_issue_type(workflow_dir: Path) -> None:
+    """The PR process declares `issue_types: ["pr"]` — PR work items are
+    of the pre-defined `pr` type (mapping to GitHub pull-request entities,
+    not native Issue Types)."""
+    workflow = parse_state_machine(workflow_dir / "pr-states.json")
+    assert workflow.name == "pr"
+    assert workflow.issue_types == ["pr"]
 
 
 def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None:
+    """Inner-loop has four variation groups (feature/bug/chore, experiment,
+    spike, hotfix), each with entry, claim, PR-review, and staged states."""
     workflow = parse_state_machine(inner_loop_workflow_path)
     assert workflow.name == "inner-loop"
     assert workflow.states["ready_for_dev"].claim_role == "developer"
     assert workflow.states["ready_for_dev"].state_class is StateClass.RESTING
-    assert workflow.gates_in_legend == {
-        "merge_to_main": ReversibilityClass.REVERSIBLE_SLOW,
-        "bounce_back": ReversibilityClass.REVERSIBLE_FAST,
-    }
+    assert "implementing" in workflow.states
+    assert "implementing_experiment" in workflow.states
+    assert "implementing_spike" in workflow.states
+    assert "implementing_hotfix" in workflow.states
+    # Spike entry is a spawn (new work item starts on inner-loop).
+    spike_entry = next(
+        (
+            t
+            for t in workflow.transitions
+            if t.source == "[*]"
+            and t.destination == "ready_for_spike"
+            and t.transition_type is TransitionType.CROSS_PROCESS
+        ),
+        None,
+    )
+    assert spike_entry is not None
+    assert spike_entry.cross_process_kind == "spawn"

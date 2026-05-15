@@ -1,0 +1,31 @@
+flowchart LR
+
+    backport(backport)
+    experimentation(experimentation)
+    incident_response(incident-response)
+    inner_loop(inner-loop)
+    mitigation(mitigation)
+    postmortem(postmortem)
+    pr(pr)
+    progressive_rollout(progressive-rollout)
+    refinement(refinement)
+    release(release)
+
+    backport -.->|accumulating| release
+    incident_response -.->|ready_for_backport| backport
+    incident_response -.->|ready_for_flag_toggle| mitigation
+    incident_response -.->|ready_for_hotfix| mitigation
+    incident_response -.->|ready_for_rollback| mitigation
+    incident_response -.->|pending| postmortem
+    inner_loop -.->|draft| pr
+    inner_loop ==>|ready_bounced| refinement
+    inner_loop -.->|accumulating| release
+    inner_loop -.->|staged| release
+    inner_loop -.->|staged_experiment| release
+    inner_loop -.->|staged_hotfix| release
+    mitigation ==>|ready_for_hotfix| inner_loop
+    refinement ==>|ready_for_dev| inner_loop
+    refinement ==>|ready_for_experiment| inner_loop
+    refinement -.->|ready_for_spike| inner_loop
+    release -.->|measuring| experimentation
+    release -.->|soaking| progressive_rollout

@@ -306,8 +306,9 @@ def test_init_creates_config_and_trust_grants_dir(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """`workflow init --role pm --agent-home <dir>` writes config.json and an
-    empty trust-grants/ subdirectory."""
+    """`workflow init --role pm --agent-home <dir>` writes config.json and
+    scaffolds the default `.workflow/workflows/` + `.workflow/trust-grants/`
+    subdirectories."""
     rc = cli(
         [
             "--agent-home",
@@ -328,9 +329,41 @@ def test_init_creates_config_and_trust_grants_dir(
     assert workflows_path.is_dir()
 
     config = json.loads(config_path.read_text())
-    # Only `agent-role` is written. `repo`, `host`, the workflow / path
-    # fields are all per-invocation or auto-discovered.
+    # Only `agent-role` is written when --workflow-dir is not supplied.
+    # `repo`, `host`, and the workflow path fields stay per-invocation or
+    # use the default location.
     assert config == {"agent-role": "pm"}
+
+
+def test_init_records_workflow_dir_when_provided(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Passing --workflow-dir to init writes the relative path into the
+    config as the `workflow-dir` entry — that's how a per-role agent home
+    points at a shared workflows directory. The default
+    `.workflow/workflows/` is still scaffolded; the config entry overrides
+    it at lookup time."""
+    rc = cli(
+        [
+            "--agent-home",
+            str(tmp_path),
+            "--agent-role",
+            "pm",
+            "init",
+            "--workflow-dir",
+            "../../workflows",
+        ]
+    )
+    assert rc == 0
+    config = json.loads((tmp_path / ".workflow" / "config.json").read_text())
+    assert config == {
+        "agent-role": "pm",
+        "workflow-dir": "../../workflows",
+    }
+    # Default workflows/ is still created — the config entry just overrides
+    # the lookup target.
+    assert (tmp_path / ".workflow" / "workflows").is_dir()
 
 
 def test_init_minimal_config_contains_only_role(
@@ -463,6 +496,7 @@ def test_init_json_output(
     # Both default subdirectories are reported in the JSON output.
     assert payload["workflow_dir"].endswith(".workflow/workflows")
     assert payload["grants_dir"].endswith(".workflow/trust-grants")
+    assert payload["grants_dir"].endswith(".workflow/trust-grants")
 
 
 def test_create_dry_run_does_not_call_backend(
@@ -494,6 +528,195 @@ def test_create_dry_run_does_not_call_backend(
     assert not create_mock.called
     assert "[dry-run]" in output
     assert "raw" in output
+
+
+def test_create_pr_dry_run_shows_pr_specific_plan(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`create --to draft` resolves to the pr process and the pr type;
+    the dry-run output names the PR-specific fields (head, base, refs, draft)."""
+    rc = cli(
+        [
+            "--dry-run",
+            "--workflow-dir",
+            str(workflow_dir),
+            "create",
+            "--to",
+            "draft",
+            "--title",
+            "feat: add the thing",
+            "--body",
+            "Implements thing X.",
+            "--head",
+            "feat/thing",
+            "--base",
+            "main",
+            "--refs",
+            "42",
+            "--refs",
+            "43",
+        ]
+    )
+    output = capsys.readouterr().out
+    assert rc == 0, output
+    assert "would create pull request" in output
+    assert "head:          feat/thing" in output
+    assert "base:          main" in output
+    assert "#42, #43" in output
+    assert "draft:         True" in output
+
+
+def test_create_pr_requires_head(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Creating a PR without --head fails fast with a clear error."""
+    rc = cli(
+        [
+            "--dry-run",
+            "--workflow-dir",
+            str(workflow_dir),
+            "create",
+            "--to",
+            "draft",
+            "--title",
+            "x",
+            "--body",
+            "y",
+            "--refs",
+            "1",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "--head" in (captured.out + captured.err)
+
+
+def test_create_pr_requires_refs(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Creating a PR without any --refs fails fast."""
+    rc = cli(
+        [
+            "--dry-run",
+            "--workflow-dir",
+            str(workflow_dir),
+            "create",
+            "--to",
+            "draft",
+            "--title",
+            "x",
+            "--body",
+            "y",
+            "--head",
+            "feat/x",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "--refs" in (captured.out + captured.err)
+
+
+def test_create_pr_requires_body(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """PRs need a description — body is mandatory."""
+    rc = cli(
+        [
+            "--dry-run",
+            "--workflow-dir",
+            str(workflow_dir),
+            "create",
+            "--to",
+            "draft",
+            "--title",
+            "x",
+            "--head",
+            "feat/x",
+            "--refs",
+            "1",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "body" in (captured.out + captured.err).lower()
+
+
+def test_create_issue_rejects_pr_flags(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """--head / --base / --refs are PR-only; passing them on an issue create
+    fails fast."""
+    rc = cli(
+        [
+            "--dry-run",
+            "--workflow-dir",
+            str(workflow_dir),
+            "create",
+            "--to",
+            "raw",
+            "--type",
+            "bug",
+            "--title",
+            "x",
+            "--head",
+            "branch",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "--head" in (captured.out + captured.err)
+
+
+def test_create_pr_invokes_backend_pull_request_path(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """A successful PR create calls backend.create_pull_request (not
+    create_issue) and the body carries the framework's Refs footer."""
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.create_issue",
+        ) as create_issue_mock,
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.create_pull_request",
+            return_value="77",
+        ) as create_pr_mock,
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "create",
+                "--to",
+                "draft",
+                "--title",
+                "feat: thing",
+                "--body",
+                "Adds thing.",
+                "--head",
+                "feat/thing",
+                "--refs",
+                "42",
+            ]
+        )
+    output = capsys.readouterr().out
+    assert rc == 0, output
+    assert not create_issue_mock.called
+    create_pr_mock.assert_called_once()
+    kwargs = create_pr_mock.call_args.kwargs
+    assert kwargs["title"] == "feat: thing"
+    assert kwargs["state"] == "draft"
+    assert kwargs["head"] == "feat/thing"
+    assert kwargs["draft"] is True
+    assert "Refs #42" in kwargs["body"]
+    assert kwargs["body"].startswith("Adds thing.")
 
 
 def test_create_unknown_state_errors_clean(

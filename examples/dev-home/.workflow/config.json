@@ -1,5 +1,0 @@
-{
-  "agent-role": "developer",
-  "workflow-dir": "../.workflow/workflows",
-  "grants-dir": "../.workflow/trust-grants"
-}

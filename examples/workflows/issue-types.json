@@ -1,0 +1,45 @@
+{
+  "types": {
+    "bug": {
+      "name": "Bug",
+      "description": "Defect in shipped behavior — something is broken or wrong. Branch prefix `fix/`. Failing test first; reviewer scrutinizes root cause vs surface symptom.",
+      "github_issue_type": "Bug",
+      "github_issue_type_color": "red"
+    },
+    "feature": {
+      "name": "Feature",
+      "description": "New user-facing capability or enhancement to existing behavior. Branch prefix `feat/`. Standard inner-loop flow with no per-step variations.",
+      "github_issue_type": "Feature",
+      "github_issue_type_color": "green"
+    },
+    "hotfix": {
+      "name": "Hotfix",
+      "description": "Compressed inner-loop work for urgent production fixes during active incidents. Branch prefix `hotfix/`. Spawned by mitigation under IC authority; skips refinement; QA may be bypassed.",
+      "github_issue_type": "Hotfix",
+      "github_issue_type_color": "orange"
+    },
+    "chore": {
+      "name": "Chore",
+      "description": "Internal cleanup with no user-visible behavior change: refactors, dependency bumps, lint config. Branch prefix `chore/`. QA may be skipped at reviewer discretion.",
+      "github_issue_type": "Chore",
+      "github_issue_type_color": "blue"
+    },
+    "spike": {
+      "name": "Spike",
+      "description": "Time-boxed investigation. Branch prefix `spike/`. Deliverable is a findings doc, not merged code — the PR is never merged. Follow-ups re-enter refinement.",
+      "github_issue_type": "Spike",
+      "github_issue_type_color": "purple"
+    },
+    "experiment": {
+      "name": "Experiment",
+      "description": "Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Requires hypothesis, metric, and cohort up-front. Post-merge owned by product-owner; closes at verdict on the experimentation lifecycle.",
+      "github_issue_type": "Experiment",
+      "github_issue_type_color": "pink"
+    },
+    "pr": {
+      "name": "Pull Request",
+      "description": "A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create`; the framework recognises it for cross-process modelling and documentation.",
+      "github_entity": "pull_request"
+    }
+  }
+}

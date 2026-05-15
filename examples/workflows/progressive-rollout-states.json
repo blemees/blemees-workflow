@@ -1,0 +1,51 @@
+{
+  "name": "progressive-rollout",
+  "canonical_catalog_path": "progressive-rollout-hcps.json",
+  "states": {
+    "soaking": {
+      "class": "resting"
+    },
+    "ready_for_stage_analysis": {
+      "class": "resting",
+      "claim_role": "developer"
+    },
+    "analyzing": {
+      "class": "working"
+    },
+    "holding": {
+      "class": "resting",
+      "claim_role": "developer"
+    },
+    "killing": {
+      "class": "working"
+    },
+    "complete": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    },
+    "kill_switched": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "reverted",
+      "close_reason": "completed"
+    }
+  },
+  "transitions": [
+    {"source": "[*]", "destination": "soaking", "type": "cross_process", "label": "from process release (first stage activated)", "kind": "spawn", "process": "release"},
+
+    {"source": "soaking", "destination": "ready_for_stage_analysis", "type": "external", "label": "soak window elapses (time)"},
+
+    {"source": "ready_for_stage_analysis", "destination": "analyzing", "type": "claim", "label": "on-call claims stage analysis"},
+
+    {"source": "analyzing", "destination": "soaking", "type": "role_action", "label": "on-call advances to next stage"},
+    {"source": "analyzing", "destination": "complete", "type": "role_action", "label": "on-call confirms final stage healthy"},
+    {"source": "analyzing", "destination": "holding", "type": "role_action", "label": "on-call pauses rollout"},
+    {"source": "analyzing", "destination": "killing", "type": "role_action", "label": "on-call claims to kill rollout"},
+
+    {"source": "holding", "destination": "analyzing", "type": "claim", "label": "on-call re-claims held rollout"},
+
+    {"source": "killing", "destination": "kill_switched", "type": "role_action", "label": "on-call disables flag, files compensating bug"}
+  ]
+}

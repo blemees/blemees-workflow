@@ -15,6 +15,8 @@ from workflow.core.emitter.docs import (
     emit_index_doc,
     emit_issue_types_doc,
     emit_process_doc,
+    emit_process_map,
+    emit_process_map_doc,
     emit_roles_doc,
 )
 from workflow.core.emitter.mermaid import emit_mermaid
@@ -24,6 +26,8 @@ __all__ = [
     "emit_process_doc",
     "emit_roles_doc",
     "emit_issue_types_doc",
+    "emit_process_map",
+    "emit_process_map_doc",
     "emit_index_doc",
     "ProcessDocInput",
 ]

@@ -22,6 +22,15 @@ class IssueType:
     Type (now a first-class field on GitHub issues). `github_issue_type_color`
     is an optional color hint used when `setup-github` provisions the type
     at the org (GitHub accepts gray/blue/green/yellow/orange/red/pink/purple).
+
+    `github_entity` says which GitHub entity this type maps to: `"issue"`
+    (default) or `"pull_request"`. Pull requests aren't a native GitHub
+    Issue Type — the type is implicit in the entity kind. The framework
+    treats `pr` as a pre-defined type so PR work items are first-class
+    alongside bug/feature/etc., but they are spawned via `gh pr create`
+    (typically by a developer from inner-loop's implementing state), not
+    via `workflow create`.
+
     Other backends may add similar fields; the framework's `type_id` is
     the canonical name.
     """
@@ -31,6 +40,7 @@ class IssueType:
     description: str
     github_issue_type: str | None = None
     github_issue_type_color: str | None = None
+    github_entity: str = "issue"
 
 
 @dataclass

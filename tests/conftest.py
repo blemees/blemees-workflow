@@ -1,10 +1,11 @@
 """Pytest fixtures for the workflow tool.
 
-Points at the in-repo `examples/.workflow/workflows/` directory so parsers,
+Points at the in-repo `examples/workflows/` directory so parsers,
 validator, planner, and CLI smoke tests run against the canonical example
-workflows shipped with the codebase. These same files are what the README's
-walkthroughs reference; keeping the tests honest against them prevents the
-example from drifting out of sync with the framework.
+workflows shipped with the codebase. The shared `workflows/` folder is
+referenced by every per-role agent home under `examples/<role>/.workflow/`
+via a `workflow-dir` config entry. Keeping the tests honest against the
+shipped files prevents the examples from drifting out of sync.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_EXAMPLE_WORKFLOWS = _REPO_ROOT / "examples" / ".workflow" / "workflows"
+_EXAMPLE_WORKFLOWS = _REPO_ROOT / "examples" / "workflows"
 
 
 @pytest.fixture(autouse=True)

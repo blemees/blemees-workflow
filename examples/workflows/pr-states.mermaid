@@ -1,0 +1,29 @@
+stateDiagram-v2
+    %% Cross-process interfaces:
+    %%   Entry (spawn ): draft from process inner-loop
+    %%
+
+    [*] --> draft: from process inner-loop (developer opens draft PR at ticket claim)
+    draft --> needs_review: developer marks PR ready for review
+    needs_review --> reviewing: reviewer claims PR
+    reviewing --> needs_qa: reviewer approves PR
+    reviewing --> qa_passed: reviewer approves hotfix PR (QA skipped, IC discretion)
+    reviewing --> changes_requested: reviewer requests changes
+    changes_requested --> fixing_review: developer claims PR for fixes
+    fixing_review --> needs_review: developer re-requests review
+    needs_qa --> verifying: QA claims PR
+    verifying --> qa_passed: QA posts pass verdict
+    verifying --> qa_failed: QA posts fail verdict
+    qa_failed --> fixing_qa: developer claims PR for fixes
+    fixing_qa --> needs_review: developer re-requests review
+    qa_passed --> merging: developer claims and merges
+    merging --> staged: verified staging deploy
+    merging --> needs_review: merge conflict or failed staging deploy
+    staged --> [*]: terminal (shipped)
+
+    note right of needs_review: claim-role=reviewer
+    note right of changes_requested: claim-role=developer
+    note right of needs_qa: claim-role=qa
+    note right of qa_passed: claim-role=developer
+    note right of qa_failed: claim-role=developer
+    note right of staged: reversible-slow

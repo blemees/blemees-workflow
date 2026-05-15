@@ -1,0 +1,89 @@
+{
+  "name": "refinement",
+  "canonical_catalog_path": "refinement-hcps.json",
+  "issue_types": ["bug", "feature", "chore", "experiment"],
+  "states": {
+    "raw": {
+      "class": "resting",
+      "claim_role": "pm"
+    },
+    "refining": {
+      "class": "working"
+    },
+    "consult_requested": {
+      "class": "resting"
+    },
+    "consulting": {
+      "class": "working"
+    },
+    "consult_complete": {
+      "class": "resting",
+      "claim_role": "pm"
+    },
+    "spiking": {
+      "class": "resting"
+    },
+    "ready_for_dev": {
+      "class": "resting",
+      "reversibility": "reversible-slow"
+    },
+    "ready_for_experiment": {
+      "class": "resting",
+      "reversibility": "reversible-slow"
+    },
+    "ready_bounced": {
+      "class": "resting",
+      "claim_role": "pm",
+      "reversibility": "reversible-fast"
+    },
+    "deprioritized": {
+      "class": "resting",
+      "claim_role": "pm"
+    },
+    "duplicate": {
+      "class": "terminal",
+      "reversibility": "reversible-fast",
+      "terminal_taxonomy": "deduplicated",
+      "close_reason": "not planned"
+    },
+    "wont_fix": {
+      "class": "terminal",
+      "reversibility": "reversible-fast",
+      "terminal_taxonomy": "abandoned",
+      "close_reason": "not planned"
+    }
+  },
+  "transitions": [
+    {"source": "[*]", "destination": "raw", "type": "external", "label": "issue created (external)"},
+    {"source": "[*]", "destination": "ready_bounced", "type": "cross_process", "label": "from process inner-loop", "kind": "shared", "process": "inner-loop"},
+
+    {"source": "raw", "destination": "refining", "type": "claim", "label": "PM claims raw"},
+
+    {"source": "refining", "destination": "duplicate", "type": "role_action", "label": "PM marks duplicate"},
+    {"source": "refining", "destination": "wont_fix", "type": "role_action", "label": "PM marks won't-fix"},
+
+    {"source": "refining", "destination": "consult_requested", "type": "role_action", "label": "PM requests consult"},
+    {"source": "consult_requested", "destination": "consulting", "type": "claim", "label": "consultant claims consult"},
+
+    {"source": "consulting", "destination": "consult_complete", "type": "role_action", "label": "consultant posts findings"},
+    {"source": "consult_complete", "destination": "refining", "type": "claim", "label": "PM claims consult feedback"},
+
+    {"source": "consulting", "destination": "spiking", "type": "role_action", "label": "consultant creates spike sub-issue (spawns spike to inner-loop ready_for_spike)"},
+    {"source": "spiking", "destination": "consulting", "type": "claim", "label": "consultant claims spike findings"},
+
+    {"source": "refining", "destination": "ready_for_dev", "type": "role_action", "label": "PM marks ready (feat/bug/chore)"},
+    {"source": "refining", "destination": "ready_for_experiment", "type": "role_action", "label": "PM marks ready (exp)"},
+
+    {"source": "ready_for_dev", "destination": "[*]", "type": "cross_process", "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"},
+    {"source": "ready_for_experiment", "destination": "[*]", "type": "cross_process", "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"},
+
+    {"source": "ready_bounced", "destination": "refining", "type": "claim", "label": "PM claims bounced issue"},
+
+    {"source": "refining", "destination": "deprioritized", "type": "role_action", "label": "PM parks issue"},
+    {"source": "ready_for_dev", "destination": "deprioritized", "type": "role_action", "label": "PM parks issue"},
+    {"source": "ready_for_experiment", "destination": "deprioritized", "type": "role_action", "label": "PM parks issue"},
+
+    {"source": "deprioritized", "destination": "refining", "type": "claim", "label": "PM claims to re-refine (staleness check)"},
+    {"source": "deprioritized", "destination": "wont_fix", "type": "role_action", "label": "PM kills parked issue"}
+  ]
+}

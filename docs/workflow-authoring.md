@@ -175,8 +175,8 @@ $ git add refinement-states.json refinement-states.mermaid refinement.md \
 
 ## Annotated examples
 
-See [`../examples/.workflow/workflows/refinement-states.json`](../examples/.workflow/workflows/refinement-states.json)
-and [`../examples/.workflow/workflows/inner-loop-states.json`](../examples/.workflow/workflows/inner-loop-states.json)
+See [`../examples/workflows/refinement-states.json`](../examples/workflows/refinement-states.json)
+and [`../examples/workflows/inner-loop-states.json`](../examples/workflows/inner-loop-states.json)
 for two full workflow definitions that validate clean. Inspect the
 generated `.mermaid` files alongside them to see what the emitter
 produces.

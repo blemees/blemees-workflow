@@ -110,6 +110,35 @@ Each process declares which issue types it accepts via a top-level `"issue_types
 
 `workflow create` requires `--type` when the process supports multiple types; auto-defaults when only one. Issue type is set at creation and **immutable** — if a type needs to change, that's a new issue, not a retype. The validator checks every type id a process declares exists in `issue-types.json`; missing ids are an ERROR, missing directory is a WARNING.
 
+### `pr` — the pre-defined pull-request type
+
+`pr` is a built-in type that maps to GitHub pull-request entities rather than issues. The `IssueType` entry carries `"github_entity": "pull_request"` (default for every other type is `"issue"`); `github_issue_type` is forbidden on a `pull_request` entry because PRs are not a native GitHub Issue Type — the type is implicit in the entity kind.
+
+The PR process declares `"issue_types": ["pr"]`. PRs are created via the same `workflow create` command as issues, with **extra required flags** that drive a framework-applied message format:
+
+- `--head BRANCH` (required) — source branch.
+- `--base BRANCH` (optional) — target branch; backend defaults to the repo's default branch when omitted.
+- `--refs N` (required, repeatable) — parent ticket id(s) the PR addresses. Renders as a `Refs #N, #M, ...` footer in the body.
+- `--body` is required for PRs (PRs need a description; the framework wraps it).
+
+The backend dispatches to `create_pull_request` (which shells out to `gh pr create`) rather than `create_issue`. When the initial state is `draft`, the PR is opened in GitHub's draft mode. The `state:<name>` label is attached atomically. The framework does **not** apply a `type:` label or native Issue Type to PRs — the entity kind itself conveys the type.
+
+One ticket can spawn zero (spike findings doc only), one (typical), or many PRs (incident mitigation chain, hotfix + backports, multi-component feature) — the cardinality between an issue and its PRs is **1:N**, and the framework does not gate the parent ticket's advancement on the PR set. Each PR is an independent work item; the agent decides when the parent advances. The spawn from `inner-loop.implementing → pr.draft` is modelled on `pr-states.json` for documentation; agents may also create PRs directly with `workflow create --to draft --head ... --refs ...` (e.g., for backports that don't pass through inner-loop).
+
+#### Standard PR message format
+
+The framework appends a footer to whatever body the user supplies:
+
+```
+<user body>
+
+---
+
+Refs #<ticket>[, #<ticket>...]
+```
+
+GitHub auto-links the `#N` references as cross-references on the parent ticket. The footer is mandatory and not user-configurable at this layer — projects that want richer templates should compose their body before passing it to `--body`.
+
 ### Type encoding (native vs label)
 
 How the type is recorded on the tracker depends on what the org supports:

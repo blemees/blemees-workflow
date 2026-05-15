@@ -129,6 +129,32 @@ class TrackerBackend(Protocol):
         """
         ...
 
+    def create_pull_request(
+        self,
+        title: str,
+        body: str,
+        state: str,
+        head: str,
+        base: str | None = None,
+        draft: bool = False,
+        extra_labels: list[str] | None = None,
+    ) -> str:
+        """Create a new pull request in the given initial state.
+
+        Distinct from `create_issue` because the backend dispatches to a
+        different tracker entity (GitHub PRs aren't Issues; some trackers
+        merge the two but the creation path still differs). The framework's
+        `state:<name>` marker is attached atomically with creation.
+
+        `head` is the source branch; `base` is the target branch (None
+        means the backend chooses the repo default). `draft` opens the PR
+        in the tracker's draft mode — typically aligned with the initial
+        framework state being `draft`, but they're independent.
+
+        Returns the new PR's id (issue/PR number for GitHub).
+        """
+        ...
+
     def read_issue(self, issue_id: str) -> IssueState:
         """Fetch the issue's current framework-relevant markers."""
         ...

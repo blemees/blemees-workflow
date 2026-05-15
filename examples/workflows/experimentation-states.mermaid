@@ -1,0 +1,24 @@
+stateDiagram-v2
+    %% Cross-process interfaces:
+    %%   Entry (spawn ): measuring from process release
+    %%
+
+    [*] --> measuring: from process release (experiment released to production)
+    measuring --> measurement_complete: measurement window elapses (time)
+    measuring --> aborting: PO claims to abort
+    aborting --> aborted: PO publishes abort reason
+    measurement_complete --> analyzing: PO claims experiment for analysis
+    analyzing --> measuring: PO extends experiment, resets window
+    analyzing --> promoted: PO promotes experiment to feature (files promotion chore on process refinement)
+    analyzing --> killed: PO kills experiment (files cleanup chore on process refinement)
+    analyzing --> iterated: PO requests experiment iteration (files new experiment on process refinement)
+    promoted --> [*]: terminal (shipped)
+    killed --> [*]: terminal (abandoned)
+    iterated --> [*]: terminal (iterated)
+    aborted --> [*]: terminal (aborted)
+
+    note right of measurement_complete: claim-role=product-owner
+    note right of promoted: reversible-slow
+    note right of killed: reversible-slow
+    note right of iterated: reversible-fast
+    note right of aborted: reversible-fast

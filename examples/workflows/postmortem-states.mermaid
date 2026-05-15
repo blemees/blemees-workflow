@@ -1,0 +1,15 @@
+stateDiagram-v2
+    %% Cross-process interfaces:
+    %%   Entry (spawn ): pending from process incident-response
+    %%
+
+    [*] --> pending: from process incident-response (incident stabilized)
+    pending --> drafting: PM claims postmortem
+    drafting --> ready_for_followups: PM completes postmortem narrative
+    ready_for_followups --> creating_followups: PM claims for follow-up filing
+    creating_followups --> complete: PM files compensating issues (spawn events to process refinement)
+    complete --> [*]: terminal (resolved)
+
+    note left of pending: claim-role=pm, reversible-slow
+    note right of ready_for_followups: claim-role=pm
+    note right of complete: reversible-slow

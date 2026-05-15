@@ -118,6 +118,18 @@ def _resolve_body(args: argparse.Namespace) -> str | None:
         raise ConfigError(f"Could not read body file {body_from}: {exc}") from exc
 
 
+def _format_pr_body(user_body: str, refs: list[str]) -> str:
+    """Apply the framework's standard PR message format.
+
+    Appends a horizontal rule and a `Refs #N, #M, ...` footer to the
+    user-supplied body. Each ref is normalised to a `#N` form (leading
+    `#` stripped from input then re-added) so callers can pass either
+    `123` or `#123`. GitHub auto-links these as cross-references.
+    """
+    refs_line = ", ".join(f"#{r.lstrip('#')}" for r in refs)
+    return f"{user_body.rstrip()}\n\n---\n\nRefs {refs_line}\n"
+
+
 def _path_existing_file(value: str) -> Path:
     p = Path(value)
     if not p.exists():
@@ -453,6 +465,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Atomically claim the new item for the agent's role "
         "(adds `wip:<agent-role>` alongside the state label).",
     )
+    # PR-specific flags — applicable only when the resolved issue type maps to
+    # the pull-request entity (e.g., type=pr). Validated at runtime, not via
+    # argparse `required`, since they don't apply to issue-entity types.
+    p_create.add_argument(
+        "--head",
+        default=None,
+        help="(PR types only) Source branch for the pull request.",
+    )
+    p_create.add_argument(
+        "--base",
+        default=None,
+        help="(PR types only) Target branch for the pull request. "
+        "Defaults to the repo's default branch when omitted.",
+    )
+    p_create.add_argument(
+        "--refs",
+        dest="refs",
+        action="append",
+        default=None,
+        help="(PR types only) Ticket id(s) this PR addresses. Repeat for "
+        "multiple parents (e.g., --refs 123 --refs 456). Rendered as "
+        "'Refs #N' in the standard message footer.",
+    )
     p_create.set_defaults(func=_do_create)
 
     p_inbox = subparsers.add_parser(
@@ -601,10 +636,14 @@ def build_parser() -> argparse.ArgumentParser:
             "the agent's identity (the global --agent-role, required for "
             "init) and creates empty `.workflow/workflows/` and "
             "`.workflow/trust-grants/` subdirectories — the default "
-            "locations for workflow definitions and trust grants. The "
-            "target directory is the global --agent-home, defaulting to "
-            "cwd. Refuses to overwrite an existing config.json unless "
-            "--force is passed."
+            "locations for workflow definitions and trust grants. To "
+            "point at a shared workflows directory instead, pass "
+            "`--workflow-dir PATH`; the path is written into the config "
+            "as the `workflow-dir` entry and overrides the default at "
+            "lookup time (relative paths are resolved from the agent "
+            "home). The target directory is the global --agent-home, "
+            "defaulting to cwd. Refuses to overwrite an existing "
+            "config.json unless --force is passed."
         ),
     )
     p_init.add_argument(
@@ -612,6 +651,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Overwrite an existing config.json if present.",
+    )
+    p_init.add_argument(
+        "--workflow-dir",
+        dest="init_workflow_dir",
+        default=None,
+        help="Path to the shared workflows directory. Written into the "
+        "config as the `workflow-dir` entry. Relative paths are stored "
+        "as-is and resolved from the agent home at lookup time "
+        "(e.g., `--workflow-dir ../../workflows`).",
     )
     p_init.set_defaults(func=_do_init)
 
@@ -1497,6 +1545,53 @@ def _do_create(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # Resolve the IssueType entry once. We need it early to know whether
+    # this is a pull-request create (different backend call, extra required
+    # flags, framework-applied message footer).
+    type_entry = None
+    if issue_type is not None and process.issue_type_directory is not None:
+        try:
+            type_entry = process.issue_type_directory.get(issue_type)
+        except KeyError:
+            _handle_workflow_error(
+                ConfigError(
+                    f"Issue type {issue_type!r} is declared by the process "
+                    f"but not defined in issue-types.json."
+                )
+            )
+            return 2
+
+    is_pr = type_entry is not None and type_entry.github_entity == "pull_request"
+
+    # PR-specific flag gating. --head/--base/--refs are valid only when the
+    # resolved type maps to pull-requests; conversely, PR creates require
+    # --head and at least one --refs.
+    if is_pr:
+        if not args.head:
+            _handle_workflow_error(
+                ConfigError(
+                    "--head BRANCH is required when creating a pull request."
+                )
+            )
+            return 2
+        if not args.refs:
+            _handle_workflow_error(
+                ConfigError(
+                    "--refs N is required when creating a pull request "
+                    "(repeat for multiple parents, e.g., --refs 123 --refs 456)."
+                )
+            )
+            return 2
+    else:
+        if args.head or args.base or args.refs:
+            _handle_workflow_error(
+                ConfigError(
+                    "--head / --base / --refs are only valid when --type "
+                    "maps to GitHub pull requests."
+                )
+            )
+            return 2
+
     # 3. Resolve claim role if --claim is set.
     claim_role: str | None = None
     if args.claim:
@@ -1516,32 +1611,55 @@ def _do_create(args: argparse.Namespace) -> int:
     except WorkflowError as exc:
         _handle_workflow_error(exc)
         return 2
-    body = body_text if body_text is not None else ""
+
+    # For PR creates, the body is mandatory — the framework wraps it in a
+    # standard message format and a description is part of the contract.
+    if is_pr and (body_text is None or not body_text.strip()):
+        _handle_workflow_error(
+            ConfigError(
+                "--body / --body-from is required when creating a pull "
+                "request — PRs need a description."
+            )
+        )
+        return 2
+
+    if is_pr:
+        body = _format_pr_body(body_text or "", refs=args.refs)
+    else:
+        body = body_text if body_text is not None else ""
 
     # 5. Dry run path: print the plan, don't touch the backend.
     if ctx["dry_run"]:
         extras = [f"wip:{claim_role}"] if claim_role else []
         if ctx["json_output"]:
-            print(
-                _json.dumps(
-                    {
-                        "workflow": process_name,
-                        "initial_state": args.initial_state,
-                        "title": args.title,
-                        "type": issue_type,
-                        "labels": [f"state:{args.initial_state}", *extras],
-                        "body_chars": len(body),
-                        "dry_run": True,
-                    },
-                    indent=2,
-                )
-            )
+            payload: dict[str, Any] = {
+                "workflow": process_name,
+                "initial_state": args.initial_state,
+                "title": args.title,
+                "type": issue_type,
+                "labels": [f"state:{args.initial_state}", *extras],
+                "body_chars": len(body),
+                "dry_run": True,
+            }
+            if is_pr:
+                payload["entity"] = "pull_request"
+                payload["head"] = args.head
+                payload["base"] = args.base
+                payload["refs"] = [r.lstrip("#") for r in args.refs]
+                payload["draft"] = args.initial_state == "draft"
+            print(_json.dumps(payload, indent=2))
         else:
-            print(f"[dry-run] would create issue in workflow {process_name!r}:")
+            noun = "pull request" if is_pr else "issue"
+            print(f"[dry-run] would create {noun} in workflow {process_name!r}:")
             print(f"  title:         {args.title}")
             print(f"  initial state: {args.initial_state}")
             if issue_type:
                 print(f"  type:          {issue_type}")
+            if is_pr:
+                print(f"  head:          {args.head}")
+                print(f"  base:          {args.base or '(repo default)'}")
+                print(f"  refs:          {', '.join('#' + r.lstrip('#') for r in args.refs)}")
+                print(f"  draft:         {args.initial_state == 'draft'}")
             if claim_role:
                 print(f"  claim:         {claim_role}")
             print(f"  body:          {len(body)} character(s)")
@@ -1554,46 +1672,53 @@ def _do_create(args: argparse.Namespace) -> int:
         _handle_workflow_error(exc)
         return 2
 
-    # Resolve encoding from capability cache (probe if needed). Then resolve
-    # framework type id to either a backend-specific type string (native
-    # encoding) or a `type:<id>` label (label encoding).
-    backend_issue_type: str | None = None
-    type_extra_labels: list[str] = []
-    if issue_type is not None:
-        encoding = _resolve_encoding(ctx, backend)
-        if process.issue_type_directory is not None:
-            try:
-                type_entry = process.issue_type_directory.get(issue_type)
-            except KeyError:
-                _handle_workflow_error(
-                    ConfigError(
-                        f"Issue type {issue_type!r} is declared by the process "
-                        f"but not defined in issue-types.json."
-                    )
-                )
-                return 2
-            if encoding == "native":
-                backend_issue_type = type_entry.github_issue_type
-            else:
+    if is_pr:
+        # PRs don't carry a native GitHub Issue Type and don't get a
+        # `type:` label (the entity kind is the type). Open the PR as a
+        # draft when landing on the framework's `draft` state.
+        try:
+            new_id = backend.create_pull_request(
+                title=args.title,
+                body=body,
+                state=args.initial_state,
+                head=args.head,
+                base=args.base,
+                draft=args.initial_state == "draft",
+            )
+        except BackendError as exc:
+            _handle_workflow_error(exc)
+            return 2
+    else:
+        # Resolve encoding from capability cache (probe if needed). Then
+        # resolve the framework type id to either a backend-specific type
+        # string (native encoding) or a `type:<id>` label (label encoding).
+        backend_issue_type: str | None = None
+        type_extra_labels: list[str] = []
+        if issue_type is not None:
+            encoding = _resolve_encoding(ctx, backend)
+            if type_entry is not None:
+                if encoding == "native":
+                    backend_issue_type = type_entry.github_issue_type
+                else:
+                    type_extra_labels = [f"type:{issue_type}"]
+            elif encoding == "label":
+                # Fall back to `type:<id>` even without a directory entry.
                 type_extra_labels = [f"type:{issue_type}"]
-        elif encoding == "label":
-            # Fall back to `type:<id>` even without a directory entry.
-            type_extra_labels = [f"type:{issue_type}"]
 
-    # Create at the initial state with no claim label. Claiming, if
-    # requested, runs as a second operation so the state machine moves
-    # resting → working properly (sets wip:<role> AND wip-from:<initial_state>).
-    try:
-        new_id = backend.create_issue(
-            title=args.title,
-            body=body,
-            state=args.initial_state,
-            extra_labels=type_extra_labels,
-            issue_type=backend_issue_type,
-        )
-    except BackendError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        # Create at the initial state with no claim label. Claiming, if
+        # requested, runs as a second operation so the state machine moves
+        # resting → working properly (sets wip:<role> AND wip-from:<initial_state>).
+        try:
+            new_id = backend.create_issue(
+                title=args.title,
+                body=body,
+                state=args.initial_state,
+                extra_labels=type_extra_labels,
+                issue_type=backend_issue_type,
+            )
+        except BackendError as exc:
+            _handle_workflow_error(exc)
+            return 2
 
     # 6. If --claim, immediately claim the new issue.
     claim_result = None
@@ -2076,6 +2201,8 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         emit_issue_types_doc,
         emit_mermaid,
         emit_process_doc,
+        emit_process_map,
+        emit_process_map_doc,
         emit_roles_doc,
     )
 
@@ -2100,12 +2227,14 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     workflow_dir = None
     role_directory = None
     issue_type_directory = None
+    processes_loaded: list[Any] = []
     for wf_name in process_names:
         try:
             process = registry.get_process(wf_name)
         except WorkflowError as exc:
             _handle_workflow_error(exc)
             return 2
+        processes_loaded.append(process)
         if workflow_dir is None:
             workflow_dir = process.workflow_dir
         # Capture shared directories from the first process that has them —
@@ -2138,6 +2267,18 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         )
         written.append(str(doc_path))
 
+    has_process_map = False
+    if workflow_dir is not None and processes_loaded:
+        # Process map shows up only when we've got at least one process to
+        # plot — otherwise the diagram would be empty.
+        map_path = workflow_dir / "process-map.mermaid"
+        map_path.write_text(emit_process_map(processes_loaded), encoding="utf-8")
+        written.append(str(map_path))
+        map_doc_path = workflow_dir / "process-map.md"
+        map_doc_path.write_text(emit_process_map_doc(), encoding="utf-8")
+        written.append(str(map_doc_path))
+        has_process_map = True
+
     if workflow_dir is not None:
         if role_directory is not None:
             roles_path = workflow_dir / "roles.md"
@@ -2153,6 +2294,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
                 process_names,
                 has_roles=role_directory is not None,
                 has_issue_types=issue_type_directory is not None,
+                has_process_map=has_process_map,
             ),
             encoding="utf-8",
         )
@@ -2363,6 +2505,12 @@ def _do_init(args: argparse.Namespace) -> int:
     env), defaulting to cwd when neither is set. The agent's role comes
     from the global `--agent-role` (or AGENT_ROLE env) — required for init,
     since there's no existing config to fall back on.
+
+    Always scaffolds `.workflow/workflows/` (the per-agent default lookup
+    location). Pass `--workflow-dir PATH` to record an override in the
+    config — useful when multiple per-role agent homes share a single
+    workflows directory. Relative paths are resolved from the agent home
+    at lookup time.
     """
     ctx = _ctx_obj_from_args(args)
 
@@ -2399,12 +2547,15 @@ def _do_init(args: argparse.Namespace) -> int:
     # Build the config from provided values. Strip placeholder braces from
     # the role so `{pm}` and `pm` both produce the same `pm`.
     #
-    # Only `agent-role` is persisted by default: `repo`/`host`/`workflow`
-    # flags are per-invocation, and the path config keys (`workflow-dir`,
-    # `grants-dir`) are written separately when explicitly provided. The
-    # file stays minimal so adding future agent-identity fields is
-    # unambiguous.
+    # `agent-role` is always persisted. `workflow-dir` is persisted when the
+    # user passes --workflow-dir at init — stored verbatim (relative paths
+    # are resolved from the agent home at lookup time) and overrides the
+    # default `.workflow/workflows/` location. Other CLI flags like
+    # --repo / --host stay per-invocation and are never written here.
     config: dict[str, Any] = {"agent-role": agent_role.strip("{}").strip()}
+    init_workflow_dir = getattr(args, "init_workflow_dir", None)
+    if init_workflow_dir:
+        config["workflow-dir"] = init_workflow_dir
 
     if ctx["dry_run"]:
         if ctx["json_output"]:
@@ -2426,6 +2577,11 @@ def _do_init(args: argparse.Namespace) -> int:
             print(f"  config:        {config_path}")
             print(f"  workflows:     {workflows_path}/")
             print(f"  trust grants:  {grants_path}/")
+            if init_workflow_dir:
+                print(
+                    f"  workflow-dir:  {init_workflow_dir} (override, "
+                    f"recorded in config)"
+                )
             print("")
             print("Config that would be written:")
             for line in _json.dumps(config, indent=2).splitlines():

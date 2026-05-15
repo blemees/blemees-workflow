@@ -307,6 +307,80 @@ class GitHubBackend:
             )
         return url.rsplit("/", 1)[-1]
 
+    def create_pull_request(
+        self,
+        title: str,
+        body: str,
+        state: str,
+        head: str,
+        base: str | None = None,
+        draft: bool = False,
+        extra_labels: list[str] | None = None,
+    ) -> str:
+        """Create a GitHub PR via `gh pr create --head H --base B --title T
+        --body-file F [--draft] --label L1,L2`.
+
+        The framework's `state:<name>` label is attached atomically with
+        creation (gh `pr create` accepts `--label`). Labels are ensured to
+        exist on the repo before the call so gh doesn't error on missing
+        names. Returns the new PR's number parsed from gh's output URL.
+        """
+        labels = [f"state:{state}"]
+        if extra_labels:
+            labels.extend(extra_labels)
+        for label in labels:
+            self.ensure_label(label)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".md",
+            delete=False,
+        ) as tmp:
+            tmp.write(body or "")
+            tmp_path = tmp.name
+        try:
+            args: list[str] = [
+                "pr",
+                "create",
+                "--repo",
+                self.repo,
+                "--title",
+                title,
+                "--body-file",
+                tmp_path,
+                "--head",
+                head,
+                "--label",
+                ",".join(labels),
+            ]
+            if base:
+                args += ["--base", base]
+            if draft:
+                args.append("--draft")
+            output = self._gh(*args)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        # `gh pr create` prints the new PR URL on the last non-empty line:
+        #   https://github.com/owner/repo/pull/123
+        url = ""
+        for line in reversed(output.splitlines()):
+            stripped = line.strip()
+            if stripped:
+                url = stripped
+                break
+        if not url:
+            raise BackendError(f"`gh pr create` returned no output: {output!r}")
+        if "/pull/" not in url:
+            raise BackendError(
+                f"`gh pr create` returned unexpected output (no /pull/ in URL): {url!r}"
+            )
+        return url.rsplit("/", 1)[-1]
+
     def read_issue(self, issue_id: str) -> IssueState:
         result = self._gh(
             "issue",

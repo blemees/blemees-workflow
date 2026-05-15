@@ -1,0 +1,51 @@
+{
+  "name": "mitigation",
+  "canonical_catalog_path": "mitigation-hcps.json",
+  "states": {
+    "ready_for_rollback": {
+      "class": "resting",
+      "claim_role": "responder",
+      "reversibility": "reversible-fast"
+    },
+    "ready_for_flag_toggle": {
+      "class": "resting",
+      "claim_role": "responder",
+      "reversibility": "reversible-fast"
+    },
+    "ready_for_hotfix": {
+      "class": "resting",
+      "reversibility": "reversible-fast"
+    },
+    "rolling_back": {
+      "class": "working"
+    },
+    "rolled_back": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    },
+    "toggling_flag": {
+      "class": "working"
+    },
+    "flag_toggled": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    }
+  },
+  "transitions": [
+    {"source": "[*]", "destination": "ready_for_rollback", "type": "cross_process", "label": "from process incident-response (IC requests rollback)", "kind": "spawn", "process": "incident-response"},
+    {"source": "[*]", "destination": "ready_for_flag_toggle", "type": "cross_process", "label": "from process incident-response (IC requests flag toggle)", "kind": "spawn", "process": "incident-response"},
+    {"source": "[*]", "destination": "ready_for_hotfix", "type": "cross_process", "label": "from process incident-response (IC spawns hotfix issue)", "kind": "spawn", "process": "incident-response"},
+
+    {"source": "ready_for_rollback", "destination": "rolling_back", "type": "claim", "label": "responder claims rollback"},
+    {"source": "rolling_back", "destination": "rolled_back", "type": "role_action", "label": "responder completes rollback"},
+
+    {"source": "ready_for_flag_toggle", "destination": "toggling_flag", "type": "claim", "label": "responder claims flag toggle"},
+    {"source": "toggling_flag", "destination": "flag_toggled", "type": "role_action", "label": "responder completes toggle"},
+
+    {"source": "ready_for_hotfix", "destination": "[*]", "type": "cross_process", "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"}
+  ]
+}

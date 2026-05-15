@@ -128,10 +128,30 @@ def _parse_type(type_id: str, entry: dict[str, Any]) -> IssueType:
             )
         github_issue_type_color = github_issue_type_color.strip()
 
+    github_entity_raw = entry.get("github_entity", "issue")
+    if not isinstance(github_entity_raw, str):
+        raise ParseError(
+            f"Issue type {type_id!r}: `github_entity` must be a string "
+            f"(got {type(github_entity_raw).__name__})."
+        )
+    github_entity = github_entity_raw.strip()
+    if github_entity not in ("issue", "pull_request"):
+        raise ParseError(
+            f"Issue type {type_id!r}: `github_entity` must be 'issue' or "
+            f"'pull_request' (got {github_entity!r})."
+        )
+    if github_entity == "pull_request" and github_issue_type is not None:
+        raise ParseError(
+            f"Issue type {type_id!r}: `github_issue_type` cannot be set when "
+            f"`github_entity` is 'pull_request' (PRs are not a native GitHub "
+            f"Issue Type — the type is implicit in the entity kind)."
+        )
+
     return IssueType(
         type_id=type_id,
         name=name.strip(),
         description=description.strip(),
         github_issue_type=github_issue_type,
         github_issue_type_color=github_issue_type_color,
+        github_entity=github_entity,
     )
