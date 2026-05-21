@@ -1,26 +1,32 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "name": "refinement",
-  "issue_types": ["bug", "feature", "chore", "experiment"],
   "states": {
     "raw": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "refining": {
       "class": "working",
-      "roles": ["product-manager"]
+      "roles": ["product-manager"],
+      "issue_types": ["bug", "feature", "chore", "experiment"]
     },
     "consult_requested": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "consulting": {
-      "class": "working"
+      "class": "working",
+      "issue_types": ["bug", "feature", "chore", "experiment"],
+      "roles": ["architect", "designer", "security-engineer"]
     },
     "consult_complete": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "spiking": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "ready_for_dev": {
       "class": "resting",
@@ -35,7 +41,8 @@
       "reversibility": "reversible-fast"
     },
     "deprioritized": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "duplicate": {
       "class": "terminal",

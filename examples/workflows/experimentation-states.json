@@ -1,20 +1,24 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "name": "experimentation",
-  "issue_types": ["experiment"],
   "states": {
     "measuring": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "measurement_complete": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "analyzing": {
       "class": "working",
-      "roles": ["product-owner"]
+      "roles": ["product-owner"],
+      "issue_types": ["experiment"]
     },
     "aborting": {
-      "class": "working"
+      "class": "working",
+      "issue_types": ["experiment"],
+      "roles": ["product-owner"]
     },
     "promoted": {
       "class": "terminal",

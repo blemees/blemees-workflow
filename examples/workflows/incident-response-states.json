@@ -3,32 +3,40 @@
   "name": "incident-response",
   "states": {
     "declared": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "triaging": {
       "class": "working",
-      "roles": ["incident-commander"]
+      "roles": ["incident-commander"],
+      "issue_types": ["incident"]
     },
     "needs_diagnosis": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "diagnosing": {
       "class": "working",
-      "roles": ["incident-responder"]
+      "roles": ["incident-responder"],
+      "issue_types": ["incident"]
     },
     "cause_identified": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "mitigating": {
       "class": "working",
-      "roles": ["incident-commander"]
+      "roles": ["incident-commander"],
+      "issue_types": ["incident"]
     },
     "needs_verification": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "verifying": {
       "class": "working",
-      "roles": ["incident-responder"]
+      "roles": ["incident-responder"],
+      "issue_types": ["incident"]
     },
     "stabilized": {
       "class": "terminal",

@@ -5,9 +5,9 @@
 ## Issue types accepted
 
 - `bug` — **Bug**: Defect in shipped behavior — something is broken or wrong. Branch prefix `fix/`. Failing test first; reviewer scrutinizes root cause vs surface symptom.
-- `feature` — **Feature**: New user-facing capability or enhancement to existing behavior. Branch prefix `feat/`. Standard inner-loop flow with no per-step variations.
 - `chore` — **Chore**: Internal cleanup with no user-visible behavior change: refactors, dependency bumps, lint config. Branch prefix `chore/`. QA may be skipped at reviewer discretion.
 - `experiment` — **Experiment**: Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Requires hypothesis, metric, and cohort up-front. Post-merge owned by product-owner; closes at verdict on the experimentation lifecycle.
+- `feature` — **Feature**: New user-facing capability or enhancement to existing behavior. Branch prefix `feat/`. Standard inner-loop flow with no per-step variations.
 
 ## State diagram
 
@@ -43,10 +43,16 @@ stateDiagram-v2
     duplicate --> [*]: terminal (deduplicated)
     wont_fix --> [*]: terminal (abandoned)
 
-    note right of refining: role=product-manager
+    note left of raw: reversible-fast
+    note right of refining: role=product-manager, types=bug, feature, chore, experiment
+    note right of consult_requested: reversible-fast
+    note right of consulting: roles=architect, designer, security-engineer, types=bug, feature, chore, experiment
+    note right of consult_complete: reversible-fast
+    note right of spiking: reversible-fast
     note right of ready_for_dev: reversible-slow
     note right of ready_for_experiment: reversible-slow
     note right of ready_bounced: reversible-fast
+    note right of deprioritized: reversible-fast
     note right of duplicate: reversible-fast
     note right of wont_fix: reversible-fast
 ```
@@ -55,16 +61,16 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|
-| `raw` | resting | — | — | — | — | — |
-| `refining` | working | — | product-manager | — | — | — |
-| `consult_requested` | resting | — | — | — | — | — |
-| `consulting` | working | — | — | — | — | — |
-| `consult_complete` | resting | — | — | — | — | — |
-| `spiking` | resting | — | — | — | — | — |
+| `raw` | resting | reversible-fast | — | — | — | — |
+| `refining` | working | — | product-manager | bug, feature, chore, experiment | — | — |
+| `consult_requested` | resting | reversible-fast | — | — | — | — |
+| `consulting` | working | — | architect, designer, security-engineer | bug, feature, chore, experiment | — | — |
+| `consult_complete` | resting | reversible-fast | — | — | — | — |
+| `spiking` | resting | reversible-fast | — | — | — | — |
 | `ready_for_dev` | resting | reversible-slow | — | — | — | — |
 | `ready_for_experiment` | resting | reversible-slow | — | — | — | — |
 | `ready_bounced` | resting | reversible-fast | — | — | — | — |
-| `deprioritized` | resting | — | — | — | — | — |
+| `deprioritized` | resting | reversible-fast | — | — | — | — |
 | `duplicate` | terminal | reversible-fast | — | — | deduplicated | not planned |
 | `wont_fix` | terminal | reversible-fast | — | — | abandoned | not planned |
 

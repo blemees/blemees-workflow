@@ -2,6 +2,10 @@
 
 > Defined in: `backport-states.json`
 
+## Issue types accepted
+
+- `backport` — **Backport**: Port of an already-merged change onto a release/patch branch. Distinct from a regular bug/hotfix because the work is mechanical (cherry-pick + verify), not net-new.
+
 ## State diagram
 
 ```mermaid
@@ -19,7 +23,10 @@ stateDiagram-v2
     backported --> [*]: terminal (shipped)
 
     note left of ready_for_backport: reversible-slow
-    note right of cherry_picking: role=developer
+    note right of cherry_picking: role=developer, types=backport
+    note right of backport_pr_review: reversible-fast
+    note right of backport_merged: reversible-slow
+    note right of patch_releasing: reversible-slow
     note right of backported: reversible-slow
 ```
 
@@ -28,10 +35,10 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|
 | `ready_for_backport` | resting | reversible-slow | — | — | — | — |
-| `cherry_picking` | working | — | developer | — | — | — |
-| `backport_pr_review` | resting | — | — | — | — | — |
-| `backport_merged` | resting | — | — | — | — | — |
-| `patch_releasing` | resting | — | — | — | — | — |
+| `cherry_picking` | working | — | developer | backport | — | — |
+| `backport_pr_review` | resting | reversible-fast | — | — | — | — |
+| `backport_merged` | resting | reversible-slow | — | — | — | — |
+| `patch_releasing` | resting | reversible-slow | — | — | — | — |
 | `backported` | terminal | reversible-slow | — | — | shipped | completed |
 
 ## Transitions

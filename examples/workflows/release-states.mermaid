@@ -27,10 +27,18 @@ stateDiagram-v2
     rolled_back --> [*]: terminal (reverted)
     released --> [*]: terminal (shipped)
 
-    note right of preparing: role=release-manager
-    note right of reviewing_release: role=product-owner
-    note right of abandoning: role=product-owner
+    note left of accumulating: reversible-fast
+    note right of cut: reversible-slow
+    note right of preparing: role=release-manager, types=release
+    note right of ready_for_release_decision: reversible-slow
+    note right of reviewing_release: role=product-owner, types=release
+    note right of gated_nogo: reversible-fast
+    note right of abandoning: role=product-owner, types=release
     note right of abandoned: reversible-fast
-    note right of monitoring: role=developer
+    note right of deploying: reversible-slow
+    note right of rolling_out: reversible-slow
+    note right of ready_for_monitoring: reversible-slow
+    note right of monitoring: role=developer, types=release
+    note right of rolling_back: roles=incident-commander, release-manager, types=release
     note right of rolled_back: reversible-slow
     note right of released: reversible-slow

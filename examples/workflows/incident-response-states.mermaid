@@ -11,8 +11,12 @@ stateDiagram-v2
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
     stabilized --> [*]: terminal (superseded)
 
-    note right of triaging: role=incident-commander
-    note right of diagnosing: role=incident-responder
-    note right of mitigating: role=incident-commander
-    note right of verifying: role=incident-responder
+    note left of declared: reversible-fast
+    note right of triaging: role=incident-commander, types=incident
+    note right of needs_diagnosis: reversible-fast
+    note right of diagnosing: role=incident-responder, types=incident
+    note right of cause_identified: reversible-fast
+    note right of mitigating: role=incident-commander, types=incident
+    note right of needs_verification: reversible-fast
+    note right of verifying: role=incident-responder, types=incident
     note right of stabilized: reversible-fast

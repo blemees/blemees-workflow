@@ -925,7 +925,7 @@ def test_claim_rejects_wrong_issue_type_for_destination_state() -> None:
         TransitionType,
     )
 
-    workflow = StateMachine(name="t", issue_types=["bug", "experiment"])
+    workflow = StateMachine(name="t")
     workflow.states = {
         "ready": State(name="ready", state_class=StateClass.RESTING),
         "implementing_experiment": State(
@@ -967,7 +967,7 @@ def test_claim_allows_matching_issue_type() -> None:
         TransitionType,
     )
 
-    workflow = StateMachine(name="t", issue_types=["bug", "experiment"])
+    workflow = StateMachine(name="t")
     workflow.states = {
         "ready": State(name="ready", state_class=StateClass.RESTING),
         "implementing_experiment": State(

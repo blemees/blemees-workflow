@@ -1,7 +1,6 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "name": "inner-loop",
-  "issue_types": ["bug", "feature", "chore", "hotfix", "spike", "experiment"],
   "states": {
     "ready_for_dev": {
       "class": "resting",
@@ -40,22 +39,28 @@
       "issue_types": ["hotfix"]
     },
     "pr_review": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "pr_review_experiment": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "pr_review_hotfix": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "staged": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "staged_experiment": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "staged_hotfix": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "spike_completed": {
       "class": "terminal",

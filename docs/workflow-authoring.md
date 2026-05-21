@@ -29,9 +29,18 @@ surface via `workflow validate`.
 {
   "name": "tiny",
   "states": {
-    "raw": {"class": "resting"},
-    "refining": {"class": "working", "roles": ["product-manager"]},
-    "done": {"class": "terminal", "terminal_taxonomy": "shipped"}
+    "raw": {"class": "resting", "reversibility": "reversible-fast"},
+    "refining": {
+      "class": "working",
+      "roles": ["product-manager"],
+      "issue_types": ["bug"]
+    },
+    "done": {
+      "class": "terminal",
+      "reversibility": "reversible-fast",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    }
   },
   "transitions": [
     {"source": "[*]", "destination": "raw", "type": "external", "label": "issue created (external)"},
@@ -59,10 +68,11 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 | Field | Type | Required | Allowed values |
 |---|---|---|---|
 | `class` | string | yes | `"resting"`, `"working"`, `"terminal"` |
-| `reversibility` | string | optional | `"irreversible"`, `"reversible-fast"`, `"reversible-slow"` |
+| `reversibility` | string | required on resting / terminal; forbidden on working | `"irreversible"`, `"reversible-fast"`, `"reversible-slow"` — how reversible landing in this state is. |
 | `terminal_taxonomy` | string | required when `class=terminal` | `"shipped"`, `"resolved"`, `"reverted"`, `"abandoned"`, `"deduplicated"`, `"superseded"` |
-| `roles` | array of strings | optional, working states only | Role ids permitted to occupy this state. Empty / absent = open (any role may claim). Resting states must NOT carry this field. |
-| `issue_types` | array of strings | optional, working states only | Subset of the process-level `issue_types` this working state accepts. Empty / absent = accepts any process-level type. Checked at claim time: the issue's type must be in this set. |
+| `roles` | array of strings | required on working states, forbidden on resting/terminal | Role ids permitted to occupy this state. Non-empty. Resting / terminal states must NOT carry this field. |
+| `issue_types` | array of strings | required on working states, forbidden on resting/terminal | Issue type ids this working state accepts. Checked at claim time: the issue's type must be in this set. The process's overall accepted set is derived as the union of every working state's `issue_types` — there is no separate process-level field. |
+| `close_reason` | string | required on terminal states, forbidden elsewhere | Backend close-reason. For GitHub: `"completed"` or `"not planned"`. Every terminal closes the tracker's issue with this reason. |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
 The parser fails loud on:

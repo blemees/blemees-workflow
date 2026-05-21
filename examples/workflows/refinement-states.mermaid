@@ -29,9 +29,15 @@ stateDiagram-v2
     duplicate --> [*]: terminal (deduplicated)
     wont_fix --> [*]: terminal (abandoned)
 
-    note right of refining: role=product-manager
+    note left of raw: reversible-fast
+    note right of refining: role=product-manager, types=bug, feature, chore, experiment
+    note right of consult_requested: reversible-fast
+    note right of consulting: roles=architect, designer, security-engineer, types=bug, feature, chore, experiment
+    note right of consult_complete: reversible-fast
+    note right of spiking: reversible-fast
     note right of ready_for_dev: reversible-slow
     note right of ready_for_experiment: reversible-slow
     note right of ready_bounced: reversible-fast
+    note right of deprioritized: reversible-fast
     note right of duplicate: reversible-fast
     note right of wont_fix: reversible-fast

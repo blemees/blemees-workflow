@@ -16,6 +16,7 @@ are gone — the schema demands intent.
   "states": {
     "raw": {
       "class": "resting",
+      "reversibility": "reversible-fast",
       "notes": ["optional prose for visualization"]
     },
     "refining": {
@@ -29,7 +30,8 @@ are gone — the schema demands intent.
     "wont_fix": {
       "class": "terminal",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "abandoned"
+      "terminal_taxonomy": "abandoned",
+      "close_reason": "not planned"
     }
   },
   "transitions": [
@@ -56,15 +58,17 @@ are gone — the schema demands intent.
 
 ### States
 - `class` (string, required): `"resting"` | `"working"` | `"terminal"`.
-- `reversibility` (string, optional): `"irreversible"` | `"reversible-fast"` |
-  `"reversible-slow"`.
+- `reversibility` (string, required on resting + terminal, forbidden on
+  working): `"irreversible"` | `"reversible-fast"` | `"reversible-slow"`.
+  Says how reversible *landing* in this state is. Working states are
+  transient — only landings have a reversibility class.
 - `terminal_taxonomy` (string, required when `class=terminal`):
   `"shipped"` | `"resolved"` | `"reverted"` | `"abandoned"` | `"deduplicated"` | `"superseded"`.
-- `roles` (list of strings, optional): role ids permitted to occupy this
-  state. Only valid on working states — the role-restriction lives on the
-  working state, not on the resting queue it's claimed from. Resting
-  states are open queues; downstream working states declare who may pick
-  items up.
+- `roles` (list of strings, required on working, forbidden elsewhere):
+  role ids permitted to occupy this state. Non-empty. The role-restriction
+  lives on the working state, not on the resting queue it's claimed from.
+  Resting states are open queues; downstream working states declare who
+  may pick items up.
 - `issue_types` (list of strings, optional): subset of the process-level
   `issue_types` this working state accepts. Only valid on working states.
   Empty / absent = accepts any process-level type. The validator
@@ -183,19 +187,14 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
         )
     name = declared_name or name or "unnamed"
 
-    issue_types_raw = data.get("issue_types", [])
-    if not isinstance(issue_types_raw, list):
+    # Process-level `issue_types` was removed — types now live exclusively
+    # on working states (the umbrella is derivable as the union).
+    if "issue_types" in data:
         raise ParseError(
-            f"`issue_types` must be a list of type ids "
-            f"(got {type(issue_types_raw).__name__})."
+            "Top-level `issue_types` was removed. Declare types on each "
+            "working state via `issue_types: [...]`; the process's "
+            "accepted set is derived as the union."
         )
-    issue_types: list[str] = []
-    for i, t in enumerate(issue_types_raw):
-        if not isinstance(t, str) or not t.strip():
-            raise ParseError(
-                f"`issue_types[{i}]` must be a non-empty string (got {t!r})."
-            )
-        issue_types.append(t.strip())
 
     states_raw = data.get("states")
     if not isinstance(states_raw, dict):
@@ -246,7 +245,6 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
         name=name,
         states=states,
         transitions=transitions,
-        issue_types=issue_types,
         gates_in_legend=gates_in_legend,
         source_path=source_path,
     )
@@ -270,6 +268,21 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
                 f"{sorted(_REVERSIBILITY.keys())} (got {rev_raw!r})."
             )
         reversibility = _REVERSIBILITY[rev_raw]
+    # Reversibility is REQUIRED on resting + terminal states (every state
+    # an issue can "land" in declares how reversible the landing is).
+    # Working states are transient — the field is FORBIDDEN there.
+    if state_class is StateClass.WORKING and reversibility is not None:
+        raise ParseError(
+            f"State {state_id!r}: `reversibility` is not valid on working "
+            f"states (working states are transient — only resting and "
+            f"terminal landings have a reversibility class)."
+        )
+    if state_class is not StateClass.WORKING and reversibility is None:
+        raise ParseError(
+            f"State {state_id!r}: `reversibility` is required on "
+            f"{state_class.value} states (one of "
+            f"{sorted(_REVERSIBILITY.keys())})."
+        )
 
     terminal_taxonomy: TerminalTaxonomy | None = None
     tax_raw = spec.get("terminal_taxonomy")
@@ -316,6 +329,11 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"State {state_id!r}: `roles` is only valid on working states "
             f"(state class is {state_class.value!r})."
         )
+    if state_class is StateClass.WORKING and not roles_parsed:
+        raise ParseError(
+            f"State {state_id!r}: `roles` is required on working states "
+            f"(declare which role(s) may occupy this state)."
+        )
     # Reject the legacy field outright so authors don't silently lose the
     # role declaration during migration.
     if "claim_role" in spec:
@@ -350,6 +368,11 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"State {state_id!r}: `issue_types` is only valid on working "
             f"states (state class is {state_class.value!r})."
         )
+    if state_class is StateClass.WORKING and not state_issue_types_parsed:
+        raise ParseError(
+            f"State {state_id!r}: `issue_types` is required on working "
+            f"states (declare which issue types this state accepts)."
+        )
     state_issue_types = tuple(state_issue_types_parsed)
 
     close_reason_raw = spec.get("close_reason")
@@ -364,6 +387,12 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
                 f"State {state_id!r}: `close_reason` is only valid for `class: terminal`."
             )
         close_reason = close_reason_raw.strip()
+    if state_class is StateClass.TERMINAL and close_reason is None:
+        raise ParseError(
+            f"State {state_id!r}: `close_reason` is required on terminal "
+            f"states (every terminal closes the tracker's issue). For "
+            f"GitHub, use 'completed' or 'not planned'."
+        )
 
     notes_raw = spec.get("notes", [])
     if notes_raw is None:

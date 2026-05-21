@@ -1533,7 +1533,7 @@ def _do_create(args: argparse.Namespace) -> int:
         _handle_workflow_error(exc)
         return 2
 
-    supported_types = process.state_machine.issue_types
+    supported_types = process.state_machine.accepted_issue_types
     issue_type: str | None = args.issue_type
     if supported_types:
         if issue_type is None:

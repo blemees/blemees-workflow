@@ -3,28 +3,35 @@
   "name": "release",
   "states": {
     "accumulating": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "cut": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "preparing": {
       "class": "working",
-      "roles": ["release-manager"]
+      "roles": ["release-manager"],
+      "issue_types": ["release"]
     },
     "ready_for_release_decision": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "reviewing_release": {
       "class": "working",
-      "roles": ["product-owner"]
+      "roles": ["product-owner"],
+      "issue_types": ["release"]
     },
     "gated_nogo": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "abandoning": {
       "class": "working",
-      "roles": ["product-owner"]
+      "roles": ["product-owner"],
+      "issue_types": ["release"]
     },
     "abandoned": {
       "class": "terminal",
@@ -33,20 +40,26 @@
       "close_reason": "not planned"
     },
     "deploying": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "rolling_out": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "ready_for_monitoring": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "monitoring": {
       "class": "working",
-      "roles": ["developer"]
+      "roles": ["developer"],
+      "issue_types": ["release"]
     },
     "rolling_back": {
-      "class": "working"
+      "class": "working",
+      "issue_types": ["release"],
+      "roles": ["incident-commander", "release-manager"]
     },
     "rolled_back": {
       "class": "terminal",

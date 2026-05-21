@@ -15,6 +15,10 @@ stateDiagram-v2
     complete --> [*]: terminal (shipped)
     kill_switched --> [*]: terminal (reverted)
 
-    note right of analyzing: role=developer
+    note left of soaking: reversible-slow
+    note right of ready_for_stage_analysis: reversible-fast
+    note right of analyzing: role=developer, types=release
+    note right of holding: reversible-fast
+    note right of killing: roles=incident-commander, incident-responder, types=release
     note right of complete: reversible-slow
     note right of kill_switched: reversible-slow

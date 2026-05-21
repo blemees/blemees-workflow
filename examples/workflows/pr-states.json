@@ -1,49 +1,60 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "name": "pr",
-  "issue_types": ["pr"],
   "states": {
     "draft": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "drafting": {
       "class": "working",
-      "roles": ["developer"]
+      "roles": ["developer"],
+      "issue_types": ["pr"]
     },
     "needs_review": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "reviewing": {
       "class": "working",
-      "roles": ["peer-reviewer"]
+      "roles": ["peer-reviewer"],
+      "issue_types": ["pr"]
     },
     "changes_requested": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "fixing_review": {
       "class": "working",
-      "roles": ["developer"]
+      "roles": ["developer"],
+      "issue_types": ["pr"]
     },
     "needs_qa": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "verifying": {
       "class": "working",
-      "roles": ["tester"]
+      "roles": ["tester"],
+      "issue_types": ["pr"]
     },
     "qa_passed": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "qa_failed": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "fixing_qa": {
       "class": "working",
-      "roles": ["developer"]
+      "roles": ["developer"],
+      "issue_types": ["pr"]
     },
     "merging": {
       "class": "working",
-      "roles": ["developer"]
+      "roles": ["developer"],
+      "issue_types": ["pr"]
     },
     "staged": {
       "class": "terminal",

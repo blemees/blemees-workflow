@@ -8,16 +8,20 @@
     },
     "cherry_picking": {
       "class": "working",
-      "roles": ["developer"]
+      "roles": ["developer"],
+      "issue_types": ["backport"]
     },
     "backport_pr_review": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "backport_merged": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "patch_releasing": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "backported": {
       "class": "terminal",

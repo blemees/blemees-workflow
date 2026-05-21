@@ -28,7 +28,10 @@ stateDiagram-v2
     iterated --> [*]: terminal (superseded)
     aborted --> [*]: terminal (abandoned)
 
-    note right of analyzing: role=product-owner
+    note left of measuring: reversible-slow
+    note right of measurement_complete: reversible-fast
+    note right of analyzing: role=product-owner, types=experiment
+    note right of aborting: role=product-owner, types=experiment
     note right of promoted: reversible-slow
     note right of killed: reversible-slow
     note right of iterated: reversible-fast
@@ -39,10 +42,10 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|
-| `measuring` | resting | — | — | — | — | — |
-| `measurement_complete` | resting | — | — | — | — | — |
-| `analyzing` | working | — | product-owner | — | — | — |
-| `aborting` | working | — | — | — | — | — |
+| `measuring` | resting | reversible-slow | — | — | — | — |
+| `measurement_complete` | resting | reversible-fast | — | — | — | — |
+| `analyzing` | working | — | product-owner | experiment | — | — |
+| `aborting` | working | — | product-owner | experiment | — | — |
 | `promoted` | terminal | reversible-slow | — | — | shipped | completed |
 | `killed` | terminal | reversible-slow | — | — | abandoned | not planned |
 | `iterated` | terminal | reversible-fast | — | — | superseded | not planned |

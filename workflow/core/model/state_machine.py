@@ -102,11 +102,11 @@ class State:
     terminal_taxonomy: TerminalTaxonomy | None = None
     roles: tuple[str, ...] = ()
     issue_types: tuple[str, ...] = ()
-    # Backend-specific close reason for terminal states. When set, advancing
-    # into this state closes the tracker's issue with this reason (e.g.,
-    # GitHub's "completed" or "not planned"). When None, the issue stays
-    # open — used for handoff-style terminals where the work continues
-    # elsewhere. Only valid on terminal states.
+    # Backend-specific close reason for terminal states. REQUIRED on
+    # terminals — every terminal closes the tracker's issue with this
+    # reason (GitHub: "completed" or "not planned"). FORBIDDEN on resting
+    # and working states. Cross-process handoffs that keep the same issue
+    # open use shared resting states, not terminals.
     close_reason: str | None = None
     notes: list[str] = field(default_factory=list, hash=False, compare=False)
 
@@ -155,17 +155,27 @@ class StateMachine:
 
     The HCP catalog path is derived by convention from `name`:
     `<name>-hcps.json`. There's no explicit field for it.
+
+    Issue types live on working states (`State.issue_types`); the process's
+    overall accepted set is derived as the union — see `accepted_issue_types`.
     """
 
     name: str
     states: dict[str, State] = field(default_factory=dict)
     transitions: list[Transition] = field(default_factory=list)
-    # Issue types this process accepts (declared as a list of type ids). The
-    # ids are resolved against the shared `issue-types.json` (an
-    # `IssueTypeDirectory`). Empty list means no type constraint is declared.
-    issue_types: list[str] = field(default_factory=list)
     gates_in_legend: dict[str, ReversibilityClass] = field(default_factory=dict)
     source_path: str | None = None
+
+    @property
+    def accepted_issue_types(self) -> list[str]:
+        """Sorted union of every working state's `issue_types`. This is the
+        umbrella for the process — the set of types that can be created
+        with `--to <some resting state of this process>`."""
+        seen: set[str] = set()
+        for st in self.states.values():
+            if st.state_class is StateClass.WORKING:
+                seen.update(st.issue_types)
+        return sorted(seen)
 
     def state(self, name: str) -> State:
         if name not in self.states:

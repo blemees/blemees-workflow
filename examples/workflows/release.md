@@ -2,6 +2,10 @@
 
 > Defined in: `release-states.json`
 
+## Issue types accepted
+
+- `release` — **Release**: A release-train work item. Tracks one cut through prep → deploy → monitor; experimentation and progressive-rollout are phases that operate on the same release ticket.
+
 ## State diagram
 
 ```mermaid
@@ -34,11 +38,19 @@ stateDiagram-v2
     rolled_back --> [*]: terminal (reverted)
     released --> [*]: terminal (shipped)
 
-    note right of preparing: role=release-manager
-    note right of reviewing_release: role=product-owner
-    note right of abandoning: role=product-owner
+    note left of accumulating: reversible-fast
+    note right of cut: reversible-slow
+    note right of preparing: role=release-manager, types=release
+    note right of ready_for_release_decision: reversible-slow
+    note right of reviewing_release: role=product-owner, types=release
+    note right of gated_nogo: reversible-fast
+    note right of abandoning: role=product-owner, types=release
     note right of abandoned: reversible-fast
-    note right of monitoring: role=developer
+    note right of deploying: reversible-slow
+    note right of rolling_out: reversible-slow
+    note right of ready_for_monitoring: reversible-slow
+    note right of monitoring: role=developer, types=release
+    note right of rolling_back: roles=incident-commander, release-manager, types=release
     note right of rolled_back: reversible-slow
     note right of released: reversible-slow
 ```
@@ -47,19 +59,19 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|
-| `accumulating` | resting | — | — | — | — | — |
-| `cut` | resting | — | — | — | — | — |
-| `preparing` | working | — | release-manager | — | — | — |
-| `ready_for_release_decision` | resting | — | — | — | — | — |
-| `reviewing_release` | working | — | product-owner | — | — | — |
-| `gated_nogo` | resting | — | — | — | — | — |
-| `abandoning` | working | — | product-owner | — | — | — |
+| `accumulating` | resting | reversible-fast | — | — | — | — |
+| `cut` | resting | reversible-slow | — | — | — | — |
+| `preparing` | working | — | release-manager | release | — | — |
+| `ready_for_release_decision` | resting | reversible-slow | — | — | — | — |
+| `reviewing_release` | working | — | product-owner | release | — | — |
+| `gated_nogo` | resting | reversible-fast | — | — | — | — |
+| `abandoning` | working | — | product-owner | release | — | — |
 | `abandoned` | terminal | reversible-fast | — | — | abandoned | not planned |
-| `deploying` | resting | — | — | — | — | — |
-| `rolling_out` | resting | — | — | — | — | — |
-| `ready_for_monitoring` | resting | — | — | — | — | — |
-| `monitoring` | working | — | developer | — | — | — |
-| `rolling_back` | working | — | — | — | — | — |
+| `deploying` | resting | reversible-slow | — | — | — | — |
+| `rolling_out` | resting | reversible-slow | — | — | — | — |
+| `ready_for_monitoring` | resting | reversible-slow | — | — | — | — |
+| `monitoring` | working | — | developer | release | — | — |
+| `rolling_back` | working | — | incident-commander, release-manager | release | — | — |
 | `rolled_back` | terminal | reversible-slow | — | — | reverted | completed |
 | `released` | terminal | reversible-slow | — | — | shipped | completed |
 

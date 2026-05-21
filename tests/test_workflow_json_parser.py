@@ -21,9 +21,18 @@ def _minimal() -> dict:
     return {
         "name": "t",
         "states": {
-            "a": {"class": "resting"},
-            "b": {"class": "working", "roles": ["product-manager"]},
-            "c": {"class": "terminal", "terminal_taxonomy": "shipped"},
+            "a": {"class": "resting", "reversibility": "reversible-fast"},
+            "b": {
+                "class": "working",
+                "roles": ["product-manager"],
+                "issue_types": ["bug"],
+            },
+            "c": {
+                "class": "terminal",
+                "reversibility": "reversible-fast",
+                "terminal_taxonomy": "shipped",
+                "close_reason": "completed",
+            },
         },
         "transitions": [
             {"source": "[*]", "destination": "a", "type": "external", "label": "in"},
@@ -48,8 +57,29 @@ def test_parses_minimal_workflow() -> None:
 
 def test_terminal_requires_taxonomy() -> None:
     bad = _minimal()
-    bad["states"]["c"] = {"class": "terminal"}
+    bad["states"]["c"] = {"class": "terminal", "reversibility": "reversible-fast"}
     with pytest.raises(ParseError, match="terminal_taxonomy"):
+        parse_state_machine(json.dumps(bad))
+
+
+def test_resting_state_requires_reversibility() -> None:
+    bad = _minimal()
+    del bad["states"]["a"]["reversibility"]
+    with pytest.raises(ParseError, match="reversibility.*required"):
+        parse_state_machine(json.dumps(bad))
+
+
+def test_terminal_state_requires_reversibility() -> None:
+    bad = _minimal()
+    del bad["states"]["c"]["reversibility"]
+    with pytest.raises(ParseError, match="reversibility.*required"):
+        parse_state_machine(json.dumps(bad))
+
+
+def test_working_state_rejects_reversibility() -> None:
+    bad = _minimal()
+    bad["states"]["b"]["reversibility"] = "reversible-fast"
+    with pytest.raises(ParseError, match="not valid on working"):
         parse_state_machine(json.dumps(bad))
 
 
@@ -132,9 +162,9 @@ def test_gates_in_legend_built_from_hitl_transitions() -> None:
 
 
 def test_parses_real_refinement_workflow(refinement_workflow_path: Path) -> None:
-    """The shipped refinement example parses, declares its issue types,
-    and carries cross-process transitions to inner-loop (shared) plus an
-    entry from inner-loop for bounced issues."""
+    """The shipped refinement example parses, derives its accepted types
+    from its working states, and carries cross-process transitions to
+    inner-loop (shared) plus an entry from inner-loop for bounced issues."""
     workflow = parse_state_machine(refinement_workflow_path)
     assert workflow.name == "refinement"
     assert "raw" in workflow.states
@@ -142,7 +172,8 @@ def test_parses_real_refinement_workflow(refinement_workflow_path: Path) -> None
     assert "ready_bounced" in workflow.states
     assert "wont_fix" in workflow.states
     assert "duplicate" in workflow.states
-    assert set(workflow.issue_types) >= {"bug", "feature"}
+    # Derived umbrella = union of working states' issue_types.
+    assert set(workflow.accepted_issue_types) >= {"bug", "feature"}
     cross = [t for t in workflow.transitions if t.transition_type is TransitionType.CROSS_PROCESS]
     # At minimum: entry from inner-loop, exit to inner-loop (×2 — ready_for_dev + ready_for_experiment).
     assert len(cross) >= 3
@@ -150,13 +181,40 @@ def test_parses_real_refinement_workflow(refinement_workflow_path: Path) -> None
     assert "inner-loop" in targets
 
 
-def test_pr_process_declares_pr_issue_type(workflow_dir: Path) -> None:
-    """The PR process declares `issue_types: ["pr"]` — PR work items are
-    of the pre-defined `pr` type (mapping to GitHub pull-request entities,
-    not native Issue Types)."""
+def test_pr_process_accepts_pr_issue_type(workflow_dir: Path) -> None:
+    """The PR process's working states accept the `pr` type; the derived
+    umbrella reflects it."""
     workflow = parse_state_machine(workflow_dir / "pr-states.json")
     assert workflow.name == "pr"
-    assert workflow.issue_types == ["pr"]
+    assert workflow.accepted_issue_types == ["pr"]
+
+
+def test_top_level_issue_types_rejected() -> None:
+    bad = _minimal()
+    bad["issue_types"] = ["bug"]
+    with pytest.raises(ParseError, match="Top-level.*issue_types"):
+        parse_state_machine(json.dumps(bad))
+
+
+def test_working_state_requires_issue_types() -> None:
+    bad = _minimal()
+    del bad["states"]["b"]["issue_types"]
+    with pytest.raises(ParseError, match="issue_types.*required on working"):
+        parse_state_machine(json.dumps(bad))
+
+
+def test_working_state_requires_roles() -> None:
+    bad = _minimal()
+    del bad["states"]["b"]["roles"]
+    with pytest.raises(ParseError, match="roles.*required on working"):
+        parse_state_machine(json.dumps(bad))
+
+
+def test_terminal_state_requires_close_reason() -> None:
+    bad = _minimal()
+    del bad["states"]["c"]["close_reason"]
+    with pytest.raises(ParseError, match="close_reason.*required on terminal"):
+        parse_state_machine(json.dumps(bad))
 
 
 def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None:

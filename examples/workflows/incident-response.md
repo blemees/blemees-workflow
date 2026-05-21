@@ -2,6 +2,10 @@
 
 > Defined in: `incident-response-states.json`
 
+## Issue types accepted
+
+- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response and any mitigation work on the same ticket. Closes at `stabilized`; postmortem is a separate (spawned) ticket.
+
 ## State diagram
 
 ```mermaid
@@ -18,10 +22,14 @@ stateDiagram-v2
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
     stabilized --> [*]: terminal (superseded)
 
-    note right of triaging: role=incident-commander
-    note right of diagnosing: role=incident-responder
-    note right of mitigating: role=incident-commander
-    note right of verifying: role=incident-responder
+    note left of declared: reversible-fast
+    note right of triaging: role=incident-commander, types=incident
+    note right of needs_diagnosis: reversible-fast
+    note right of diagnosing: role=incident-responder, types=incident
+    note right of cause_identified: reversible-fast
+    note right of mitigating: role=incident-commander, types=incident
+    note right of needs_verification: reversible-fast
+    note right of verifying: role=incident-responder, types=incident
     note right of stabilized: reversible-fast
 ```
 
@@ -29,14 +37,14 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|
-| `declared` | resting | — | — | — | — | — |
-| `triaging` | working | — | incident-commander | — | — | — |
-| `needs_diagnosis` | resting | — | — | — | — | — |
-| `diagnosing` | working | — | incident-responder | — | — | — |
-| `cause_identified` | resting | — | — | — | — | — |
-| `mitigating` | working | — | incident-commander | — | — | — |
-| `needs_verification` | resting | — | — | — | — | — |
-| `verifying` | working | — | incident-responder | — | — | — |
+| `declared` | resting | reversible-fast | — | — | — | — |
+| `triaging` | working | — | incident-commander | incident | — | — |
+| `needs_diagnosis` | resting | reversible-fast | — | — | — | — |
+| `diagnosing` | working | — | incident-responder | incident | — | — |
+| `cause_identified` | resting | reversible-fast | — | — | — | — |
+| `mitigating` | working | — | incident-commander | incident | — | — |
+| `needs_verification` | resting | reversible-fast | — | — | — | — |
+| `verifying` | working | — | incident-responder | incident | — | — |
 | `stabilized` | terminal | reversible-fast | — | — | superseded | completed |
 
 ## Transitions

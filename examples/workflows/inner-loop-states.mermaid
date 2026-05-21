@@ -40,5 +40,11 @@ stateDiagram-v2
     note right of implementing_experiment: role=developer, types=experiment
     note right of implementing_spike: role=developer, types=spike
     note right of implementing_hotfix: role=developer, types=hotfix
+    note right of pr_review: reversible-fast
+    note right of pr_review_experiment: reversible-fast
+    note right of pr_review_hotfix: reversible-fast
+    note right of staged: reversible-slow
+    note right of staged_experiment: reversible-slow
+    note right of staged_hotfix: reversible-slow
     note right of spike_completed: reversible-fast
     note right of ready_bounced: reversible-fast

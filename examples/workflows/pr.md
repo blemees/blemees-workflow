@@ -33,12 +33,18 @@ stateDiagram-v2
     merging --> needs_review: merge conflict or failed staging deploy
     staged --> [*]: terminal (shipped)
 
-    note right of drafting: role=developer
-    note right of reviewing: role=peer-reviewer
-    note right of fixing_review: role=developer
-    note right of verifying: role=tester
-    note right of fixing_qa: role=developer
-    note right of merging: role=developer
+    note left of draft: reversible-fast
+    note right of drafting: role=developer, types=pr
+    note right of needs_review: reversible-fast
+    note right of reviewing: role=peer-reviewer, types=pr
+    note right of changes_requested: reversible-fast
+    note right of fixing_review: role=developer, types=pr
+    note right of needs_qa: reversible-fast
+    note right of verifying: role=tester, types=pr
+    note right of qa_passed: reversible-fast
+    note right of qa_failed: reversible-fast
+    note right of fixing_qa: role=developer, types=pr
+    note right of merging: role=developer, types=pr
     note right of staged: reversible-slow
 ```
 
@@ -46,18 +52,18 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|
-| `draft` | resting | — | — | — | — | — |
-| `drafting` | working | — | developer | — | — | — |
-| `needs_review` | resting | — | — | — | — | — |
-| `reviewing` | working | — | peer-reviewer | — | — | — |
-| `changes_requested` | resting | — | — | — | — | — |
-| `fixing_review` | working | — | developer | — | — | — |
-| `needs_qa` | resting | — | — | — | — | — |
-| `verifying` | working | — | tester | — | — | — |
-| `qa_passed` | resting | — | — | — | — | — |
-| `qa_failed` | resting | — | — | — | — | — |
-| `fixing_qa` | working | — | developer | — | — | — |
-| `merging` | working | — | developer | — | — | — |
+| `draft` | resting | reversible-fast | — | — | — | — |
+| `drafting` | working | — | developer | pr | — | — |
+| `needs_review` | resting | reversible-fast | — | — | — | — |
+| `reviewing` | working | — | peer-reviewer | pr | — | — |
+| `changes_requested` | resting | reversible-fast | — | — | — | — |
+| `fixing_review` | working | — | developer | pr | — | — |
+| `needs_qa` | resting | reversible-fast | — | — | — | — |
+| `verifying` | working | — | tester | pr | — | — |
+| `qa_passed` | resting | reversible-fast | — | — | — | — |
+| `qa_failed` | resting | reversible-fast | — | — | — | — |
+| `fixing_qa` | working | — | developer | pr | — | — |
+| `merging` | working | — | developer | pr | — | — |
 | `staged` | terminal | reversible-slow | — | — | shipped | completed |
 
 ## Transitions

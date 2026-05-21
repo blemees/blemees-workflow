@@ -43,3 +43,27 @@ Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Re
 A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create`; the framework recognises it for cross-process modelling and documentation.
 
 **GitHub entity**: pull request (no native Issue Type)
+
+## `incident` — Incident
+
+Live production incident. Opened by the IC at declaration; carries through incident-response and any mitigation work on the same ticket. Closes at `stabilized`; postmortem is a separate (spawned) ticket.
+
+**GitHub Issue Type**: `Incident` · **Color**: `red`
+
+## `postmortem` — Postmortem
+
+Post-incident review work. Spawned at `incident.stabilized`; owns the narrative, root-cause integration, and follow-up filing. Distinct ticket from the incident itself so the postmortem can outlive the incident's close.
+
+**GitHub Issue Type**: `Postmortem` · **Color**: `purple`
+
+## `release` — Release
+
+A release-train work item. Tracks one cut through prep → deploy → monitor; experimentation and progressive-rollout are phases that operate on the same release ticket.
+
+**GitHub Issue Type**: `Release` · **Color**: `blue`
+
+## `backport` — Backport
+
+Port of an already-merged change onto a release/patch branch. Distinct from a regular bug/hotfix because the work is mechanical (cherry-pick + verify), not net-new.
+
+**GitHub Issue Type**: `Backport` · **Color**: `yellow`

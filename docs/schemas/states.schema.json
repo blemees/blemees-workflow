@@ -15,12 +15,6 @@
       "type": "string",
       "description": "Process name. Defaults to the file stem with `-states` stripped. The HCP catalog path is derived from this by convention: `<name>-hcps.json`."
     },
-    "issue_types": {
-      "type": "array",
-      "description": "Issue type ids this process accepts. Each id must resolve in the shared `issue-types.json`.",
-      "items": {"type": "string", "minLength": 1},
-      "uniqueItems": true
-    },
     "states": {
       "type": "object",
       "description": "Map of state-id → state spec.",
@@ -44,19 +38,20 @@
         },
         "roles": {
           "type": "array",
-          "description": "Role ids permitted to occupy this working state. Only valid on working states — the role-restriction lives on the working state, not on the resting queue it's claimed from. Resting states are open queues; downstream working states declare who may pick items up.",
+          "description": "Role ids permitted to occupy this working state. REQUIRED on working states; FORBIDDEN on resting / terminal states. Resting states are open queues; downstream working states declare who may pick items up.",
           "items": {"type": "string", "minLength": 1},
+          "minItems": 1,
           "uniqueItems": true
         },
         "issue_types": {
           "type": "array",
-          "description": "Issue type ids this working state accepts. Only valid on working states. Empty / absent = accepts any of the process-level types. Each entry must be in the process-level `issue_types` set (cross-checked by the validator).",
+          "description": "Issue type ids this working state accepts. REQUIRED on working states; FORBIDDEN on resting / terminal states. The process's overall accepted set is derived as the union of every working state's `issue_types`.",
           "items": {"type": "string", "minLength": 1},
           "uniqueItems": true
         },
         "reversibility": {
           "enum": ["irreversible", "reversible-fast", "reversible-slow"],
-          "description": "Reversibility class of acting from this state."
+          "description": "How reversible landing in this state is. REQUIRED on resting and terminal states; FORBIDDEN on working states (working states are transient — only landings have a reversibility class). Enforced by the Python parser."
         },
         "terminal_taxonomy": {
           "enum": [
@@ -71,7 +66,7 @@
         },
         "close_reason": {
           "type": "string",
-          "description": "Backend close-reason hint (e.g., GitHub's 'completed' or 'not planned'). Set on terminal-done states; absent on handoff terminals."
+          "description": "Backend close-reason hint. REQUIRED on terminal states, FORBIDDEN elsewhere. For GitHub: 'completed' or 'not planned'."
         },
         "notes": {
           "type": "array",

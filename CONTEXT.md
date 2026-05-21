@@ -106,11 +106,13 @@ Per-process markdown (`<name>.md`) contains everything an agent needs to operate
 
 ## Issue type
 
-Each process declares which issue types it accepts via a top-level `"issue_types": [...]` array on its state machine JSON. The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).
+Issue types are declared at the **working-state** level. Every working state lists which types it accepts via `issue_types: [...]`; the field is required there and forbidden on resting / terminal states. The process's overall accepted set is derived as the union of every working state's `issue_types` (`StateMachine.accepted_issue_types`).
 
-`workflow create` requires `--type` when the process supports multiple types; auto-defaults when only one. Issue type is set at creation and **immutable** — if a type needs to change, that's a new issue, not a retype. The validator checks every type id a process declares exists in `issue-types.json`; missing ids are an ERROR, missing directory is a WARNING.
+The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).
 
-**Working states can narrow the type set.** A working state may declare its own `issue_types: [...]` to accept only a subset of the process-level umbrella. The validator enforces the subset rule; the planner checks at claim time that the issue's type is in the destination working state's set (when declared). Resting and terminal states never carry `issue_types` — they're queues / endpoints, not the unit of type-restriction. This is how inner-loop's `implementing` (accepts bug/feature/chore), `implementing_experiment` (accepts experiment), `implementing_spike` (accepts spike), and `implementing_hotfix` (accepts hotfix) fan a single ticket into the right working flow.
+`workflow create` requires `--type` when the process accepts multiple types; auto-defaults when only one. Issue type is set at creation and **immutable** — if a type needs to change, that's a new issue, not a retype. The validator checks every type id referenced by a working state exists in `issue-types.json`; missing ids are an ERROR, missing directory is a WARNING. The planner checks at claim time that the issue's type is in the destination working state's set — a typed ticket can't be claimed into a working state that doesn't accept its type.
+
+This is how inner-loop's `implementing` (accepts bug/feature/chore), `implementing_experiment` (accepts experiment), `implementing_spike` (accepts spike), and `implementing_hotfix` (accepts hotfix) fan a single ticket into the right working flow.
 
 ### `pr` — the pre-defined pull-request type
 
@@ -161,9 +163,11 @@ Provisions both org Issue Types and repo labels:
 
 ## Closing the tracker's issue
 
-Each terminal state declares its own `close_reason` in `<name>-states.json` — the literal string the backend hands to the tracker (e.g., GitHub's `"completed"` or `"not planned"`). When `close_reason` is set, advancing into the state closes the tracker's issue with that reason as part of the same atomic apply step. When `close_reason` is absent, the issue stays open — used for handoff-style terminals where the work continues elsewhere.
+Every terminal state declares a `close_reason` in `<name>-states.json` — the literal string the backend hands to the tracker (GitHub: `"completed"` or `"not planned"`). The field is **required on terminals** (parser-enforced) and forbidden elsewhere. Advancing into a terminal state closes the tracker's issue with that reason as part of the same atomic apply step.
 
-Authoring lives in JSON, not in code. A project can map taxonomies to reasons however it wants without changing the framework. The validator may eventually warn if a terminal has no `close_reason` and the taxonomy suggests one is appropriate, but the field stays authored, not inferred.
+There is no "open-after-terminal" mode: a terminal always closes the issue. Work that *continues* under a different process keeps the same issue open via a **shared resting state** (cross-process `kind: shared`), not via a terminal. Work that **spawns a follow-up issue** terminates the original (taxonomy `superseded`, close_reason `completed`) and creates a new issue on the receiving process (`kind: spawn`).
+
+Authoring lives in JSON, not in code. Projects map taxonomies to reasons however they want without changing the framework — typical pairings: `shipped`/`resolved`/`reverted`/`superseded` → `completed`; `abandoned`/`deduplicated` → `not planned`.
 
 ## `superseded` is for follow-up work, not handoff
 

@@ -2,6 +2,10 @@
 
 > Defined in: `mitigation-states.json`
 
+## Issue types accepted
+
+- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response and any mitigation work on the same ticket. Closes at `stabilized`; postmortem is a separate (spawned) ticket.
+
 ## State diagram
 
 ```mermaid
@@ -27,9 +31,9 @@ stateDiagram-v2
     note left of ready_for_rollback: reversible-fast
     note right of ready_for_flag_toggle: reversible-fast
     note right of ready_for_hotfix: reversible-fast
-    note right of rolling_back: role=incident-responder
+    note right of rolling_back: role=incident-responder, types=incident
     note right of rolled_back: reversible-slow
-    note right of toggling_flag: role=incident-responder
+    note right of toggling_flag: role=incident-responder, types=incident
     note right of flag_toggled: reversible-slow
 ```
 
@@ -40,9 +44,9 @@ stateDiagram-v2
 | `ready_for_rollback` | resting | reversible-fast | — | — | — | — |
 | `ready_for_flag_toggle` | resting | reversible-fast | — | — | — | — |
 | `ready_for_hotfix` | resting | reversible-fast | — | — | — | — |
-| `rolling_back` | working | — | incident-responder | — | — | — |
+| `rolling_back` | working | — | incident-responder | incident | — | — |
 | `rolled_back` | terminal | reversible-slow | — | — | shipped | completed |
-| `toggling_flag` | working | — | incident-responder | — | — | — |
+| `toggling_flag` | working | — | incident-responder | incident | — | — |
 | `flag_toggled` | terminal | reversible-slow | — | — | shipped | completed |
 
 ## Transitions

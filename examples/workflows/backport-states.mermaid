@@ -12,5 +12,8 @@ stateDiagram-v2
     backported --> [*]: terminal (shipped)
 
     note left of ready_for_backport: reversible-slow
-    note right of cherry_picking: role=developer
+    note right of cherry_picking: role=developer, types=backport
+    note right of backport_pr_review: reversible-fast
+    note right of backport_merged: reversible-slow
+    note right of patch_releasing: reversible-slow
     note right of backported: reversible-slow

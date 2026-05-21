@@ -8,14 +8,17 @@
     },
     "drafting": {
       "class": "working",
-      "roles": ["product-manager"]
+      "roles": ["product-manager"],
+      "issue_types": ["postmortem"]
     },
     "ready_for_followups": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "creating_followups": {
       "class": "working",
-      "roles": ["product-manager"]
+      "roles": ["product-manager"],
+      "issue_types": ["postmortem"]
     },
     "complete": {
       "class": "terminal",

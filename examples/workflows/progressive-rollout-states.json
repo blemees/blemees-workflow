@@ -3,20 +3,26 @@
   "name": "progressive-rollout",
   "states": {
     "soaking": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-slow"
     },
     "ready_for_stage_analysis": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "analyzing": {
       "class": "working",
-      "roles": ["developer"]
+      "roles": ["developer"],
+      "issue_types": ["release"]
     },
     "holding": {
-      "class": "resting"
+      "class": "resting",
+      "reversibility": "reversible-fast"
     },
     "killing": {
-      "class": "working"
+      "class": "working",
+      "issue_types": ["release"],
+      "roles": ["incident-commander", "incident-responder"]
     },
     "complete": {
       "class": "terminal",

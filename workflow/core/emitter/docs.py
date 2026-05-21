@@ -54,8 +54,9 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
         out.append(f"> HCP catalog: `{sm.name}-hcps.json`")
     out.append("")
 
-    if sm.issue_types:
-        out.extend(_section_issue_types(sm.issue_types, inputs.issue_type_directory))
+    accepted = sm.accepted_issue_types
+    if accepted:
+        out.extend(_section_issue_types(accepted, inputs.issue_type_directory))
 
     out.extend(_section_diagram(sm))
     out.extend(_section_states(sm))

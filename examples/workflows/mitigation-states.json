@@ -16,7 +16,8 @@
     },
     "rolling_back": {
       "class": "working",
-      "roles": ["incident-responder"]
+      "roles": ["incident-responder"],
+      "issue_types": ["incident"]
     },
     "rolled_back": {
       "class": "terminal",
@@ -26,7 +27,8 @@
     },
     "toggling_flag": {
       "class": "working",
-      "roles": ["incident-responder"]
+      "roles": ["incident-responder"],
+      "issue_types": ["incident"]
     },
     "flag_toggled": {
       "class": "terminal",
