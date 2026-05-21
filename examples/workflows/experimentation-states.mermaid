@@ -14,10 +14,10 @@ stateDiagram-v2
     analyzing --> iterated: PO requests experiment iteration (files new experiment on process refinement)
     promoted --> [*]: terminal (shipped)
     killed --> [*]: terminal (abandoned)
-    iterated --> [*]: terminal (iterated)
-    aborted --> [*]: terminal (aborted)
+    iterated --> [*]: terminal (superseded)
+    aborted --> [*]: terminal (abandoned)
 
-    note right of measurement_complete: claim-role=product-owner
+    note right of analyzing: role=product-owner
     note right of promoted: reversible-slow
     note right of killed: reversible-slow
     note right of iterated: reversible-fast

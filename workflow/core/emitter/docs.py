@@ -281,15 +281,21 @@ def _section_diagram(sm: StateMachine) -> list[str]:
 
 def _section_states(sm: StateMachine) -> list[str]:
     out = ["## States", ""]
-    out.append("| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |")
-    out.append("|---|---|---|---|---|---|")
+    out.append(
+        "| Name | Class | Reversibility | Roles | Issue types | "
+        "Terminal taxonomy | Close reason |"
+    )
+    out.append("|---|---|---|---|---|---|---|")
     for name, st in sm.states.items():
         cls = st.state_class.value
         rev = st.reversibility.value if st.reversibility else "—"
-        claim = st.claim_role or "—"
+        roles = ", ".join(st.roles) if st.roles else "—"
+        types = ", ".join(st.issue_types) if st.issue_types else "—"
         tax = st.terminal_taxonomy.value if st.terminal_taxonomy else "—"
         close = st.close_reason or "—"
-        out.append(f"| `{name}` | {cls} | {rev} | {claim} | {tax} | {close} |")
+        out.append(
+            f"| `{name}` | {cls} | {rev} | {roles} | {types} | {tax} | {close} |"
+        )
     out.append("")
     return out
 

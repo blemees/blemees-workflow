@@ -17,8 +17,10 @@ stateDiagram-v2
     rolled_back --> [*]: terminal (shipped)
     flag_toggled --> [*]: terminal (shipped)
 
-    note left of ready_for_rollback: claim-role=responder, reversible-fast
-    note right of ready_for_flag_toggle: claim-role=responder, reversible-fast
+    note left of ready_for_rollback: reversible-fast
+    note right of ready_for_flag_toggle: reversible-fast
     note right of ready_for_hotfix: reversible-fast
+    note right of rolling_back: role=incident-responder
     note right of rolled_back: reversible-slow
+    note right of toggling_flag: role=incident-responder
     note right of flag_toggled: reversible-slow

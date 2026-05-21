@@ -15,7 +15,8 @@ stateDiagram-v2
     %%
 
     [*] --> draft: from process inner-loop (developer opens draft PR at ticket claim)
-    draft --> needs_review: developer marks PR ready for review
+    draft --> drafting: developer claims draft
+    drafting --> needs_review: developer marks PR ready for review
     needs_review --> reviewing: reviewer claims PR
     reviewing --> needs_qa: reviewer approves PR
     reviewing --> qa_passed: reviewer approves hotfix PR (QA skipped, IC discretion)
@@ -32,37 +33,40 @@ stateDiagram-v2
     merging --> needs_review: merge conflict or failed staging deploy
     staged --> [*]: terminal (shipped)
 
-    note right of needs_review: claim-role=reviewer
-    note right of changes_requested: claim-role=developer
-    note right of needs_qa: claim-role=qa
-    note right of qa_passed: claim-role=developer
-    note right of qa_failed: claim-role=developer
+    note right of drafting: role=developer
+    note right of reviewing: role=peer-reviewer
+    note right of fixing_review: role=developer
+    note right of verifying: role=tester
+    note right of fixing_qa: role=developer
+    note right of merging: role=developer
     note right of staged: reversible-slow
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `draft` | resting | — | — | — | — |
-| `needs_review` | resting | — | reviewer | — | — |
-| `reviewing` | working | — | — | — | — |
-| `changes_requested` | resting | — | developer | — | — |
-| `fixing_review` | working | — | — | — | — |
-| `needs_qa` | resting | — | qa | — | — |
-| `verifying` | working | — | — | — | — |
-| `qa_passed` | resting | — | developer | — | — |
-| `qa_failed` | resting | — | developer | — | — |
-| `fixing_qa` | working | — | — | — | — |
-| `merging` | working | — | — | — | — |
-| `staged` | terminal | reversible-slow | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `draft` | resting | — | — | — | — | — |
+| `drafting` | working | — | developer | — | — | — |
+| `needs_review` | resting | — | — | — | — | — |
+| `reviewing` | working | — | peer-reviewer | — | — | — |
+| `changes_requested` | resting | — | — | — | — | — |
+| `fixing_review` | working | — | developer | — | — | — |
+| `needs_qa` | resting | — | — | — | — | — |
+| `verifying` | working | — | tester | — | — | — |
+| `qa_passed` | resting | — | — | — | — | — |
+| `qa_failed` | resting | — | — | — | — | — |
+| `fixing_qa` | working | — | developer | — | — | — |
+| `merging` | working | — | developer | — | — | — |
+| `staged` | terminal | reversible-slow | — | — | shipped | completed |
 
 ## Transitions
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
 | `[*]` | `draft` | cross_process | 'from process inner-loop (developer opens draft PR at ticket claim)' | — | — |
-| `draft` | `needs_review` | role_action | 'developer marks PR ready for review' | — | — |
+| `draft` | `drafting` | claim | 'developer claims draft' | — | — |
+| `drafting` | `needs_review` | role_action | 'developer marks PR ready for review' | — | — |
 | `needs_review` | `reviewing` | claim | 'reviewer claims PR' | — | — |
 | `reviewing` | `needs_qa` | role_action | 'reviewer approves PR' | — | — |
 | `reviewing` | `qa_passed` | role_action | 'reviewer approves hotfix PR (QA skipped, IC discretion)' | — | — |

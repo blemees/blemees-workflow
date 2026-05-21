@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blemees.io/schemas/blemees-workflow/trust-grant.schema.json",
+  "title": "blemees-workflow trust grant",
+  "description": "Schema for individual trust-grant files under `trust-grants/<process>/<gate>.json`. Per-team relaxations of catalogued HCPs. Cross-reference checks (control_point matches a real HCP; current_level in HCP's allowed_levels; evidence currency) run in `workflow validate`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "control_point",
+    "workflow",
+    "team",
+    "current_level",
+    "evidence",
+    "granted_by",
+    "granted_at",
+    "expires_at"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "control_point": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The HCP `gate_name` this grant relaxes."
+    },
+    "workflow": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Process name the gate belongs to (matches the parent directory name)."
+    },
+    "team": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Team this grant applies to."
+    },
+    "current_level": {
+      "enum": ["block", "audit"],
+      "description": "Effective gating level under this grant. Must be in the HCP's `allowed_levels` (enforced by validator)."
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Operational parameters for the grant.",
+      "properties": {
+        "timeout": {
+          "type": "string",
+          "description": "Time budget before `on_timeout` fires (e.g., '24h', 'P1D'). Free-form."
+        },
+        "on_timeout": {
+          "enum": ["abort", "escalate"],
+          "description": "What happens when `timeout` elapses without resolution."
+        },
+        "escalate_to": {
+          "type": "string",
+          "description": "Role / channel to escalate to when `on_timeout` is `escalate`."
+        },
+        "cadence": {
+          "type": "string",
+          "description": "Audit cadence for audit-level grants (e.g., 'weekly')."
+        },
+        "on_revoke": {
+          "type": "string",
+          "description": "Procedure when revoked."
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "description": "At least one evidence entry justifying the grant (per trust-grant-schema.md § 7.5).",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "granted_by": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Principal (person or body) who granted the relaxation."
+    },
+    "granted_at": {
+      "type": "string",
+      "format": "date",
+      "description": "ISO-8601 date the grant took effect."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date",
+      "description": "ISO-8601 date the grant expires. Must be strictly after `granted_at`."
+    },
+    "review_cadence": {
+      "type": "string",
+      "description": "How often this grant is re-reviewed."
+    },
+    "revocation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "procedure": {
+          "type": "string",
+          "description": "How to revoke this grant."
+        },
+        "authorized_revokers": {
+          "description": "Principal(s) who may revoke. String or array of strings.",
+          "oneOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"type": "string"}}
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "source": {"type": "string", "description": "Where the evidence comes from (e.g., dashboard name, audit log)."},
+        "metric": {"type": "string", "description": "Specific metric or signal."},
+        "window": {"type": "string", "description": "Time window the evidence covers."},
+        "detail": {"type": "string", "description": "Free-form additional detail."}
+      }
+    }
+  }
+}

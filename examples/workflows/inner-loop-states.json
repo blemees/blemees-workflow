@@ -1,39 +1,43 @@
 {
+  "$schema": "../../docs/schemas/states.schema.json",
   "name": "inner-loop",
-  "canonical_catalog_path": "inner-loop-hcps.json",
   "issue_types": ["bug", "feature", "chore", "hotfix", "spike", "experiment"],
   "states": {
     "ready_for_dev": {
       "class": "resting",
-      "claim_role": "developer",
       "reversibility": "reversible-slow"
     },
     "ready_for_experiment": {
       "class": "resting",
-      "claim_role": "developer",
       "reversibility": "reversible-slow"
     },
     "ready_for_spike": {
       "class": "resting",
-      "claim_role": "developer",
       "reversibility": "reversible-slow"
     },
     "ready_for_hotfix": {
       "class": "resting",
-      "claim_role": "developer",
       "reversibility": "reversible-fast"
     },
     "implementing": {
-      "class": "working"
+      "class": "working",
+      "roles": ["developer"],
+      "issue_types": ["bug", "feature", "chore"]
     },
     "implementing_experiment": {
-      "class": "working"
+      "class": "working",
+      "roles": ["developer"],
+      "issue_types": ["experiment"]
     },
     "implementing_spike": {
-      "class": "working"
+      "class": "working",
+      "roles": ["developer"],
+      "issue_types": ["spike"]
     },
     "implementing_hotfix": {
-      "class": "working"
+      "class": "working",
+      "roles": ["developer"],
+      "issue_types": ["hotfix"]
     },
     "pr_review": {
       "class": "resting"
@@ -61,31 +65,26 @@
     },
     "ready_bounced": {
       "class": "resting",
-      "claim_role": "pm",
       "reversibility": "reversible-fast"
     }
   },
   "transitions": [
     {"source": "[*]", "destination": "ready_for_dev", "type": "cross_process", "label": "from process refinement", "kind": "shared", "process": "refinement"},
     {"source": "[*]", "destination": "ready_for_experiment", "type": "cross_process", "label": "from process refinement", "kind": "shared", "process": "refinement"},
-    {"source": "[*]", "destination": "ready_for_spike", "type": "cross_process", "label": "from process refinement (spawn — consultant creates spike sub-issue)", "kind": "spawn", "process": "refinement"},
+    {"source": "[*]", "destination": "ready_for_spike", "type": "cross_process", "label": "from process refinement (spawn \u2014 consultant creates spike sub-issue)", "kind": "spawn", "process": "refinement"},
     {"source": "[*]", "destination": "ready_for_hotfix", "type": "cross_process", "label": "from process mitigation", "kind": "shared", "process": "mitigation"},
-
     {"source": "ready_for_dev", "destination": "implementing", "type": "claim", "label": "developer claims issue"},
     {"source": "ready_for_experiment", "destination": "implementing_experiment", "type": "claim", "label": "developer claims experiment"},
     {"source": "ready_for_spike", "destination": "implementing_spike", "type": "claim", "label": "developer claims spike"},
     {"source": "ready_for_hotfix", "destination": "implementing_hotfix", "type": "claim", "label": "developer claims hotfix"},
-
     {"source": "implementing", "destination": "ready_bounced", "type": "role_action", "label": "developer bounces ticket"},
     {"source": "implementing", "destination": "pr_review", "type": "role_action", "label": "developer requests PR review"},
     {"source": "implementing_experiment", "destination": "pr_review_experiment", "type": "role_action", "label": "developer requests PR review"},
     {"source": "implementing_hotfix", "destination": "pr_review_hotfix", "type": "role_action", "label": "developer requests PR review"},
     {"source": "implementing_spike", "destination": "spike_completed", "type": "role_action", "label": "developer posts spike findings"},
-
     {"source": "pr_review", "destination": "staged", "type": "external", "label": "from process pr-review (PR merged)"},
     {"source": "pr_review_experiment", "destination": "staged_experiment", "type": "external", "label": "from process pr-review (PR merged)"},
     {"source": "pr_review_hotfix", "destination": "staged_hotfix", "type": "external", "label": "from process pr-review (PR merged)"},
-
     {"source": "ready_bounced", "destination": "[*]", "type": "cross_process", "label": "to process refinement", "kind": "shared", "process": "refinement"},
     {"source": "staged", "destination": "[*]", "type": "cross_process", "label": "to process release (standard train)", "kind": "spawn", "process": "release"},
     {"source": "staged_experiment", "destination": "[*]", "type": "cross_process", "label": "to process release (standard train)", "kind": "spawn", "process": "release"},

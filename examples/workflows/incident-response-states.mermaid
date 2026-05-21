@@ -9,10 +9,10 @@ stateDiagram-v2
     needs_verification --> verifying: responder claims verification
     verifying --> cause_identified: responder reports mitigation failed
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
-    stabilized --> [*]: terminal (stabilized)
+    stabilized --> [*]: terminal (superseded)
 
-    note left of declared: claim-role=incident-commander
-    note right of needs_diagnosis: claim-role=responder
-    note right of cause_identified: claim-role=incident-commander
-    note right of needs_verification: claim-role=responder
+    note right of triaging: role=incident-commander
+    note right of diagnosing: role=incident-responder
+    note right of mitigating: role=incident-commander
+    note right of verifying: role=incident-responder
     note right of stabilized: reversible-fast

@@ -16,28 +16,28 @@ stateDiagram-v2
     needs_verification --> verifying: responder claims verification
     verifying --> cause_identified: responder reports mitigation failed
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
-    stabilized --> [*]: terminal (stabilized)
+    stabilized --> [*]: terminal (superseded)
 
-    note left of declared: claim-role=incident-commander
-    note right of needs_diagnosis: claim-role=responder
-    note right of cause_identified: claim-role=incident-commander
-    note right of needs_verification: claim-role=responder
+    note right of triaging: role=incident-commander
+    note right of diagnosing: role=incident-responder
+    note right of mitigating: role=incident-commander
+    note right of verifying: role=incident-responder
     note right of stabilized: reversible-fast
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `declared` | resting | — | incident-commander | — | — |
-| `triaging` | working | — | — | — | — |
-| `needs_diagnosis` | resting | — | responder | — | — |
-| `diagnosing` | working | — | — | — | — |
-| `cause_identified` | resting | — | incident-commander | — | — |
-| `mitigating` | working | — | — | — | — |
-| `needs_verification` | resting | — | responder | — | — |
-| `verifying` | working | — | — | — | — |
-| `stabilized` | terminal | reversible-fast | — | stabilized | completed |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `declared` | resting | — | — | — | — | — |
+| `triaging` | working | — | incident-commander | — | — | — |
+| `needs_diagnosis` | resting | — | — | — | — | — |
+| `diagnosing` | working | — | incident-responder | — | — | — |
+| `cause_identified` | resting | — | — | — | — | — |
+| `mitigating` | working | — | incident-commander | — | — | — |
+| `needs_verification` | resting | — | — | — | — | — |
+| `verifying` | working | — | incident-responder | — | — | — |
+| `stabilized` | terminal | reversible-fast | — | — | superseded | completed |
 
 ## Transitions
 

@@ -32,9 +32,13 @@ stateDiagram-v2
     staged_hotfix --> [*]: to process release (hotfix patch train)
     spike_completed --> [*]: terminal (resolved)
 
-    note left of ready_for_dev: claim-role=developer, reversible-slow
-    note right of ready_for_experiment: claim-role=developer, reversible-slow
-    note right of ready_for_spike: claim-role=developer, reversible-slow
-    note right of ready_for_hotfix: claim-role=developer, reversible-fast
+    note left of ready_for_dev: reversible-slow
+    note right of ready_for_experiment: reversible-slow
+    note right of ready_for_spike: reversible-slow
+    note right of ready_for_hotfix: reversible-fast
+    note right of implementing: role=developer, types=bug, feature, chore
+    note right of implementing_experiment: role=developer, types=experiment
+    note right of implementing_spike: role=developer, types=spike
+    note right of implementing_hotfix: role=developer, types=hotfix
     note right of spike_completed: reversible-fast
-    note right of ready_bounced: claim-role=pm, reversible-fast
+    note right of ready_bounced: reversible-fast

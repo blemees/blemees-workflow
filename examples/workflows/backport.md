@@ -18,20 +18,21 @@ stateDiagram-v2
     patch_releasing --> backported: from process release (patch deployed to production)
     backported --> [*]: terminal (shipped)
 
-    note left of ready_for_backport: claim-role=developer, reversible-slow
+    note left of ready_for_backport: reversible-slow
+    note right of cherry_picking: role=developer
     note right of backported: reversible-slow
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `ready_for_backport` | resting | reversible-slow | developer | — | — |
-| `cherry_picking` | working | — | — | — | — |
-| `backport_pr_review` | resting | — | — | — | — |
-| `backport_merged` | resting | — | — | — | — |
-| `patch_releasing` | resting | — | — | — | — |
-| `backported` | terminal | reversible-slow | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `ready_for_backport` | resting | reversible-slow | — | — | — | — |
+| `cherry_picking` | working | — | developer | — | — | — |
+| `backport_pr_review` | resting | — | — | — | — | — |
+| `backport_merged` | resting | — | — | — | — | — |
+| `patch_releasing` | resting | — | — | — | — | — |
+| `backported` | terminal | reversible-slow | — | — | shipped | completed |
 
 ## Transitions
 

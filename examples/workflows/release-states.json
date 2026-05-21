@@ -1,30 +1,30 @@
 {
+  "$schema": "../../docs/schemas/states.schema.json",
   "name": "release",
-  "canonical_catalog_path": "release-hcps.json",
   "states": {
     "accumulating": {
       "class": "resting"
     },
     "cut": {
-      "class": "resting",
-      "claim_role": "release-manager"
+      "class": "resting"
     },
     "preparing": {
-      "class": "working"
+      "class": "working",
+      "roles": ["release-manager"]
     },
     "ready_for_release_decision": {
-      "class": "resting",
-      "claim_role": "product-owner"
+      "class": "resting"
     },
     "reviewing_release": {
-      "class": "working"
+      "class": "working",
+      "roles": ["product-owner"]
     },
     "gated_nogo": {
-      "class": "resting",
-      "claim_role": "product-owner"
+      "class": "resting"
     },
     "abandoning": {
-      "class": "working"
+      "class": "working",
+      "roles": ["product-owner"]
     },
     "abandoned": {
       "class": "terminal",
@@ -39,11 +39,11 @@
       "class": "resting"
     },
     "ready_for_monitoring": {
-      "class": "resting",
-      "claim_role": "developer"
+      "class": "resting"
     },
     "monitoring": {
-      "class": "working"
+      "class": "working",
+      "roles": ["developer"]
     },
     "rolling_back": {
       "class": "working"
@@ -63,30 +63,23 @@
   },
   "transitions": [
     {"source": "[*]", "destination": "accumulating", "type": "external", "label": "new train opens (on cadence, or after previous release closes)"},
-    {"source": "[*]", "destination": "accumulating", "type": "cross_process", "label": "new patch train opens (from process inner-loop — hotfix merged)", "kind": "spawn", "process": "inner-loop"},
-    {"source": "[*]", "destination": "accumulating", "type": "cross_process", "label": "new patch train opens (from process backport — backport merged)", "kind": "spawn", "process": "backport"},
-
+    {"source": "[*]", "destination": "accumulating", "type": "cross_process", "label": "new patch train opens (from process inner-loop \u2014 hotfix merged)", "kind": "spawn", "process": "inner-loop"},
+    {"source": "[*]", "destination": "accumulating", "type": "cross_process", "label": "new patch train opens (from process backport \u2014 backport merged)", "kind": "spawn", "process": "backport"},
     {"source": "accumulating", "destination": "cut", "type": "external", "label": "cadence timer elapses (time)"},
     {"source": "accumulating", "destination": "cut", "type": "external", "label": "RM triggers cut script"},
-
     {"source": "cut", "destination": "preparing", "type": "claim", "label": "RM claims train"},
     {"source": "preparing", "destination": "ready_for_release_decision", "type": "role_action", "label": "RM publishes release notes, tags release candidate"},
-
     {"source": "ready_for_release_decision", "destination": "reviewing_release", "type": "claim", "label": "PO claims train"},
     {"source": "reviewing_release", "destination": "gated_nogo", "type": "role_action", "label": "PO defers with blocking reason"},
     {"source": "reviewing_release", "destination": "deploying", "type": "role_action", "label": "PO approves go (or IC approves for patch train)"},
-
     {"source": "gated_nogo", "destination": "reviewing_release", "type": "claim", "label": "PO re-claims deferred train"},
     {"source": "gated_nogo", "destination": "abandoning", "type": "claim", "label": "PO claims to abandon train"},
     {"source": "abandoning", "destination": "abandoned", "type": "role_action", "label": "PO closes train, issues revert to inner-loop.staged for next train"},
-
-    {"source": "deploying", "destination": "rolling_out", "type": "external", "label": "production deploy completes (external — progressive rollout starts)"},
+    {"source": "deploying", "destination": "rolling_out", "type": "external", "label": "production deploy completes (external \u2014 progressive rollout starts)"},
     {"source": "rolling_out", "destination": "ready_for_monitoring", "type": "external", "label": "rollout reaches 100% (from process progressive-rollout)"},
-
     {"source": "ready_for_monitoring", "destination": "monitoring", "type": "claim", "label": "on-call claims post-deploy watch"},
     {"source": "monitoring", "destination": "released", "type": "role_action", "label": "on-call confirms post-deploy window clean"},
     {"source": "monitoring", "destination": "rolling_back", "type": "role_action", "label": "on-call triggers rollback"},
-
     {"source": "rolling_back", "destination": "rolled_back", "type": "role_action", "label": "rollback completes"}
   ]
 }

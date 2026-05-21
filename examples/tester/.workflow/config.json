@@ -1,4 +1,4 @@
 {
-  "agent-role": "responder",
+  "agent-role": "tester",
   "workflow-dir": "../workflows"
 }

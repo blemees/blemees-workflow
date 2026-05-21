@@ -30,7 +30,7 @@ def emit_mermaid(state_machine: StateMachine) -> str:
       transitions exist (principle 9).
     - The HITL gate legend with reversibility (principle 11).
     - All transitions in JSON order.
-    - Notes for states with claim_role, reversibility, terminal_taxonomy,
+    - Notes for states with roles, reversibility, terminal_taxonomy,
       or free-form notes — placed only when authored. For shared handoff
       states, the receiver carries the note; the sender's side leaves it
       blank (per the convention in `docs/state_machine-authoring.md`).
@@ -97,7 +97,7 @@ def _emit_cross_process_legend(state_machine: StateMachine) -> list[str]:
 def _emit_hitl_legend(state_machine: StateMachine) -> list[str]:
     if not state_machine.gates_in_legend:
         return []
-    pointer = state_machine.canonical_catalog_path or "?"
+    pointer = f"{state_machine.name}-hcps.json"
     lines = [f"    %% HITL gates (canonical: {pointer}):"]
     width = max(len(g) for g in state_machine.gates_in_legend) + 1
     for gate in state_machine.gates_in_legend:
@@ -148,8 +148,13 @@ def _state_note_text(state: State, state_machine: StateMachine) -> str | None:
     handoff states whose receiver-side metadata is missing get no note on
     the sender's side (per convention)."""
     parts: list[str] = []
-    if state.claim_role:
-        parts.append(f"claim-role={state.claim_role}")
+    if state.roles:
+        if len(state.roles) == 1:
+            parts.append(f"role={state.roles[0]}")
+        else:
+            parts.append(f"roles={', '.join(state.roles)}")
+    if state.issue_types:
+        parts.append(f"types={', '.join(state.issue_types)}")
     # Reversibility on the state node only when it isn't already covered by
     # the HITL legend (the legend's reversibility column propagates back to
     # the state from the parser's view; emit on the state when there's no

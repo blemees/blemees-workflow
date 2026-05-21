@@ -1,8 +1,9 @@
 {
+  "$schema": "../../docs/schemas/issue-types.schema.json",
   "types": {
     "bug": {
       "name": "Bug",
-      "description": "Defect in shipped behavior — something is broken or wrong. Branch prefix `fix/`. Failing test first; reviewer scrutinizes root cause vs surface symptom.",
+      "description": "Defect in shipped behavior \u2014 something is broken or wrong. Branch prefix `fix/`. Failing test first; reviewer scrutinizes root cause vs surface symptom.",
       "github_issue_type": "Bug",
       "github_issue_type_color": "red"
     },
@@ -26,7 +27,7 @@
     },
     "spike": {
       "name": "Spike",
-      "description": "Time-boxed investigation. Branch prefix `spike/`. Deliverable is a findings doc, not merged code — the PR is never merged. Follow-ups re-enter refinement.",
+      "description": "Time-boxed investigation. Branch prefix `spike/`. Deliverable is a findings doc, not merged code \u2014 the PR is never merged. Follow-ups re-enter refinement.",
       "github_issue_type": "Spike",
       "github_issue_type_color": "purple"
     },

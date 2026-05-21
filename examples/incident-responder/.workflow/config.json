@@ -1,0 +1,4 @@
+{
+  "agent-role": "incident-responder",
+  "workflow-dir": "../workflows"
+}

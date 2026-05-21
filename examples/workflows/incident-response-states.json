@@ -1,54 +1,50 @@
 {
+  "$schema": "../../docs/schemas/states.schema.json",
   "name": "incident-response",
-  "canonical_catalog_path": "incident-response-hcps.json",
   "states": {
     "declared": {
-      "class": "resting",
-      "claim_role": "incident-commander"
+      "class": "resting"
     },
     "triaging": {
-      "class": "working"
+      "class": "working",
+      "roles": ["incident-commander"]
     },
     "needs_diagnosis": {
-      "class": "resting",
-      "claim_role": "responder"
+      "class": "resting"
     },
     "diagnosing": {
-      "class": "working"
+      "class": "working",
+      "roles": ["incident-responder"]
     },
     "cause_identified": {
-      "class": "resting",
-      "claim_role": "incident-commander"
+      "class": "resting"
     },
     "mitigating": {
-      "class": "working"
+      "class": "working",
+      "roles": ["incident-commander"]
     },
     "needs_verification": {
-      "class": "resting",
-      "claim_role": "responder"
+      "class": "resting"
     },
     "verifying": {
-      "class": "working"
+      "class": "working",
+      "roles": ["incident-responder"]
     },
     "stabilized": {
       "class": "terminal",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "stabilized",
+      "terminal_taxonomy": "superseded",
       "close_reason": "completed"
     }
   },
   "transitions": [
     {"source": "[*]", "destination": "declared", "type": "external", "label": "alert / report triggers incident (external)"},
-
     {"source": "declared", "destination": "triaging", "type": "claim", "label": "IC claims incident"},
     {"source": "triaging", "destination": "needs_diagnosis", "type": "role_action", "label": "IC assigns severity, assigns responder"},
-
     {"source": "needs_diagnosis", "destination": "diagnosing", "type": "claim", "label": "responder claims diagnosis"},
     {"source": "diagnosing", "destination": "cause_identified", "type": "role_action", "label": "responder reports root cause"},
-
     {"source": "cause_identified", "destination": "mitigating", "type": "claim", "label": "IC claims incident for mitigation"},
     {"source": "mitigating", "destination": "needs_verification", "type": "role_action", "label": "IC requests verification (spawns work items on process mitigation)"},
-
     {"source": "needs_verification", "destination": "verifying", "type": "claim", "label": "responder claims verification"},
     {"source": "verifying", "destination": "cause_identified", "type": "role_action", "label": "responder reports mitigation failed"},
     {"source": "verifying", "destination": "stabilized", "type": "role_action", "label": "responder confirms production stable (spawns postmortem on process postmortem)"}

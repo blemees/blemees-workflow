@@ -27,6 +27,13 @@ class IssueState:
     # so `release` knows where to return the issue to. Eliminates the need
     # for the user to specify a destination on release.
     wip_from: str | None = None
+    # Framework-canonical issue type id (e.g., "bug", "experiment"). Set
+    # at issue creation; immutable. Backends extract this from the type
+    # encoding they were configured with — label encoding reads `type:<id>`
+    # labels; native encoding (GitHub Issue Types) reads the entity's
+    # native type field. None means the backend couldn't determine it;
+    # the planner treats that as "skip type-restriction checks."
+    issue_type: str | None = None
     # Catalogued-block markers
     awaiting_gate: str | None = None  # gate_name currently awaiting signal
     reviewing: bool = False  # singleton: a human has claimed pre-action review

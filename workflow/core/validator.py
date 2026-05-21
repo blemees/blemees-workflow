@@ -576,40 +576,70 @@ def _check_issue_types_resolved(
     state_machine: StateMachine,
     issue_type_directory: IssueTypeDirectory | None,
 ) -> list[ValidationFinding]:
-    """Every issue type a process declares must exist in the issue-types directory.
+    """Every issue type referenced (at process or state level) must exist in
+    the issue-types directory. State-level `issue_types` must additionally
+    be a subset of the process-level set.
 
-    If the process declares `issue_types` but no directory was loaded, that's
-    a WARNING (directory missing or malformed). If the directory exists but
-    one of the referenced ids is absent, that's an ERROR (dangling reference).
+    Severities:
+    - Process declares `issue_types` but no directory loaded: WARNING.
+    - Process or state references an unknown type id: ERROR.
+    - State declares an issue type not in the process-level set: ERROR.
     """
     findings: list[ValidationFinding] = []
-    if not state_machine.issue_types:
+    process_types = set(state_machine.issue_types)
+    state_types: set[str] = set()
+    for st in state_machine.states.values():
+        state_types.update(st.issue_types)
+
+    if not process_types and not state_types:
         return findings
-    if issue_type_directory is None:
+
+    if issue_type_directory is None and process_types:
         findings.append(
             ValidationFinding(
                 severity=Severity.WARNING,
                 principle_cite="state-machine-principles.md#1",
                 message=(
-                    f"Process declares issue_types {sorted(state_machine.issue_types)} "
+                    f"Process declares issue_types {sorted(process_types)} "
                     f"but no issue-types.json was found. Types cannot be resolved "
                     f"to backend type identifiers."
                 ),
                 location=state_machine.source_path,
             )
         )
-        return findings
-    for type_id in state_machine.issue_types:
-        if not issue_type_directory.has(type_id):
-            findings.append(
-                ValidationFinding(
-                    severity=Severity.ERROR,
-                    principle_cite="state-machine-principles.md#1",
-                    message=(
-                        f"Process references issue type {type_id!r} but it is not "
-                        f"defined in {issue_type_directory.source_path or 'issue-types.json'}."
-                    ),
-                    location=state_machine.source_path,
+
+    if issue_type_directory is not None:
+        for type_id in process_types | state_types:
+            if not issue_type_directory.has(type_id):
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#1",
+                        message=(
+                            f"References issue type {type_id!r} but it is not "
+                            f"defined in {issue_type_directory.source_path or 'issue-types.json'}."
+                        ),
+                        location=state_machine.source_path,
+                    )
                 )
-            )
+
+    # State-level subset check: every state-declared type must also appear
+    # at the process level (when the process declares any).
+    if process_types:
+        for st in state_machine.states.values():
+            for type_id in st.issue_types:
+                if type_id not in process_types:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#1",
+                            message=(
+                                f"Working state {st.name!r} declares issue_type "
+                                f"{type_id!r} not in the process-level set "
+                                f"{sorted(process_types)}. State-level "
+                                f"`issue_types` must be a subset of the umbrella."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
     return findings

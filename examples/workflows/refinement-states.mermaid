@@ -29,11 +29,9 @@ stateDiagram-v2
     duplicate --> [*]: terminal (deduplicated)
     wont_fix --> [*]: terminal (abandoned)
 
-    note left of raw: claim-role=pm
-    note right of consult_complete: claim-role=pm
+    note right of refining: role=product-manager
     note right of ready_for_dev: reversible-slow
     note right of ready_for_experiment: reversible-slow
-    note right of ready_bounced: claim-role=pm, reversible-fast
-    note right of deprioritized: claim-role=pm
+    note right of ready_bounced: reversible-fast
     note right of duplicate: reversible-fast
     note right of wont_fix: reversible-fast

@@ -15,7 +15,6 @@ stateDiagram-v2
     complete --> [*]: terminal (shipped)
     kill_switched --> [*]: terminal (reverted)
 
-    note right of ready_for_stage_analysis: claim-role=developer
-    note right of holding: claim-role=developer
+    note right of analyzing: role=developer
     note right of complete: reversible-slow
     note right of kill_switched: reversible-slow

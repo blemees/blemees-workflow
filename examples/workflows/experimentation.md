@@ -25,10 +25,10 @@ stateDiagram-v2
     analyzing --> iterated: PO requests experiment iteration (files new experiment on process refinement)
     promoted --> [*]: terminal (shipped)
     killed --> [*]: terminal (abandoned)
-    iterated --> [*]: terminal (iterated)
-    aborted --> [*]: terminal (aborted)
+    iterated --> [*]: terminal (superseded)
+    aborted --> [*]: terminal (abandoned)
 
-    note right of measurement_complete: claim-role=product-owner
+    note right of analyzing: role=product-owner
     note right of promoted: reversible-slow
     note right of killed: reversible-slow
     note right of iterated: reversible-fast
@@ -37,16 +37,16 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `measuring` | resting | — | — | — | — |
-| `measurement_complete` | resting | — | product-owner | — | — |
-| `analyzing` | working | — | — | — | — |
-| `aborting` | working | — | — | — | — |
-| `promoted` | terminal | reversible-slow | — | shipped | completed |
-| `killed` | terminal | reversible-slow | — | abandoned | not planned |
-| `iterated` | terminal | reversible-fast | — | iterated | not planned |
-| `aborted` | terminal | reversible-fast | — | aborted | not planned |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `measuring` | resting | — | — | — | — | — |
+| `measurement_complete` | resting | — | — | — | — | — |
+| `analyzing` | working | — | product-owner | — | — | — |
+| `aborting` | working | — | — | — | — | — |
+| `promoted` | terminal | reversible-slow | — | — | shipped | completed |
+| `killed` | terminal | reversible-slow | — | — | abandoned | not planned |
+| `iterated` | terminal | reversible-fast | — | — | superseded | not planned |
+| `aborted` | terminal | reversible-fast | — | — | abandoned | not planned |
 
 ## Transitions
 

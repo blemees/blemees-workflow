@@ -17,20 +17,21 @@ stateDiagram-v2
     creating_followups --> complete: PM files compensating issues (spawn events to process refinement)
     complete --> [*]: terminal (resolved)
 
-    note left of pending: claim-role=pm, reversible-slow
-    note right of ready_for_followups: claim-role=pm
+    note left of pending: reversible-slow
+    note right of drafting: role=product-manager
+    note right of creating_followups: role=product-manager
     note right of complete: reversible-slow
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `pending` | resting | reversible-slow | pm | — | — |
-| `drafting` | working | — | — | — | — |
-| `ready_for_followups` | resting | — | pm | — | — |
-| `creating_followups` | working | — | — | — | — |
-| `complete` | terminal | reversible-slow | — | resolved | completed |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `pending` | resting | reversible-slow | — | — | — | — |
+| `drafting` | working | — | product-manager | — | — | — |
+| `ready_for_followups` | resting | — | — | — | — | — |
+| `creating_followups` | working | — | product-manager | — | — | — |
+| `complete` | terminal | reversible-slow | — | — | resolved | completed |
 
 ## Transitions
 

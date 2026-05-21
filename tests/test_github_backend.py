@@ -63,10 +63,10 @@ def test_create_issue_invokes_gh_issue_create_with_state_label() -> None:
 
 def test_create_issue_with_claim_adds_wip_label() -> None:
     backend = GitHubBackend(repo="owner/repo")
-    # Two ensure_label calls (state:raw, wip:pm) then gh issue create.
+    # Two ensure_label calls (state:raw, wip:product-manager) then gh issue create.
     responses = [
         _proc(stdout=""),  # ensure state:raw
-        _proc(stdout=""),  # ensure wip:pm
+        _proc(stdout=""),  # ensure wip:product-manager
         _proc(stdout="https://github.com/owner/repo/issues/7\n"),
     ]
     with mock.patch(
@@ -77,15 +77,15 @@ def test_create_issue_with_claim_adds_wip_label() -> None:
             title="New thing",
             body="",
             state="raw",
-            extra_labels=["wip:pm"],
+            extra_labels=["wip:product-manager"],
         )
 
     assert new_id == "7"
     create_cmd = [c.args[0] for c in patched.call_args_list if "create" in c.args[0]][-1]
     label_val = create_cmd[create_cmd.index("--label") + 1]
-    # Comma-joined state:raw + wip:pm.
+    # Comma-joined state:raw + wip:product-manager.
     assert "state:raw" in label_val
-    assert "wip:pm" in label_val
+    assert "wip:product-manager" in label_val
 
 
 def test_create_issue_raises_on_unexpected_gh_output() -> None:
@@ -111,7 +111,7 @@ def test_read_issue_translates_labels() -> None:
         "number": 1,
         "labels": [
             {"name": "state:refining"},
-            {"name": "wip:pm"},
+            {"name": "wip:product-manager"},
             {"name": "hitl:awaiting-ready_for_dev"},
             {"name": "type:feat"},
         ],
@@ -126,7 +126,7 @@ def test_read_issue_translates_labels() -> None:
         state = backend.read_issue("1")
 
     assert state.state == "refining"
-    assert state.agent_claim == "pm"
+    assert state.agent_claim == "product-manager"
     assert state.awaiting_gate == "ready_for_dev"
     # The actual call was a single `gh issue view`.
     cmd = patched.call_args[0][0]
@@ -138,11 +138,11 @@ def test_read_issue_translates_labels() -> None:
 
 def test_apply_marker_change_constructs_add_remove_labels() -> None:
     backend = GitHubBackend(repo="owner/repo")
-    # Pre-state: state:refining + wip:pm.
+    # Pre-state: state:refining + wip:product-manager.
     pre = {
         "labels": [
             {"name": "state:refining"},
-            {"name": "wip:pm"},
+            {"name": "wip:product-manager"},
         ],
         "assignees": [],
         "state": "OPEN",
@@ -193,7 +193,7 @@ def test_apply_marker_change_singletons_and_audit() -> None:
     pre = {
         "labels": [
             {"name": "state:refining"},
-            {"name": "wip:pm"},
+            {"name": "wip:product-manager"},
             {"name": "hitl:awaiting-ready_for_dev"},
         ],
         "assignees": [],
@@ -274,7 +274,7 @@ def test_assign_unassign() -> None:
 
 def test_resolve_role_returns_none_by_default() -> None:
     backend = GitHubBackend(repo="owner/repo")
-    assert backend.resolve_role("pm") is None
+    assert backend.resolve_role("product-manager") is None
 
 
 def test_list_issues_translates_filters_to_label_flags() -> None:
@@ -285,7 +285,7 @@ def test_list_issues_translates_filters_to_label_flags() -> None:
             "title": "Some issue",
             "labels": [
                 {"name": "state:refining"},
-                {"name": "wip:pm"},
+                {"name": "wip:product-manager"},
             ],
         }
     ]
@@ -294,7 +294,7 @@ def test_list_issues_translates_filters_to_label_flags() -> None:
         return_value=_proc(stdout=json.dumps(fake_response)),
     ) as patched:
         results = backend.list_issues(
-            IssueFilters(state="refining", claim_role="pm", limit=20)
+            IssueFilters(state="refining", claim_role="product-manager", limit=20)
         )
 
     cmd = patched.call_args[0][0]
@@ -304,7 +304,7 @@ def test_list_issues_translates_filters_to_label_flags() -> None:
     label_indices = [i for i, x in enumerate(cmd) if x == "--label"]
     label_values = [cmd[i + 1] for i in label_indices]
     assert "state:refining" in label_values
-    assert "wip:pm" in label_values
+    assert "wip:product-manager" in label_values
     # Limit is respected.
     assert "--limit" in cmd
     assert cmd[cmd.index("--limit") + 1] == "20"
@@ -312,7 +312,7 @@ def test_list_issues_translates_filters_to_label_flags() -> None:
     assert len(results) == 1
     assert results[0].issue_id == "7"
     assert results[0].state == "refining"
-    assert results[0].agent_claim == "pm"
+    assert results[0].agent_claim == "product-manager"
     assert results[0].extras.get("title") == "Some issue"
 
 
@@ -382,9 +382,14 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
 
     workflow = StateMachine(name="t")
     workflow.states = {
-        # `claim_role` is the structured signal that 'raw' is in pm's inbox.
-        "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
-        "refining": State(name="refining", state_class=StateClass.WORKING),
+        # 'raw' is product-manager's inbox because the CLAIM transition from
+        # it lands on 'refining', whose `roles` includes product-manager.
+        "raw": State(name="raw", state_class=StateClass.RESTING),
+        "refining": State(
+            name="refining",
+            state_class=StateClass.WORKING,
+            roles=("product-manager",),
+        ),
     }
     workflow.transitions = [
         Transition(
@@ -396,32 +401,33 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
     ]
 
     backend = GitHubBackend(repo="owner/repo")
-    # The helper queries the backend two ways for role "pm":
+    # The helper queries the backend two ways for role "product-manager":
     #   1. Inbox: state=raw (then filter to unclaimed)
-    #   2. Actionable wip: claim_role=pm (then filter to no awaiting markers)
+    #   2. Actionable wip: claim_role=product-manager label (then filter to no
+    #      awaiting markers)
     inbox_response = [
         {"number": 10, "title": "raw unclaimed", "labels": [{"name": "state:raw"}]},
         # This one is already claimed by someone else — must be excluded.
         {
             "number": 11,
             "title": "raw claimed",
-            "labels": [{"name": "state:raw"}, {"name": "wip:reviewer"}],
+            "labels": [{"name": "state:raw"}, {"name": "wip:peer-reviewer"}],
         },
     ]
     wip_response = [
-        # Actionable: wip:pm with no HITL markers.
+        # Actionable: wip:product-manager with no HITL markers.
         {
             "number": 20,
             "title": "wip actionable",
-            "labels": [{"name": "state:refining"}, {"name": "wip:pm"}],
+            "labels": [{"name": "state:refining"}, {"name": "wip:product-manager"}],
         },
-        # Blocked: wip:pm with hitl:awaiting-ready_for_dev — must be excluded.
+        # Blocked: wip:product-manager with hitl:awaiting-ready_for_dev — must be excluded.
         {
             "number": 21,
             "title": "wip blocked",
             "labels": [
                 {"name": "state:refining"},
-                {"name": "wip:pm"},
+                {"name": "wip:product-manager"},
                 {"name": "hitl:awaiting-ready_for_dev"},
             ],
         },
@@ -446,21 +452,21 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
         results = _list_for_role(
             ctx={},
             backend=backend,
-            role="pm",
+            role="product-manager",
             limit=50,
         )
 
     ids = sorted(item.issue_id for item in results)
     # 10 (raw, unclaimed): in inbox.
-    # 20 (wip:pm, no HITL): actionable wip.
-    # 11 (wip:reviewer): excluded — wrong claim role.
-    # 21 (wip:pm, awaiting gate): excluded — blocked.
+    # 20 (wip:product-manager, no HITL): actionable wip.
+    # 11 (wip:peer-reviewer): excluded — wrong claim role.
+    # 21 (wip:product-manager, awaiting gate): excluded — blocked.
     assert ids == ["10", "20"]
 
 
-def test_list_for_role_no_inbox_states_when_no_claim_role_matches() -> None:
-    """If no state's `claim_role` matches the queried role, the role has no
-    inbox in this workflow — only the wip filter contributes."""
+def test_list_for_role_no_inbox_states_when_no_working_state_accepts_role() -> None:
+    """If no working state's `roles` includes the queried role, the role has
+    no inbox in this workflow — only the wip filter contributes."""
     from workflow.cli import _list_for_role
     from workflow.core.model.state_machine import (
         State,
@@ -472,8 +478,13 @@ def test_list_for_role_no_inbox_states_when_no_claim_role_matches() -> None:
 
     workflow = StateMachine(name="t")
     workflow.states = {
-        # claim_role is pm; developer queries get nothing from the inbox.
-        "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
+        # The only working state accepts product-manager, not developer.
+        "raw": State(name="raw", state_class=StateClass.RESTING),
+        "refining": State(
+            name="refining",
+            state_class=StateClass.WORKING,
+            roles=("product-manager",),
+        ),
     }
     workflow.transitions = [
         Transition(
@@ -667,7 +678,7 @@ def test_list_labels_returns_names_and_seeds_cache() -> None:
     backend = GitHubBackend(repo="owner/repo")
     fake_response = [
         {"name": "state:raw"},
-        {"name": "wip:pm"},
+        {"name": "wip:product-manager"},
         {"name": "hitl:reviewing"},
     ]
     with mock.patch(
@@ -680,10 +691,10 @@ def test_list_labels_returns_names_and_seeds_cache() -> None:
     assert cmd[0] == "gh"
     assert "label" in cmd and "list" in cmd
     assert "--repo" in cmd and "owner/repo" in cmd
-    assert sorted(names) == ["hitl:reviewing", "state:raw", "wip:pm"]
+    assert sorted(names) == ["hitl:reviewing", "state:raw", "wip:product-manager"]
     # Cache was seeded so subsequent ensure_label calls are no-ops.
     assert "state:raw" in backend._known_labels
-    assert "wip:pm" in backend._known_labels
+    assert "wip:product-manager" in backend._known_labels
 
 
 def test_ensure_label_creates_missing() -> None:

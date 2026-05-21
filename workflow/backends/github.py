@@ -614,6 +614,7 @@ class GitHubBackend:
         wip_from: str | None = None
         awaiting_gate: str | None = None
         audit_pending: str | None = None
+        issue_type: str | None = None
         reviewing = False
         auditing = False
         advising = False
@@ -630,6 +631,9 @@ class GitHubBackend:
                 continue
             if label.startswith("wip:"):
                 agent_claim = label[len("wip:") :]
+                continue
+            if label.startswith("type:"):
+                issue_type = label[len("type:") :]
                 continue
             if not label.startswith("hitl:"):
                 continue
@@ -656,6 +660,7 @@ class GitHubBackend:
             state=state,
             agent_claim=agent_claim,
             wip_from=wip_from,
+            issue_type=issue_type,
             awaiting_gate=awaiting_gate,
             reviewing=reviewing,
             audit_pending=audit_pending,

@@ -1,4 +1,5 @@
 {
+  "$schema": "../../docs/schemas/roles.schema.json",
   "roles": {
     "product-owner": {
       "name": "Product Owner",
@@ -21,7 +22,7 @@
         "make architectural calls without consulting architect"
       ]
     },
-    "pm": {
+    "product-manager": {
       "name": "Product Manager",
       "responsibility": "Owns refinement; turns raw issues into ready tickets that developers can safely pick up",
       "processes": [
@@ -116,7 +117,7 @@
         "make medium-design decisions mid-implementation"
       ]
     },
-    "reviewer": {
+    "peer-reviewer": {
       "name": "Peer Reviewer",
       "responsibility": "Reviews PRs for design, intent, readability, and risk",
       "processes": [
@@ -131,8 +132,8 @@
         "rubber-stamp"
       ]
     },
-    "qa": {
-      "name": "QA",
+    "tester": {
+      "name": "Tester",
       "responsibility": "Verifies PRs behaviorally on preview environments",
       "processes": [
         "inner loop (QA phase)"
@@ -190,8 +191,8 @@
         "make business-level decisions (escalates to product-owner)"
       ]
     },
-    "responder": {
-      "name": "Responder",
+    "incident-responder": {
+      "name": "Incident Responder",
       "responsibility": "Owns incident diagnosis and mitigation execution: root-cause investigation, rollback/toggle/hotfix",
       "processes": [
         "incident response (diagnosis and mitigation execution)",

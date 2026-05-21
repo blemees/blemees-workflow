@@ -87,13 +87,11 @@ Not all terminals are equivalent. Every terminal state must be tagged with one o
 | Tag | Meaning | Examples |
 |---|---|---|
 | **shipped** | Work reached users | `released`, `promoted` (exp), `hotfix_applied`, `complete` (rollout), `backported` |
+| **resolved** | Process-complete terminal with no user-facing output (meta-work) | `complete` (postmortem, ADR, retro) |
 | **reverted** | Work reached users then was withdrawn | `rolled_back`, `kill_switched` |
-| **abandoned** | Work was not shipped by deliberate decision | `wont_fix`, `killed` (exp), `abandoned` (release train) |
+| **abandoned** | Work was not shipped — stopped on purpose (whether at intake or in flight) | `wont_fix`, `killed` (exp), `aborted` (exp), `abandoned` (release train) |
 | **deduplicated** | Work was not shipped because it was a duplicate | `duplicate` |
-| **iterated** | Work was superseded by a follow-up issue | `iterated` (exp), `ready_bounced` (inner loop → refinement shared state) |
-| **aborted** | Work was canceled before completion | `aborted` (exp) |
-| **stabilized** | Incident work is complete; subsequent work (postmortem, follow-ups) is tracked separately | `stabilized` (incident) |
-| **resolved** | Process-complete terminal with no user-facing output (meta-work) | `complete` (postmortem) |
+| **superseded** | Work continues on a follow-up issue — same-process iteration or cross-process handoff | `iterated` (exp), `stabilized` (incident → postmortem), `ready_bounced` (inner loop → refinement) |
 
 The tag is a label on the terminal state node, or in the note adjacent to it. A terminal without a tag is incomplete.
 

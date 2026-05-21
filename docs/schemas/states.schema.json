@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blemees.io/schemas/blemees-workflow/states.schema.json",
+  "title": "blemees-workflow state machine",
+  "description": "Schema for `*-states.json` files. Provides editor / IDE feedback on structure and enum values; cross-field rules (terminal-taxonomy presence, claim-only-on-resting, gate-only-when-hitl, cross_process metadata, etc.) are enforced by the Python parser + validator and surface via `workflow validate`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["states", "transitions"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional schema URI for editor support."
+    },
+    "name": {
+      "type": "string",
+      "description": "Process name. Defaults to the file stem with `-states` stripped. The HCP catalog path is derived from this by convention: `<name>-hcps.json`."
+    },
+    "issue_types": {
+      "type": "array",
+      "description": "Issue type ids this process accepts. Each id must resolve in the shared `issue-types.json`.",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "states": {
+      "type": "object",
+      "description": "Map of state-id → state spec.",
+      "additionalProperties": {"$ref": "#/$defs/state"}
+    },
+    "transitions": {
+      "type": "array",
+      "description": "Ordered list of transition specs.",
+      "items": {"$ref": "#/$defs/transition"}
+    }
+  },
+  "$defs": {
+    "state": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["class"],
+      "properties": {
+        "class": {
+          "enum": ["resting", "working", "terminal"],
+          "description": "State class per state-machine-principles.md#1."
+        },
+        "roles": {
+          "type": "array",
+          "description": "Role ids permitted to occupy this working state. Only valid on working states — the role-restriction lives on the working state, not on the resting queue it's claimed from. Resting states are open queues; downstream working states declare who may pick items up.",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "issue_types": {
+          "type": "array",
+          "description": "Issue type ids this working state accepts. Only valid on working states. Empty / absent = accepts any of the process-level types. Each entry must be in the process-level `issue_types` set (cross-checked by the validator).",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "reversibility": {
+          "enum": ["irreversible", "reversible-fast", "reversible-slow"],
+          "description": "Reversibility class of acting from this state."
+        },
+        "terminal_taxonomy": {
+          "enum": [
+            "shipped",
+            "resolved",
+            "reverted",
+            "abandoned",
+            "deduplicated",
+            "superseded"
+          ],
+          "description": "Required on terminal states; forbidden elsewhere (enforced by parser). See state-machine-principles.md#8."
+        },
+        "close_reason": {
+          "type": "string",
+          "description": "Backend close-reason hint (e.g., GitHub's 'completed' or 'not planned'). Set on terminal-done states; absent on handoff terminals."
+        },
+        "notes": {
+          "type": "array",
+          "description": "Free prose to render in the mermaid output. Not parsed for semantics.",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["source", "destination", "type", "label"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "State id, or `[*]` for the entry sentinel."
+        },
+        "destination": {
+          "type": "string",
+          "description": "State id, or `[*]` for the exit sentinel."
+        },
+        "type": {
+          "enum": ["claim", "role_action", "external", "cross_process"],
+          "description": "Transition type per state-machine-principles.md#2."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable transition label. Conventions per principle 4."
+        },
+        "hitl": {
+          "type": "boolean",
+          "description": "Marks the transition as a HITL gate. `gate` becomes required when true."
+        },
+        "gate": {
+          "type": "string",
+          "description": "HCP catalog `gate_name`. Required when `hitl: true` (enforced by parser)."
+        },
+        "kind": {
+          "enum": ["shared", "spawn"],
+          "description": "Required when `type` is `cross_process`. `shared` = same work item continues on the other process; `spawn` = new work item starts there."
+        },
+        "process": {
+          "type": "string",
+          "description": "Required when `type` is `cross_process`. Name of the other process."
+        }
+      }
+    }
+  }
+}

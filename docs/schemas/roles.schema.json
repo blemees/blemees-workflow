@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blemees.io/schemas/blemees-workflow/roles.schema.json",
+  "title": "blemees-workflow role directory",
+  "description": "Schema for the shared `roles.json` file. Provides editor / IDE feedback; richer cross-reference checks (claim_role values resolve to declared roles, etc.) run in `workflow validate`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["roles"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "roles": {
+      "type": "object",
+      "description": "Map of role-id → role definition. Role ids are kebab-case strings used in `claim_role`, `triggering_role`, agent config `agent-role`, and `wip:<role>` labels.",
+      "additionalProperties": {"$ref": "#/$defs/role"}
+    }
+  },
+  "$defs": {
+    "role": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "responsibility"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable display name (e.g., 'Product Manager')."
+        },
+        "responsibility": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-line statement of what this role owns."
+        },
+        "processes": {
+          "type": "array",
+          "description": "Processes this role participates in. Free prose.",
+          "items": {"type": "string"}
+        },
+        "wakes_on": {
+          "type": "array",
+          "description": "Events / signals that trigger this role. Free prose.",
+          "items": {"type": "string"}
+        },
+        "does_not": {
+          "type": "array",
+          "description": "Explicit non-responsibilities. Free prose.",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}

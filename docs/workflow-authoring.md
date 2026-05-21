@@ -9,26 +9,40 @@ For the design rules this format encodes, see
 covers the JSON schema, what the validator enforces, and how the principles
 map to fields.
 
+A machine-readable [JSON Schema](schemas/states.schema.json) lives next to
+the other schemas in [`docs/schemas/`](schemas/). Reference it from any
+file you author for in-editor feedback:
+
+```json
+{"$schema": "../../docs/schemas/states.schema.json", ...}
+```
+
+Or rely on the workspace-wide `.vscode/settings.json` mapping that ships
+in this repo. The schema covers enum / type / required-field checks; the
+deeper cross-field rules (terminal-needs-taxonomy, gate-only-when-hitl,
+cross_process metadata, etc.) remain enforced by the Python parser and
+surface via `workflow validate`.
+
 ## Minimum valid file
 
 ```json
 {
   "name": "tiny",
   "states": {
-    "raw": {"class": "resting", "claim_role": "pm"},
-    "refining": {"class": "working"},
+    "raw": {"class": "resting"},
+    "refining": {"class": "working", "roles": ["product-manager"]},
     "done": {"class": "terminal", "terminal_taxonomy": "shipped"}
   },
   "transitions": [
     {"source": "[*]", "destination": "raw", "type": "external", "label": "issue created (external)"},
-    {"source": "raw", "destination": "refining", "type": "claim", "label": "PM claims raw"},
-    {"source": "refining", "destination": "done", "type": "role_action", "label": "PM ships"}
+    {"source": "raw", "destination": "refining", "type": "claim", "label": "product-manager claims raw"},
+    {"source": "refining", "destination": "done", "type": "role_action", "label": "product-manager ships"}
   ]
 }
 ```
 
 This parses, validates clean, and renders to a four-state mermaid diagram
-with a terminal sink and a `note left of raw: claim-role=pm`.
+with a terminal sink and a `note left of raw: claim-role=product-manager`.
 
 ## Schema reference
 
@@ -36,8 +50,7 @@ with a terminal sink and a `note left of raw: claim-role=pm`.
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `name` | string | optional | StateMachine name. Defaults to the file stem with `-workflow` stripped. |
-| `canonical_catalog_path` | string | optional | Pointer to the HCP catalog file or process-doc section. Used by the mermaid emitter for the legend. |
+| `name` | string | optional | StateMachine name. Defaults to the file stem with `-states` stripped. The HCP catalog path is derived from this by convention as `<name>-hcps.json`. |
 | `states` | object | required | Map of state-id → state spec. |
 | `transitions` | list | required | Ordered list of transition specs. |
 
@@ -47,8 +60,9 @@ with a terminal sink and a `note left of raw: claim-role=pm`.
 |---|---|---|---|
 | `class` | string | yes | `"resting"`, `"working"`, `"terminal"` |
 | `reversibility` | string | optional | `"irreversible"`, `"reversible-fast"`, `"reversible-slow"` |
-| `terminal_taxonomy` | string | required when `class=terminal` | `"shipped"`, `"reverted"`, `"abandoned"`, `"deduplicated"`, `"iterated"`, `"aborted"`, `"stabilized"`, `"resolved"` |
-| `claim_role` | string | optional | Role id that claims this state. Required by `claim` operations. |
+| `terminal_taxonomy` | string | required when `class=terminal` | `"shipped"`, `"resolved"`, `"reverted"`, `"abandoned"`, `"deduplicated"`, `"superseded"` |
+| `roles` | array of strings | optional, working states only | Role ids permitted to occupy this state. Empty / absent = open (any role may claim). Resting states must NOT carry this field. |
+| `issue_types` | array of strings | optional, working states only | Subset of the process-level `issue_types` this working state accepts. Empty / absent = accepts any process-level type. Checked at claim time: the issue's type must be in this set. |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
 The parser fails loud on:
@@ -106,13 +120,14 @@ that lands on it):
 "ready_for_dev": {"class": "resting", "reversibility": "reversible-slow"}
 ```
 
-**Receiver** (inner-loop) — declares the same state with the full contract
-(claim role + reversibility):
+**Receiver** (inner-loop) — declares the same state with its reversibility.
+The role-restriction lives on the receiver's working state(s) reached via
+CLAIM transitions out of this resting state (e.g., `implementing`'s
+`roles: ["developer"]`).
 
 ```json
 "ready_for_dev": {
   "class": "resting",
-  "claim_role": "developer",
   "reversibility": "reversible-slow"
 }
 ```
@@ -160,7 +175,7 @@ The emitter:
   transition labels.
 - Auto-generates `state --> [*]: terminal (taxonomy)` sinks for any
   terminal state without an authored outgoing transition.
-- Emits notes for states with `claim_role`, free-form `notes`, or
+- Emits notes for states with `roles`, free-form `notes`, or
   reversibility not already covered by the HITL legend.
 
 Authors never edit the mermaid or markdown files. The pre-commit / CI flow is:

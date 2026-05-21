@@ -981,6 +981,7 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
                     if a.destination_terminal_taxonomy
                     else None
                 ),
+                "destination_roles": list(a.destination_roles),
                 "cross_process_kind": a.cross_process_kind,
                 "cross_process_other": a.cross_process_other,
             }
@@ -1013,13 +1014,18 @@ def _print_next_actions(
     advance_actions = [a for a in actions if a.transition_type is not TransitionType.CLAIM]
 
     if claim_actions and not advance_actions:
+        def _roles_suffix(a: Any) -> str:
+            if a.destination_roles:
+                return f" (roles: {', '.join(a.destination_roles)})"
+            return ""
+
         if len(claim_actions) == 1:
             a = claim_actions[0]
-            print(f"  claim  # → {a.destination} ({a.label!r})")
+            print(f"  claim  # → {a.destination}{_roles_suffix(a)} ({a.label!r})")
         else:
             print("  claim --to <state>  # ambiguous; choose one:")
             for a in claim_actions:
-                print(f"    --to {a.destination}  # {a.label!r}")
+                print(f"    --to {a.destination}  # {a.label!r}{_roles_suffix(a)}")
         return
 
     for a in advance_actions:
@@ -1390,15 +1396,16 @@ def _list_for_role(
 ) -> list:
     """Compute the role's open work across ALL workflows: inbox + actionable wip.
 
-    Roles often participate in multiple workflows (a PM does refinement,
-    postmortem, prioritization). The query uses the workflow registry to
-    aggregate inbox states from every workflow whose workflow declares
-    `claim-role={role}` on a resting state.
+    Roles often participate in multiple workflows (a product-manager does
+    refinement, postmortem, prioritization). The query uses the workflow
+    registry to aggregate inbox states: resting states from which `role`
+    can CLAIM into a working state that declares `role` in its `roles`
+    list (or has no role restriction).
 
     Two categories, deduplicated by issue id:
 
-    1. **Inbox** — items in resting states with `claim_role == role` and
-       no current claim. Aggregated across all workflows.
+    1. **Inbox** — items in those discovered resting states with no current
+       claim. Aggregated across all workflows.
 
     2. **Actionable wip** — items with `wip:{role}` where the agent is not
        blocked waiting on a human: no `hitl:awaiting-*`, no `hitl:audit-*`,
@@ -1414,8 +1421,9 @@ def _list_for_role(
     seen: dict[str, Any] = {}
     inbox_states: set[str] = set()
 
-    # Aggregate inbox states from every workflow in the registry whose
-    # workflow declares this role's claim_role on a resting state.
+    # Aggregate inbox states from every workflow in the registry. An
+    # inbox state for `role` is any resting state with at least one CLAIM
+    # transition to a working state whose `roles` includes the role.
     registry = build_registry(
         agent_home=ctx.get("agent_home"),
         workflow_dir=ctx.get("workflow_dir"),
@@ -1457,19 +1465,30 @@ def _list_for_role(
 
 
 def _states_claimed_by_role(state_machine: Any, role: str) -> set[str]:
-    """Find resting states whose `claim_role` matches the given role.
+    """Find resting states from which `role` can claim into a working state.
 
-    `claim_role` is a structured field on `State`, declared in the workflow
-    file via a note such as `note left of raw: claim-role=pm`. Role match is
-    case-insensitive and ignores `{...}` placeholder braces.
+    The role-restriction now lives on the working state's `roles` list, not
+    on the resting state. To enumerate the role's inbox, walk every CLAIM
+    transition and collect its source if the destination working state
+    permits the role (empty `roles` means unrestricted — included for any
+    role). Role match is case-insensitive and ignores `{...}` braces.
     """
+    from workflow.core.model.state_machine import TransitionType
+
     role_normalized = role.strip("{}").lower()
     matches: set[str] = set()
-    for state in state_machine.states.values():
-        if state.claim_role is None:
+    for t in state_machine.transitions:
+        if t.transition_type is not TransitionType.CLAIM:
             continue
-        if state.claim_role.strip("{}").lower() == role_normalized:
-            matches.add(state.name)
+        dest = state_machine.states.get(t.destination)
+        if dest is None:
+            continue
+        if dest.roles:
+            allowed = {r.strip("{}").lower() for r in dest.roles}
+            if role_normalized not in allowed:
+                continue
+        # dest.roles empty = open queue; any role may claim.
+        matches.add(t.source)
     return matches
 
 

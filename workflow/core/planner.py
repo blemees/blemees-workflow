@@ -198,6 +198,28 @@ def _require_role_match(
         )
 
 
+def _require_role_in_set(
+    actor: str | None,
+    allowed: tuple[str, ...],
+    context: str,
+) -> None:
+    """Raise OperationError if actor's role isn't in the allowed set.
+
+    Same normalisation as `_require_role_match`. Empty `allowed` means
+    "no role restriction" — the working state is open. None actor skips
+    validation (agent didn't declare a role).
+    """
+    if actor is None or not allowed:
+        return
+    actor_norm = actor.strip("{}").strip().lower()
+    allowed_norm = {r.strip("{}").strip().lower() for r in allowed}
+    if actor_norm not in allowed_norm:
+        raise OperationError(
+            f"Role mismatch: agent is {actor!r}, but {context} only "
+            f"permits roles {sorted(allowed_norm)}."
+        )
+
+
 def _find_transition(
     state_machine: StateMachine,
     source: str | None,
@@ -293,15 +315,25 @@ def _plan_advance(
 
     if hcp is None:
         # Ungated direct advance. If it's a claim transition, validate the
-        # actor's role against the source state's claim_role.
+        # actor's role and the issue's type against the destination working
+        # state's `roles` / `issue_types`.
         if transition.transition_type is TransitionType.CLAIM:
-            source_state = state_machine.states.get(transition.source)
-            if source_state is not None and source_state.claim_role:
-                _require_role_match(
-                    actor=request.actor,
-                    required=source_state.claim_role,
-                    context=f"claim transition into {transition.destination!r}",
-                )
+            dest_state = state_machine.states.get(transition.destination)
+            if dest_state is not None:
+                if dest_state.roles:
+                    _require_role_in_set(
+                        actor=request.actor,
+                        allowed=dest_state.roles,
+                        context=f"claim transition into {transition.destination!r}",
+                    )
+                if dest_state.issue_types and state.issue_type is not None:
+                    if state.issue_type not in dest_state.issue_types:
+                        raise OperationError(
+                            f"Issue type {state.issue_type!r} is not "
+                            f"accepted by working state "
+                            f"{transition.destination!r} "
+                            f"(accepts: {sorted(dest_state.issue_types)})."
+                        )
 
         # Per principle 1, leaving a working state clears the claim — the
         # role no longer "owns" the issue once it's resting/terminal.
@@ -454,15 +486,8 @@ def _plan_claim(
         raise OperationError(
             f"Issue already claimed by {state.agent_claim!r}; cannot claim as {role!r}."
         )
-    # Validate the claiming role matches the source state's claim_role.
-    if state.state is not None:
-        source_state = state_machine.states.get(state.state)
-        if source_state is not None and source_state.claim_role:
-            _require_role_match(
-                actor=role,
-                required=source_state.claim_role,
-                context=f"claiming {state.state!r}",
-            )
+    # Role check is done once the destination is resolved (below), since
+    # the role-restriction now lives on the destination working state.
 
     # Resolve the CLAIM transition. Per principle 3 a claim is always
     # resting → working, so a CLAIM transition out of the current state must
@@ -495,6 +520,27 @@ def _plan_claim(
             )
         if transition is not None:
             new_state = transition.destination
+            dest_state = state_machine.states.get(transition.destination)
+            if dest_state is not None:
+                # The destination working state may restrict to a role set.
+                if dest_state.roles:
+                    _require_role_in_set(
+                        actor=role,
+                        allowed=dest_state.roles,
+                        context=f"claiming into {transition.destination!r}",
+                    )
+                # And it may restrict to a subset of issue types. Skip the
+                # check when the issue's type isn't known (the backend
+                # couldn't determine it — e.g., native encoding without a
+                # native-type fetch).
+                if dest_state.issue_types and state.issue_type is not None:
+                    if state.issue_type not in dest_state.issue_types:
+                        raise OperationError(
+                            f"Issue type {state.issue_type!r} is not "
+                            f"accepted by working state "
+                            f"{transition.destination!r} "
+                            f"(accepts: {sorted(dest_state.issue_types)})."
+                        )
 
     # Record the origin so `release` can return the issue here.
     origin = state.state

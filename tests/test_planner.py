@@ -110,7 +110,7 @@ def _build_catalog() -> HCPCatalog:
 
 def test_plan_advance() -> None:
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="raw", agent_claim="pm")
+    state = IssueState(issue_id="1", state="raw", agent_claim="product-manager")
     plan = plan_operation(
         OperationRequest(
             operation=Operation.ADVANCE,
@@ -126,7 +126,7 @@ def test_plan_advance() -> None:
 
 def test_plan_advance_unknown_destination_errors() -> None:
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="raw", agent_claim="pm")
+    state = IssueState(issue_id="1", state="raw", agent_claim="product-manager")
     with pytest.raises(OperationError, match="No transition"):
         plan_operation(
             OperationRequest(
@@ -146,12 +146,12 @@ def test_plan_claim() -> None:
         OperationRequest(
             operation=Operation.CLAIM,
             issue_id="1",
-            role="pm",
+            role="product-manager",
         ),
         state,
         workflow,
     )
-    assert plan.change.set_agent_claim == "pm"
+    assert plan.change.set_agent_claim == "product-manager"
     # Claim records the origin so `release` can return the issue here.
     assert plan.change.set_wip_from == "raw"
     # The single CLAIM transition out of `raw` is auto-picked → `refining`.
@@ -166,7 +166,7 @@ def test_plan_claim_already_claimed_errors() -> None:
             OperationRequest(
                 operation=Operation.CLAIM,
                 issue_id="1",
-                role="pm",
+                role="product-manager",
             ),
             state,
             workflow,
@@ -175,7 +175,7 @@ def test_plan_claim_already_claimed_errors() -> None:
 
 def test_plan_release() -> None:
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm", wip_from="raw")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", wip_from="raw")
     plan = plan_operation(
         OperationRequest(operation=Operation.RELEASE, issue_id="1"),
         state,
@@ -189,7 +189,7 @@ def test_plan_release() -> None:
 def test_plan_release_without_wip_from_errors() -> None:
     """A working state with no origin marker can't determine where to return."""
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm", wip_from=None)
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", wip_from=None)
     with pytest.raises(OperationError, match="wip-from"):
         plan_operation(
             OperationRequest(operation=Operation.RELEASE, issue_id="1"),
@@ -248,7 +248,7 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
         name="bounced",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_FAST,
-        terminal_taxonomy=TerminalTaxonomy.ITERATED,
+        terminal_taxonomy=TerminalTaxonomy.SUPERSEDED,
         # No close_reason — handoff terminal, issue stays open.
     )
     state = IssueState(
@@ -265,7 +265,7 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
 
 
 def test_abandoned_terminal_closes_as_not_planned() -> None:
-    """Abandoned/deduplicated/aborted terminals close with `not planned`."""
+    """Abandoned / deduplicated terminals close with `not planned`."""
     workflow = _build_workflow()
     workflow.transitions.append(
         Transition(
@@ -300,7 +300,7 @@ def test_plan_release_with_drifted_wip_from_errors() -> None:
     """If wip_from points at a state with no CLAIM transition to current, error."""
     workflow = _build_workflow()
     state = IssueState(
-        issue_id="1", state="refining", agent_claim="pm", wip_from="ready_for_dev"
+        issue_id="1", state="refining", agent_claim="product-manager", wip_from="ready_for_dev"
     )
     with pytest.raises(OperationError, match="drifted"):
         plan_operation(
@@ -324,7 +324,7 @@ def test_plan_release_without_claim_errors() -> None:
 def test_plan_await_signal() -> None:
     workflow = _build_workflow()
     catalog = _build_catalog()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
     plan = plan_operation(
         OperationRequest(
             operation=Operation.AWAIT_SIGNAL,
@@ -341,7 +341,7 @@ def test_plan_await_signal() -> None:
 def test_plan_await_signal_unknown_gate_errors() -> None:
     workflow = _build_workflow()
     catalog = _build_catalog()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
     with pytest.raises(OperationError):
         plan_operation(
             OperationRequest(
@@ -361,7 +361,7 @@ def test_plan_review() -> None:
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
         awaiting_gate="ready_for_dev",
     )
     plan = plan_operation(
@@ -376,7 +376,7 @@ def test_plan_review() -> None:
 def test_plan_review_without_awaiting_errors() -> None:
     workflow = _build_workflow()
     catalog = _build_catalog()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
     with pytest.raises(OperationError):
         plan_operation(
             OperationRequest(operation=Operation.REVIEW, issue_id="1"),
@@ -392,7 +392,7 @@ def test_plan_approve_binary() -> None:
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
         awaiting_gate="ready_for_dev",
         reviewing=True,
     )
@@ -465,7 +465,7 @@ def test_plan_reject(tmp_path: Path) -> None:
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
         awaiting_gate="ready_for_dev",
     )
     plan = plan_operation(
@@ -493,7 +493,7 @@ def test_plan_record_action() -> None:
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
     )
     plan = plan_operation(
         OperationRequest(
@@ -604,7 +604,7 @@ def test_plan_request_input(tmp_path: Path) -> None:
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
     )
     plan = plan_operation(
         OperationRequest(
@@ -626,7 +626,7 @@ def test_plan_request_input_blocks_during_catalogued_gate(tmp_path: Path) -> Non
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
         awaiting_gate="ready_for_dev",
     )
     with pytest.raises(OperationError):
@@ -646,7 +646,7 @@ def test_plan_advise() -> None:
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
         awaiting_input=True,
     )
     plan = plan_operation(
@@ -664,7 +664,7 @@ def test_plan_resolve(tmp_path: Path) -> None:
     state = IssueState(
         issue_id="1",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
         awaiting_input=True,
         advising=True,
     )
@@ -697,13 +697,13 @@ def test_plan_resolve(tmp_path: Path) -> None:
                     issue_id="1",
                     destination="refining",
                 ),
-                IssueState(issue_id="1", state="raw", agent_claim="pm"),
+                IssueState(issue_id="1", state="raw", agent_claim="product-manager"),
             ),
         ),
         (
             Operation.CLAIM,
             lambda lc, cat, paths: (
-                OperationRequest(operation=Operation.CLAIM, issue_id="1", role="pm"),
+                OperationRequest(operation=Operation.CLAIM, issue_id="1", role="product-manager"),
                 IssueState(issue_id="1", state="raw", agent_claim=None),
             ),
         ),
@@ -714,7 +714,7 @@ def test_plan_resolve(tmp_path: Path) -> None:
                 IssueState(
                     issue_id="1",
                     state="refining",
-                    agent_claim="pm",
+                    agent_claim="product-manager",
                     wip_from="raw",
                 ),
             ),
@@ -740,7 +740,7 @@ def test_advance_on_block_gated_transition_dispatches_to_await_signal(
 ) -> None:
     workflow = _build_workflow()
     catalog = _build_catalog()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
     packet = tmp_path / "ready-packet.md"
     packet.write_text("acceptance criteria…", encoding="utf-8")
 
@@ -768,7 +768,7 @@ def test_advance_on_block_gated_transition_dispatches_to_await_signal(
 def test_advance_on_block_gated_transition_without_packet_errors() -> None:
     workflow = _build_workflow()
     catalog = _build_catalog()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
 
     with pytest.raises(OperationError, match="block level"):
         plan_operation(
@@ -786,7 +786,7 @@ def test_advance_on_block_gated_transition_without_packet_errors() -> None:
 def test_advance_on_ungated_transition_changes_state() -> None:
     workflow = _build_workflow()
     catalog = _build_catalog()
-    state = IssueState(issue_id="1", state="raw", agent_claim="pm")
+    state = IssueState(issue_id="1", state="raw", agent_claim="product-manager")
 
     plan = plan_operation(
         OperationRequest(
@@ -867,12 +867,14 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
 
 
 # --------------------------------------------------------------------------- #
-# Role validation: claim transitions must match the source state's claim_role,
-# and gated transitions must match the HCP's triggering_role.
+# Role validation: claim transitions must match the destination working
+# state's `roles` list, and gated transitions must match the HCP's
+# triggering_role.
 
 
-def test_claim_role_must_match_source_state_claim_role() -> None:
-    """An agent with role X can't claim a state whose claim_role is Y."""
+def test_claim_role_must_match_destination_working_state_roles() -> None:
+    """An agent with role X can't claim into a working state whose `roles`
+    doesn't include X."""
     from workflow.core.model.state_machine import (
         State,
         StateClass,
@@ -883,8 +885,12 @@ def test_claim_role_must_match_source_state_claim_role() -> None:
 
     workflow = StateMachine(name="t")
     workflow.states = {
-        "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
-        "refining": State(name="refining", state_class=StateClass.WORKING),
+        "raw": State(name="raw", state_class=StateClass.RESTING),
+        "refining": State(
+            name="refining",
+            state_class=StateClass.WORKING,
+            roles=("product-manager",),
+        ),
     }
     workflow.transitions = [
         Transition(
@@ -901,15 +907,98 @@ def test_claim_role_must_match_source_state_claim_role() -> None:
             OperationRequest(
                 operation=Operation.CLAIM,
                 issue_id="1",
-                role="developer",  # wrong role for this state
+                role="developer",  # not in refining's roles
             ),
             state,
             workflow,
         )
 
 
+def test_claim_rejects_wrong_issue_type_for_destination_state() -> None:
+    """If the destination working state declares `issue_types`, the issue's
+    type must be in the set. Mismatched types fail the claim."""
+    from workflow.core.model.state_machine import (
+        State,
+        StateClass,
+        StateMachine,
+        Transition,
+        TransitionType,
+    )
+
+    workflow = StateMachine(name="t", issue_types=["bug", "experiment"])
+    workflow.states = {
+        "ready": State(name="ready", state_class=StateClass.RESTING),
+        "implementing_experiment": State(
+            name="implementing_experiment",
+            state_class=StateClass.WORKING,
+            roles=("developer",),
+            issue_types=("experiment",),
+        ),
+    }
+    workflow.transitions = [
+        Transition(
+            source="ready",
+            destination="implementing_experiment",
+            label="developer claims experiment",
+            transition_type=TransitionType.CLAIM,
+        ),
+    ]
+    # A bug-typed issue tries to claim into the experiment-only state.
+    state = IssueState(
+        issue_id="1", state="ready", agent_claim=None, issue_type="bug"
+    )
+
+    with pytest.raises(OperationError, match="not accepted by working state"):
+        plan_operation(
+            OperationRequest(operation=Operation.CLAIM, issue_id="1", role="developer"),
+            state,
+            workflow,
+        )
+
+
+def test_claim_allows_matching_issue_type() -> None:
+    """An issue whose type is in the destination state's `issue_types`
+    succeeds."""
+    from workflow.core.model.state_machine import (
+        State,
+        StateClass,
+        StateMachine,
+        Transition,
+        TransitionType,
+    )
+
+    workflow = StateMachine(name="t", issue_types=["bug", "experiment"])
+    workflow.states = {
+        "ready": State(name="ready", state_class=StateClass.RESTING),
+        "implementing_experiment": State(
+            name="implementing_experiment",
+            state_class=StateClass.WORKING,
+            roles=("developer",),
+            issue_types=("experiment",),
+        ),
+    }
+    workflow.transitions = [
+        Transition(
+            source="ready",
+            destination="implementing_experiment",
+            label="developer claims experiment",
+            transition_type=TransitionType.CLAIM,
+        ),
+    ]
+    state = IssueState(
+        issue_id="1", state="ready", agent_claim=None, issue_type="experiment"
+    )
+
+    plan = plan_operation(
+        OperationRequest(operation=Operation.CLAIM, issue_id="1", role="developer"),
+        state,
+        workflow,
+    )
+    assert plan.change.set_state == "implementing_experiment"
+
+
 def test_claim_role_match_succeeds() -> None:
-    """Claiming with the correct role passes validation."""
+    """Claiming with a role in the destination state's `roles` passes."""
     from workflow.core.model.state_machine import (
         State,
         StateClass,
@@ -920,8 +1009,12 @@ def test_claim_role_match_succeeds() -> None:
 
     workflow = StateMachine(name="t")
     workflow.states = {
-        "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
-        "refining": State(name="refining", state_class=StateClass.WORKING),
+        "raw": State(name="raw", state_class=StateClass.RESTING),
+        "refining": State(
+            name="refining",
+            state_class=StateClass.WORKING,
+            roles=("product-manager",),
+        ),
     }
     workflow.transitions = [
         Transition(
@@ -934,11 +1027,11 @@ def test_claim_role_match_succeeds() -> None:
     state = IssueState(issue_id="1", state="raw", agent_claim=None)
 
     plan = plan_operation(
-        OperationRequest(operation=Operation.CLAIM, issue_id="1", role="pm"),
+        OperationRequest(operation=Operation.CLAIM, issue_id="1", role="product-manager"),
         state,
         workflow,
     )
-    assert plan.change.set_agent_claim == "pm"
+    assert plan.change.set_agent_claim == "product-manager"
 
 
 def test_advance_to_gated_destination_requires_role_match() -> None:
@@ -946,7 +1039,7 @@ def test_advance_to_gated_destination_requires_role_match() -> None:
     the catalog row's triggering_role."""
     workflow = _build_workflow()
     catalog = _build_catalog()
-    state = IssueState(issue_id="1", state="refining", agent_claim="pm")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
 
     with pytest.raises(OperationError, match="Role mismatch"):
         plan_operation(

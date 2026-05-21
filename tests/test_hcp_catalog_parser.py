@@ -35,7 +35,7 @@ BINARY_HCP_CATALOG = {
                 "source": "refining",
                 "destinations": ["ready_for_dev"],
             },
-            "triggering_role": "pm",
+            "triggering_role": "product-manager",
             "type": "authority",
             "reversibility": "reversible-slow",
             "allowed_levels": ["block", "audit"],
@@ -110,7 +110,7 @@ def test_default_level_must_be_in_allowed_levels() -> None:
             {
                 "gate_name": "x",
                 "transition": {"source": "a", "destinations": ["b"]},
-                "triggering_role": "pm",
+                "triggering_role": "product-manager",
                 "type": "authority",
                 "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
@@ -129,7 +129,7 @@ def test_unknown_type_rejected() -> None:
             {
                 "gate_name": "x",
                 "transition": {"source": "a", "destinations": ["b"]},
-                "triggering_role": "pm",
+                "triggering_role": "product-manager",
                 "type": "uncertainty",  # not in the four-type taxonomy
                 "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
@@ -148,7 +148,7 @@ def test_missing_required_field_rejected() -> None:
             {
                 "gate_name": "x",
                 # missing transition
-                "triggering_role": "pm",
+                "triggering_role": "product-manager",
                 "type": "authority",
                 "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
@@ -167,7 +167,7 @@ def test_duplicate_gate_names_rejected() -> None:
             {
                 "gate_name": "x",
                 "transition": {"source": "a", "destinations": ["b"]},
-                "triggering_role": "pm",
+                "triggering_role": "product-manager",
                 "type": "authority",
                 "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
@@ -176,7 +176,7 @@ def test_duplicate_gate_names_rejected() -> None:
             {
                 "gate_name": "x",
                 "transition": {"source": "c", "destinations": ["d"]},
-                "triggering_role": "pm",
+                "triggering_role": "product-manager",
                 "type": "authority",
                 "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],

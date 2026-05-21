@@ -314,7 +314,7 @@ def test_init_creates_config_and_trust_grants_dir(
             "--agent-home",
             str(tmp_path),
             "--agent-role",
-            "pm",
+            "product-manager",
             "init",
         ]
     )
@@ -332,7 +332,7 @@ def test_init_creates_config_and_trust_grants_dir(
     # Only `agent-role` is written when --workflow-dir is not supplied.
     # `repo`, `host`, and the workflow path fields stay per-invocation or
     # use the default location.
-    assert config == {"agent-role": "pm"}
+    assert config == {"agent-role": "product-manager"}
 
 
 def test_init_records_workflow_dir_when_provided(
@@ -349,7 +349,7 @@ def test_init_records_workflow_dir_when_provided(
             "--agent-home",
             str(tmp_path),
             "--agent-role",
-            "pm",
+            "product-manager",
             "init",
             "--workflow-dir",
             "../../workflows",
@@ -358,7 +358,7 @@ def test_init_records_workflow_dir_when_provided(
     assert rc == 0
     config = json.loads((tmp_path / ".workflow" / "config.json").read_text())
     assert config == {
-        "agent-role": "pm",
+        "agent-role": "product-manager",
         "workflow-dir": "../../workflows",
     }
     # Default workflows/ is still created — the config entry just overrides
@@ -390,20 +390,20 @@ def test_init_minimal_config_contains_only_role(
 def test_init_strips_placeholder_braces_from_role(
     tmp_path: Path,
 ) -> None:
-    """`--agent-role {pm}` is normalized to `pm` — accept the braced
-    placeholder form skill prose uses."""
+    """`--agent-role {product-manager}` is normalized to `product-manager` —
+    accept the braced placeholder form skill prose uses."""
     rc = cli(
         [
             "--agent-home",
             str(tmp_path),
             "--agent-role",
-            "{pm}",
+            "{product-manager}",
             "init",
         ]
     )
     assert rc == 0
     config = json.loads((tmp_path / ".workflow" / "config.json").read_text())
-    assert config["agent-role"] == "pm"
+    assert config["agent-role"] == "product-manager"
 
 
 def test_init_refuses_to_overwrite_existing_config(
@@ -463,7 +463,7 @@ def test_init_dry_run_does_not_write_files(
             "--agent-home",
             str(tmp_path),
             "--agent-role",
-            "pm",
+            "product-manager",
             "init",
         ]
     )
@@ -483,14 +483,14 @@ def test_init_json_output(
             "--agent-home",
             str(tmp_path),
             "--agent-role",
-            "pm",
+            "product-manager",
             "init",
         ]
     )
     output = capsys.readouterr().out
     assert rc == 0, output
     payload = json.loads(output)
-    assert payload["config"]["agent-role"] == "pm"
+    assert payload["config"]["agent-role"] == "product-manager"
     assert payload["config_path"].endswith("config.json")
     assert payload["agent_home"] == str(tmp_path)
     # Both default subdirectories are reported in the JSON output.
@@ -805,7 +805,7 @@ def test_create_with_claim_creates_then_claims(
     refining_state = IssueState(
         issue_id="99",
         state="refining",
-        agent_claim="pm",
+        agent_claim="product-manager",
         wip_from="raw",
     )
     with (
@@ -832,7 +832,7 @@ def test_create_with_claim_creates_then_claims(
                 "--workflow-dir",
                 str(workflow_dir),
                 "--agent-role",
-                "pm",
+                "product-manager",
                 "create",
                 "--to",
                 "raw",
@@ -852,7 +852,7 @@ def test_create_with_claim_creates_then_claims(
     assert apply_mock.called
     change = apply_mock.call_args.args[1]
     assert change.set_state == "refining"
-    assert change.set_agent_claim == "pm"
+    assert change.set_agent_claim == "product-manager"
     assert change.set_wip_from == "raw"
 
 
@@ -923,7 +923,7 @@ def test_setup_github_dry_run_enumerates_without_calling_backend(
     ):
         assert fixed in output, f"expected {fixed} in dry-run output"
     assert "state:raw" in output
-    assert "wip:pm" in output
+    assert "wip:product-manager" in output
     assert "wip:developer" in output
     # In label-encoding mode, `type:*` labels are also enumerated.
     assert "type:bug" in output

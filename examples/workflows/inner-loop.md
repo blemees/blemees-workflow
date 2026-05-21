@@ -48,34 +48,38 @@ stateDiagram-v2
     staged_hotfix --> [*]: to process release (hotfix patch train)
     spike_completed --> [*]: terminal (resolved)
 
-    note left of ready_for_dev: claim-role=developer, reversible-slow
-    note right of ready_for_experiment: claim-role=developer, reversible-slow
-    note right of ready_for_spike: claim-role=developer, reversible-slow
-    note right of ready_for_hotfix: claim-role=developer, reversible-fast
+    note left of ready_for_dev: reversible-slow
+    note right of ready_for_experiment: reversible-slow
+    note right of ready_for_spike: reversible-slow
+    note right of ready_for_hotfix: reversible-fast
+    note right of implementing: role=developer, types=bug, feature, chore
+    note right of implementing_experiment: role=developer, types=experiment
+    note right of implementing_spike: role=developer, types=spike
+    note right of implementing_hotfix: role=developer, types=hotfix
     note right of spike_completed: reversible-fast
-    note right of ready_bounced: claim-role=pm, reversible-fast
+    note right of ready_bounced: reversible-fast
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `ready_for_dev` | resting | reversible-slow | developer | — | — |
-| `ready_for_experiment` | resting | reversible-slow | developer | — | — |
-| `ready_for_spike` | resting | reversible-slow | developer | — | — |
-| `ready_for_hotfix` | resting | reversible-fast | developer | — | — |
-| `implementing` | working | — | — | — | — |
-| `implementing_experiment` | working | — | — | — | — |
-| `implementing_spike` | working | — | — | — | — |
-| `implementing_hotfix` | working | — | — | — | — |
-| `pr_review` | resting | — | — | — | — |
-| `pr_review_experiment` | resting | — | — | — | — |
-| `pr_review_hotfix` | resting | — | — | — | — |
-| `staged` | resting | — | — | — | — |
-| `staged_experiment` | resting | — | — | — | — |
-| `staged_hotfix` | resting | — | — | — | — |
-| `spike_completed` | terminal | reversible-fast | — | resolved | completed |
-| `ready_bounced` | resting | reversible-fast | pm | — | — |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `ready_for_dev` | resting | reversible-slow | — | — | — | — |
+| `ready_for_experiment` | resting | reversible-slow | — | — | — | — |
+| `ready_for_spike` | resting | reversible-slow | — | — | — | — |
+| `ready_for_hotfix` | resting | reversible-fast | — | — | — | — |
+| `implementing` | working | — | developer | bug, feature, chore | — | — |
+| `implementing_experiment` | working | — | developer | experiment | — | — |
+| `implementing_spike` | working | — | developer | spike | — | — |
+| `implementing_hotfix` | working | — | developer | hotfix | — | — |
+| `pr_review` | resting | — | — | — | — | — |
+| `pr_review_experiment` | resting | — | — | — | — | — |
+| `pr_review_hotfix` | resting | — | — | — | — | — |
+| `staged` | resting | — | — | — | — | — |
+| `staged_experiment` | resting | — | — | — | — | — |
+| `staged_hotfix` | resting | — | — | — | — | — |
+| `spike_completed` | terminal | reversible-fast | — | — | resolved | completed |
+| `ready_bounced` | resting | reversible-fast | — | — | — | — |
 
 ## Transitions
 

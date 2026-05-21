@@ -66,7 +66,7 @@ Synonym for HCP. The `gate_name` is the key used to look up an HCP in the catalo
 
 ## Role
 
-A framework-defined actor identity (e.g., `pm`, `developer`, `reviewer`). Roles are declared once in the shared `roles.json` and referenced from state `claim_role` fields and HCP `triggering_role` fields. Roles map to backend handles (GitHub usernames, etc.) per team config — that mapping is outside the workflow tool's scope.
+A framework-defined actor identity (e.g., `product-manager`, `developer`, `peer-reviewer`). Roles are declared once in the shared `roles.json` and referenced from working states' `roles` lists and HCP `triggering_role` fields. Roles map to backend handles (GitHub usernames, etc.) per team config — that mapping is outside the workflow tool's scope.
 
 ## Agent
 
@@ -109,6 +109,8 @@ Per-process markdown (`<name>.md`) contains everything an agent needs to operate
 Each process declares which issue types it accepts via a top-level `"issue_types": [...]` array on its state machine JSON. The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).
 
 `workflow create` requires `--type` when the process supports multiple types; auto-defaults when only one. Issue type is set at creation and **immutable** — if a type needs to change, that's a new issue, not a retype. The validator checks every type id a process declares exists in `issue-types.json`; missing ids are an ERROR, missing directory is a WARNING.
+
+**Working states can narrow the type set.** A working state may declare its own `issue_types: [...]` to accept only a subset of the process-level umbrella. The validator enforces the subset rule; the planner checks at claim time that the issue's type is in the destination working state's set (when declared). Resting and terminal states never carry `issue_types` — they're queues / endpoints, not the unit of type-restriction. This is how inner-loop's `implementing` (accepts bug/feature/chore), `implementing_experiment` (accepts experiment), `implementing_spike` (accepts spike), and `implementing_hotfix` (accepts hotfix) fan a single ticket into the right working flow.
 
 ### `pr` — the pre-defined pull-request type
 
@@ -163,13 +165,13 @@ Each terminal state declares its own `close_reason` in `<name>-states.json` — 
 
 Authoring lives in JSON, not in code. A project can map taxonomies to reasons however it wants without changing the framework. The validator may eventually warn if a terminal has no `close_reason` and the taxonomy suggests one is appropriate, but the field stays authored, not inferred.
 
-## `iterated` is for supersession, not handoff
+## `superseded` is for follow-up work, not handoff
 
-Per upstream principle 8, `iterated` means *"work was superseded by a follow-up work item"* — the original work item terminates and a new one is created to continue. Typical use: a failed experiment ticket terminates as `iterated` while a fresh experiment ticket is opened with a revised hypothesis. Single-process scenario, two issues.
+Per upstream principle 8 (updated), `superseded` means *"work continues on a follow-up issue"* — the original work item terminates and a new one is created to continue. Covers both same-process iteration (a failed experiment ticket terminates as `superseded`; a fresh experiment ticket is opened with a revised hypothesis) and cross-process spawn (incident `stabilized` → new postmortem ticket).
 
-This is **not** the same as a cross-process handoff (per principle 9), where the **same** work item continues on another process's diagram. Handoffs are modelled as shared resting states, not as terminals.
+This is **not** the same as a cross-process *handoff* (per principle 9), where the **same** work item continues on another process's diagram. Handoffs are modelled as shared resting states, not as terminals.
 
-Our example's `bounced_back` in inner-loop is currently labeled `terminal_taxonomy: iterated`, which is a known misuse — the bounce-back is a handoff (same issue continues in refinement), not supersession. Because the close behavior is now driven by `close_reason` (absent for `bounced_back`), the tracker issue correctly stays open, but the taxonomy tag is wrong. A proper fix would restructure `bounced_back` as a shared resting state declared in both processes; that's a follow-up that requires resolving the registry's first-load-wins routing.
+Our example's `bounced_back` in inner-loop is currently labeled `terminal_taxonomy: superseded`, which is a known misuse — the bounce-back is a handoff (same issue continues in refinement), not supersession. Because close behavior is driven by `close_reason` (absent for `bounced_back`), the tracker issue correctly stays open, but the taxonomy tag is wrong. A proper fix would restructure `bounced_back` as a shared resting state declared in both processes; that's a follow-up that requires resolving the registry's first-load-wins routing.
 
 ## Origin marker (`wip-from`)
 
@@ -206,7 +208,7 @@ The mechanism by which a work item passes from one process to another. Two flavo
 - **Shared resting state** — the same issue continues. The state appears in both processes' state machines (e.g., `ready_for_dev` ends refinement and starts inner-loop).
 - **Spawn event** — the originating process creates a new issue that starts fresh in another process (e.g., incident response spawning a postmortem issue).
 
-Convention: receiver owns the shared state's contract (claim role, reversibility); sender just declares the state exists with its class.
+Convention: the receiver declares the shared state's `reversibility`; the role-restriction lives on the receiver's working state(s) reached via CLAIM from this resting state. The sender declares the state exists with its class.
 
 ## Workflow directory (`--workflow-dir`)
 

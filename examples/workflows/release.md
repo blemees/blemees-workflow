@@ -34,34 +34,34 @@ stateDiagram-v2
     rolled_back --> [*]: terminal (reverted)
     released --> [*]: terminal (shipped)
 
-    note right of cut: claim-role=release-manager
-    note right of ready_for_release_decision: claim-role=product-owner
-    note right of gated_nogo: claim-role=product-owner
+    note right of preparing: role=release-manager
+    note right of reviewing_release: role=product-owner
+    note right of abandoning: role=product-owner
     note right of abandoned: reversible-fast
-    note right of ready_for_monitoring: claim-role=developer
+    note right of monitoring: role=developer
     note right of rolled_back: reversible-slow
     note right of released: reversible-slow
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `accumulating` | resting | — | — | — | — |
-| `cut` | resting | — | release-manager | — | — |
-| `preparing` | working | — | — | — | — |
-| `ready_for_release_decision` | resting | — | product-owner | — | — |
-| `reviewing_release` | working | — | — | — | — |
-| `gated_nogo` | resting | — | product-owner | — | — |
-| `abandoning` | working | — | — | — | — |
-| `abandoned` | terminal | reversible-fast | — | abandoned | not planned |
-| `deploying` | resting | — | — | — | — |
-| `rolling_out` | resting | — | — | — | — |
-| `ready_for_monitoring` | resting | — | developer | — | — |
-| `monitoring` | working | — | — | — | — |
-| `rolling_back` | working | — | — | — | — |
-| `rolled_back` | terminal | reversible-slow | — | reverted | completed |
-| `released` | terminal | reversible-slow | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `accumulating` | resting | — | — | — | — | — |
+| `cut` | resting | — | — | — | — | — |
+| `preparing` | working | — | release-manager | — | — | — |
+| `ready_for_release_decision` | resting | — | — | — | — | — |
+| `reviewing_release` | working | — | product-owner | — | — | — |
+| `gated_nogo` | resting | — | — | — | — | — |
+| `abandoning` | working | — | product-owner | — | — | — |
+| `abandoned` | terminal | reversible-fast | — | — | abandoned | not planned |
+| `deploying` | resting | — | — | — | — | — |
+| `rolling_out` | resting | — | — | — | — | — |
+| `ready_for_monitoring` | resting | — | — | — | — | — |
+| `monitoring` | working | — | developer | — | — | — |
+| `rolling_back` | working | — | — | — | — | — |
+| `rolled_back` | terminal | reversible-slow | — | — | reverted | completed |
+| `released` | terminal | reversible-slow | — | — | shipped | completed |
 
 ## Transitions
 

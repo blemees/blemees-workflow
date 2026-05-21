@@ -38,16 +38,27 @@ class TerminalTaxonomy(Enum):
 
     Every terminal state must carry one of these tags. A terminal without a tag
     is an authoring error caught by the validator.
+
+    Six buckets covering the meaningful outcome categories:
+
+    - `shipped`: user-facing change went out.
+    - `resolved`: meta-work / internal process complete (postmortem, ADR,
+      retro) — no user-facing output.
+    - `reverted`: work shipped then withdrawn.
+    - `abandoned`: stopped on purpose without shipping (whether at intake
+      or in flight — `wont_fix`, `killed`, experiment aborted).
+    - `deduplicated`: not shipped because it was a duplicate of other work.
+    - `superseded`: work continues on a follow-up issue. Covers both
+      same-process iteration (failed experiment → new experiment) and
+      cross-process handoff (incident stabilized → postmortem opens).
     """
 
     SHIPPED = "shipped"
+    RESOLVED = "resolved"
     REVERTED = "reverted"
     ABANDONED = "abandoned"
     DEDUPLICATED = "deduplicated"
-    ITERATED = "iterated"
-    ABORTED = "aborted"
-    STABILIZED = "stabilized"
-    RESOLVED = "resolved"
+    SUPERSEDED = "superseded"
 
 
 class TransitionType(Enum):
@@ -71,18 +82,26 @@ class State:
     Reversibility is required for non-resting states that participate in HITL
     gates; the validator enforces this where it matters.
 
-    `claim_role` names the agent role that claims this state (for resting
-    states). It is declared structurally in the workflow file via a note
-    such as `note left of raw: claim-role=pm`. Used by discovery queries
-    (e.g., `workflow list --role pm` returns items in any state with
-    `claim_role == 'pm'` and no current claim).
+    `roles` lists every agent role that may occupy this working state.
+    Only valid on working states — resting states are open queues, and the
+    role-restriction lives on the working state they CLAIM into. Discovery
+    queries (`workflow inbox`, `workflow list --role X`) traverse outgoing
+    CLAIM transitions to find resting states whose downstream working
+    state(s) include role X in `roles`.
+
+    `issue_types` narrows which issue types may occupy this working state.
+    Only valid on working states. Empty = accepts any of the process-level
+    `issue_types` (the umbrella). Each entry must be present in the
+    process-level set (cross-checked by the validator). Runtime: claiming
+    an issue into this state requires the issue's type to be in the set.
     """
 
     name: str
     state_class: StateClass
     reversibility: ReversibilityClass | None = None
     terminal_taxonomy: TerminalTaxonomy | None = None
-    claim_role: str | None = None
+    roles: tuple[str, ...] = ()
+    issue_types: tuple[str, ...] = ()
     # Backend-specific close reason for terminal states. When set, advancing
     # into this state closes the tracker's issue with this reason (e.g.,
     # GitHub's "completed" or "not planned"). When None, the issue stays
@@ -129,14 +148,13 @@ class Transition:
 class StateMachine:
     """A parsed workflow .mermaid file.
 
-    `canonical_catalog_path` is extracted from the legend comment block's first
-    line and points at the canonical HCP catalog location (the process doc
-    section). The validator uses this to find the catalog when cross-checking.
-
     `gates_in_legend` is the strict listing extracted from the legend block — a
     map from gate name to its declared reversibility class. The validator
     cross-checks against `transitions` (every `[hitl]` marker should have a
     legend entry; every legend entry should have a matching marker).
+
+    The HCP catalog path is derived by convention from `name`:
+    `<name>-hcps.json`. There's no explicit field for it.
     """
 
     name: str
@@ -146,7 +164,6 @@ class StateMachine:
     # ids are resolved against the shared `issue-types.json` (an
     # `IssueTypeDirectory`). Empty list means no type constraint is declared.
     issue_types: list[str] = field(default_factory=list)
-    canonical_catalog_path: str | None = None
     gates_in_legend: dict[str, ReversibilityClass] = field(default_factory=dict)
     source_path: str | None = None
 

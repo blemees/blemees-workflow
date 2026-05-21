@@ -10,7 +10,7 @@ Final say on product direction, priorities, business trade-offs, and experiment 
 - **Wakes on**: direct escalation from pm, roadmap-level discussions, experiment enters measuring state, experiment enters measurement_complete state
 - **Does not**: write code, run the inner loop, refine issues, make architectural calls without consulting architect
 
-## `pm` — Product Manager
+## `product-manager` — Product Manager
 
 Owns refinement; turns raw issues into ready tickets that developers can safely pick up
 
@@ -50,7 +50,7 @@ Implements changes end-to-end: code, tests, PR, merge
 - **Wakes on**: new ready issues (pull model), PR review feedback, QA results
 - **Does not**: self-refine issues (bounces back instead), review their own PRs, make medium-design decisions mid-implementation
 
-## `reviewer` — Peer Reviewer
+## `peer-reviewer` — Peer Reviewer
 
 Reviews PRs for design, intent, readability, and risk
 
@@ -58,7 +58,7 @@ Reviews PRs for design, intent, readability, and risk
 - **Wakes on**: needs-review label + mention on a PR
 - **Does not**: review their own code, do QA verification, rubber-stamp
 
-## `qa` — QA
+## `tester` — Tester
 
 Verifies PRs behaviorally on preview environments
 
@@ -82,7 +82,7 @@ Owns the incident lifecycle: triage, coordination, communication, postmortem cre
 - **Wakes on**: production alerts, customer-reported outages, type:incident issues, escalation from on-call
 - **Does not**: diagnose technical root causes, write code, merge PRs, draft or own the postmortem (that's pm), make business-level decisions (escalates to product-owner)
 
-## `responder` — Responder
+## `incident-responder` — Incident Responder
 
 Owns incident diagnosis and mitigation execution: root-cause investigation, rollback/toggle/hotfix
 

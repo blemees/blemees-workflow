@@ -21,8 +21,12 @@ from workflow.core.model.trust_grant import Evidence, TrustGrant, TrustGrantPara
 def _build() -> tuple[StateMachine, HCPCatalog]:
     sm = StateMachine(name="t")
     sm.states = {
-        "raw": State(name="raw", state_class=StateClass.RESTING, claim_role="pm"),
-        "refining": State(name="refining", state_class=StateClass.WORKING),
+        "raw": State(name="raw", state_class=StateClass.RESTING),
+        "refining": State(
+            name="refining",
+            state_class=StateClass.WORKING,
+            roles=("product-manager",),
+        ),
         "ready_for_dev": State(
             name="ready_for_dev",
             state_class=StateClass.RESTING,
@@ -64,7 +68,7 @@ def _build() -> tuple[StateMachine, HCPCatalog]:
         gate_name="ready_for_dev",
         source_state="refining",
         destinations=["ready_for_dev"],
-        triggering_role="pm",
+        triggering_role="product-manager",
         hcp_type=HCPType.JUDGMENT,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
         allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
@@ -75,7 +79,7 @@ def _build() -> tuple[StateMachine, HCPCatalog]:
         gate_name="wont_fix",
         source_state="refining",
         destinations=["wont_fix"],
-        triggering_role="pm",
+        triggering_role="product-manager",
         hcp_type=HCPType.JUDGMENT,
         reversibility=ReversibilityClass.REVERSIBLE_FAST,
         allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
@@ -106,7 +110,7 @@ def test_available_transitions_from_working_returns_hitl_actions() -> None:
     assert ready.default_level is HCPLevel.BLOCK
     assert ready.effective_level is HCPLevel.BLOCK
     assert ready.grant_relaxed is False
-    assert ready.triggering_role == "pm"
+    assert ready.triggering_role == "product-manager"
     assert ready.agent_prepares_path == "ready-packet.md"
     assert ready.destination_reversibility is ReversibilityClass.REVERSIBLE_SLOW
     assert ready.destination_state_class is StateClass.RESTING

@@ -11,5 +11,6 @@ stateDiagram-v2
     patch_releasing --> backported: from process release (patch deployed to production)
     backported --> [*]: terminal (shipped)
 
-    note left of ready_for_backport: claim-role=developer, reversible-slow
+    note left of ready_for_backport: reversible-slow
+    note right of cherry_picking: role=developer
     note right of backported: reversible-slow

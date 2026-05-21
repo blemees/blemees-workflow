@@ -43,32 +43,30 @@ stateDiagram-v2
     duplicate --> [*]: terminal (deduplicated)
     wont_fix --> [*]: terminal (abandoned)
 
-    note left of raw: claim-role=pm
-    note right of consult_complete: claim-role=pm
+    note right of refining: role=product-manager
     note right of ready_for_dev: reversible-slow
     note right of ready_for_experiment: reversible-slow
-    note right of ready_bounced: claim-role=pm, reversible-fast
-    note right of deprioritized: claim-role=pm
+    note right of ready_bounced: reversible-fast
     note right of duplicate: reversible-fast
     note right of wont_fix: reversible-fast
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `raw` | resting | — | pm | — | — |
-| `refining` | working | — | — | — | — |
-| `consult_requested` | resting | — | — | — | — |
-| `consulting` | working | — | — | — | — |
-| `consult_complete` | resting | — | pm | — | — |
-| `spiking` | resting | — | — | — | — |
-| `ready_for_dev` | resting | reversible-slow | — | — | — |
-| `ready_for_experiment` | resting | reversible-slow | — | — | — |
-| `ready_bounced` | resting | reversible-fast | pm | — | — |
-| `deprioritized` | resting | — | pm | — | — |
-| `duplicate` | terminal | reversible-fast | — | deduplicated | not planned |
-| `wont_fix` | terminal | reversible-fast | — | abandoned | not planned |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `raw` | resting | — | — | — | — | — |
+| `refining` | working | — | product-manager | — | — | — |
+| `consult_requested` | resting | — | — | — | — | — |
+| `consulting` | working | — | — | — | — | — |
+| `consult_complete` | resting | — | — | — | — | — |
+| `spiking` | resting | — | — | — | — | — |
+| `ready_for_dev` | resting | reversible-slow | — | — | — | — |
+| `ready_for_experiment` | resting | reversible-slow | — | — | — | — |
+| `ready_bounced` | resting | reversible-fast | — | — | — | — |
+| `deprioritized` | resting | — | — | — | — | — |
+| `duplicate` | terminal | reversible-fast | — | — | deduplicated | not planned |
+| `wont_fix` | terminal | reversible-fast | — | — | abandoned | not planned |
 
 ## Transitions
 

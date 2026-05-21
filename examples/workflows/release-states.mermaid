@@ -27,10 +27,10 @@ stateDiagram-v2
     rolled_back --> [*]: terminal (reverted)
     released --> [*]: terminal (shipped)
 
-    note right of cut: claim-role=release-manager
-    note right of ready_for_release_decision: claim-role=product-owner
-    note right of gated_nogo: claim-role=product-owner
+    note right of preparing: role=release-manager
+    note right of reviewing_release: role=product-owner
+    note right of abandoning: role=product-owner
     note right of abandoned: reversible-fast
-    note right of ready_for_monitoring: claim-role=developer
+    note right of monitoring: role=developer
     note right of rolled_back: reversible-slow
     note right of released: reversible-slow

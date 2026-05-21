@@ -51,6 +51,9 @@ class AvailableTransition:
     destination_state_class: StateClass | None = None
     destination_reversibility: ReversibilityClass | None = None
     destination_terminal_taxonomy: TerminalTaxonomy | None = None
+    # Roles permitted to occupy the destination state. Empty when the
+    # destination is unrestricted, isn't a working state, or is `[*]`.
+    destination_roles: tuple[str, ...] = ()
 
     # Cross-process metadata (None when transition isn't CROSS_PROCESS)
     cross_process_kind: str | None = None
@@ -116,6 +119,7 @@ def available_transitions(
                 destination_terminal_taxonomy=(
                     dst_state.terminal_taxonomy if dst_state else None
                 ),
+                destination_roles=dst_state.roles if dst_state else (),
                 cross_process_kind=t.cross_process_kind,
                 cross_process_other=t.cross_process_other,
             )

@@ -21,8 +21,8 @@ def _minimal() -> dict:
     return {
         "name": "t",
         "states": {
-            "a": {"class": "resting", "claim_role": "pm"},
-            "b": {"class": "working"},
+            "a": {"class": "resting"},
+            "b": {"class": "working", "roles": ["product-manager"]},
             "c": {"class": "terminal", "terminal_taxonomy": "shipped"},
         },
         "transitions": [
@@ -37,8 +37,9 @@ def test_parses_minimal_workflow() -> None:
     workflow = parse_state_machine(json.dumps(_minimal()))
     assert workflow.name == "t"
     assert workflow.states["a"].state_class is StateClass.RESTING
-    assert workflow.states["a"].claim_role == "pm"
+    assert workflow.states["a"].roles == ()
     assert workflow.states["b"].state_class is StateClass.WORKING
+    assert workflow.states["b"].roles == ("product-manager",)
     assert workflow.states["c"].state_class is StateClass.TERMINAL
     assert workflow.states["c"].terminal_taxonomy is TerminalTaxonomy.SHIPPED
     assert len(workflow.transitions) == 3
@@ -163,8 +164,10 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     spike, hotfix), each with entry, claim, PR-review, and staged states."""
     workflow = parse_state_machine(inner_loop_workflow_path)
     assert workflow.name == "inner-loop"
-    assert workflow.states["ready_for_dev"].claim_role == "developer"
     assert workflow.states["ready_for_dev"].state_class is StateClass.RESTING
+    # Role-restriction lives on the working state reached by CLAIM, not on
+    # the resting queue.
+    assert "developer" in workflow.states["implementing"].roles
     assert "implementing" in workflow.states
     assert "implementing_experiment" in workflow.states
     assert "implementing_spike" in workflow.states

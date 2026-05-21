@@ -4,7 +4,8 @@ stateDiagram-v2
     %%
 
     [*] --> draft: from process inner-loop (developer opens draft PR at ticket claim)
-    draft --> needs_review: developer marks PR ready for review
+    draft --> drafting: developer claims draft
+    drafting --> needs_review: developer marks PR ready for review
     needs_review --> reviewing: reviewer claims PR
     reviewing --> needs_qa: reviewer approves PR
     reviewing --> qa_passed: reviewer approves hotfix PR (QA skipped, IC discretion)
@@ -21,9 +22,10 @@ stateDiagram-v2
     merging --> needs_review: merge conflict or failed staging deploy
     staged --> [*]: terminal (shipped)
 
-    note right of needs_review: claim-role=reviewer
-    note right of changes_requested: claim-role=developer
-    note right of needs_qa: claim-role=qa
-    note right of qa_passed: claim-role=developer
-    note right of qa_failed: claim-role=developer
+    note right of drafting: role=developer
+    note right of reviewing: role=peer-reviewer
+    note right of fixing_review: role=developer
+    note right of verifying: role=tester
+    note right of fixing_qa: role=developer
+    note right of merging: role=developer
     note right of staged: reversible-slow

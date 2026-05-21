@@ -24,24 +24,26 @@ stateDiagram-v2
     rolled_back --> [*]: terminal (shipped)
     flag_toggled --> [*]: terminal (shipped)
 
-    note left of ready_for_rollback: claim-role=responder, reversible-fast
-    note right of ready_for_flag_toggle: claim-role=responder, reversible-fast
+    note left of ready_for_rollback: reversible-fast
+    note right of ready_for_flag_toggle: reversible-fast
     note right of ready_for_hotfix: reversible-fast
+    note right of rolling_back: role=incident-responder
     note right of rolled_back: reversible-slow
+    note right of toggling_flag: role=incident-responder
     note right of flag_toggled: reversible-slow
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `ready_for_rollback` | resting | reversible-fast | responder | — | — |
-| `ready_for_flag_toggle` | resting | reversible-fast | responder | — | — |
-| `ready_for_hotfix` | resting | reversible-fast | — | — | — |
-| `rolling_back` | working | — | — | — | — |
-| `rolled_back` | terminal | reversible-slow | — | shipped | completed |
-| `toggling_flag` | working | — | — | — | — |
-| `flag_toggled` | terminal | reversible-slow | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `ready_for_rollback` | resting | reversible-fast | — | — | — | — |
+| `ready_for_flag_toggle` | resting | reversible-fast | — | — | — | — |
+| `ready_for_hotfix` | resting | reversible-fast | — | — | — | — |
+| `rolling_back` | working | — | incident-responder | — | — | — |
+| `rolled_back` | terminal | reversible-slow | — | — | shipped | completed |
+| `toggling_flag` | working | — | incident-responder | — | — | — |
+| `flag_toggled` | terminal | reversible-slow | — | — | shipped | completed |
 
 ## Transitions
 

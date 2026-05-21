@@ -22,23 +22,22 @@ stateDiagram-v2
     complete --> [*]: terminal (shipped)
     kill_switched --> [*]: terminal (reverted)
 
-    note right of ready_for_stage_analysis: claim-role=developer
-    note right of holding: claim-role=developer
+    note right of analyzing: role=developer
     note right of complete: reversible-slow
     note right of kill_switched: reversible-slow
 ```
 
 ## States
 
-| Name | Class | Reversibility | Claim role | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|
-| `soaking` | resting | — | — | — | — |
-| `ready_for_stage_analysis` | resting | — | developer | — | — |
-| `analyzing` | working | — | — | — | — |
-| `holding` | resting | — | developer | — | — |
-| `killing` | working | — | — | — | — |
-| `complete` | terminal | reversible-slow | — | shipped | completed |
-| `kill_switched` | terminal | reversible-slow | — | reverted | completed |
+| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|
+| `soaking` | resting | — | — | — | — | — |
+| `ready_for_stage_analysis` | resting | — | — | — | — | — |
+| `analyzing` | working | — | developer | — | — | — |
+| `holding` | resting | — | — | — | — | — |
+| `killing` | working | — | — | — | — | — |
+| `complete` | terminal | reversible-slow | — | — | shipped | completed |
+| `kill_switched` | terminal | reversible-slow | — | — | reverted | completed |
 
 ## Transitions
 

@@ -1,4 +1,4 @@
 {
-  "agent-role": "reviewer",
+  "agent-role": "peer-reviewer",
   "workflow-dir": "../workflows"
 }

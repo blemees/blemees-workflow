@@ -46,7 +46,7 @@ uv run ruff format
 workflow --help                              # top-level help
 workflow <operation> --help                  # per-operation help
 
-workflow --agent-role pm init
+workflow --agent-role product-manager init                     # scaffold .workflow/ for one role
 workflow setup-github                                          # ensure org Issue Types (best-effort) + repo labels
 workflow setup-github --setup-org                              # admin path — create org Issue Types and refresh cache
 workflow capabilities                                          # show the per-(host, owner) encoding cache
@@ -94,18 +94,32 @@ Three groups. See `hitl-principles.md` § 5 for full semantics.
 
 ## Configuration
 
-The tool's configuration travels with the **agent**, not the OS user. Each agent has its own home directory containing a `.workflow/` folder:
+The tool's configuration travels with the **agent**, not the OS user. Each agent has its own home directory containing a `.workflow/` folder. Multiple per-role agent homes typically share a single workflows directory; each agent home is independent for identity and trust grants.
 
 ```
-<agent-home>/
-  .workflow/
-    config.json          # agent identity: just `role` for now
-    trust-grants/        # the agent's trust grants (per-team or shared)
-      refinement/
-        ready_for_dev.json
-      inner-loop/
-        staged.json
+project/                 # shared workflows directory at the top
+  workflows/
+    refinement-states.json
+    inner-loop-states.json
+    roles.json
+    issue-types.json
+    ...
+  product-manager/       # one per-role agent home
+    .workflow/
+      config.json        # agent-role: product-manager, workflow-dir: ../workflows
+      trust-grants/
+        refinement/
+          ready_for_dev.json
+  developer/
+    .workflow/
+      config.json        # agent-role: developer, workflow-dir: ../workflows
+      trust-grants/
+        inner-loop/
+          staged.json
+  ...
 ```
+
+See [`examples/`](examples/) for a fully populated multi-role tree with eleven agent homes (one per role in `roles.json`) all pointing at the shared `examples/workflows/`.
 
 `config.json` carries *agent identity* — fields that don't change between
 invocations. The recognized keys are:
@@ -219,7 +233,7 @@ only.
 
 ```json
 {
-  "agent-role": "pm"
+  "agent-role": "product-manager"
 }
 ```
 
@@ -227,14 +241,23 @@ only.
 `workflow --agent-role <role> init`). Everything else is per-invocation or
 auto-discovered.
 
-An agent that uses a non-default workflows directory and a shared grants
-directory might look like:
+A per-role agent home pointing at a shared workflows directory (the
+canonical multi-role pattern) looks like:
 
 ```json
 {
-  "agent-role": "pm",
+  "agent-role": "product-manager",
+  "workflow-dir": "../workflows"
+}
+```
+
+A solo setup that also pins a non-default grants location:
+
+```json
+{
+  "agent-role": "developer",
   "workflow-dir": "../shared/workflows",
-  "grants-dir": "../shared/grants/refinement"
+  "grants-dir": "../shared/grants/inner-loop"
 }
 ```
 

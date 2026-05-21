@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://blemees.io/schemas/blemees-workflow/issue-types.schema.json",
+  "title": "blemees-workflow issue-type directory",
+  "description": "Schema for the shared `issue-types.json` file. Provides editor / IDE feedback; cross-reference checks (each process's `issue_types` entries resolve here) run in `workflow validate`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["types"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "types": {
+      "type": "object",
+      "description": "Map of type-id → type definition. Type ids are short framework-canonical names (bug, feature, hotfix, chore, spike, experiment, pr).",
+      "additionalProperties": {"$ref": "#/$defs/issueType"}
+    }
+  },
+  "$defs": {
+    "issueType": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable display name (e.g., 'Bug', 'Pull Request')."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prose description of what this type means. Often references the work-types catalog."
+        },
+        "github_issue_type": {
+          "type": "string",
+          "description": "Exact GitHub Issue Type name to apply via `gh issue create --type`. Optional. Forbidden when `github_entity` is `pull_request` (PRs are not a native GitHub Issue Type)."
+        },
+        "github_issue_type_color": {
+          "enum": ["gray", "blue", "green", "yellow", "orange", "red", "pink", "purple"],
+          "description": "Color hint for `setup-github --setup-org`. GitHub accepts these eight named colors."
+        },
+        "github_entity": {
+          "enum": ["issue", "pull_request"],
+          "default": "issue",
+          "description": "Which GitHub entity this type creates. `issue` is default; `pull_request` is the special `pr` type. Drives whether the CLI dispatches `gh issue create` or `gh pr create`."
+        }
+      }
+    }
+  }
+}

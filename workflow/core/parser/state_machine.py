@@ -13,14 +13,15 @@ are gone — the schema demands intent.
 ```json
 {
   "name": "refinement",
-  "canonical_catalog_path": "refinement-hcps.json",
   "states": {
     "raw": {
       "class": "resting",
-      "claim_role": "pm",
       "notes": ["optional prose for visualization"]
     },
-    "refining": {"class": "working"},
+    "refining": {
+      "class": "working",
+      "roles": ["product-manager"]
+    },
     "ready_for_dev": {
       "class": "resting",
       "reversibility": "reversible-slow"
@@ -33,11 +34,11 @@ are gone — the schema demands intent.
   },
   "transitions": [
     {"source": "[*]", "destination": "raw", "type": "external", "label": "issue created"},
-    {"source": "raw", "destination": "refining", "type": "claim", "label": "PM claims raw"},
+    {"source": "raw", "destination": "refining", "type": "claim", "label": "product-manager claims raw"},
     {"source": "refining", "destination": "ready_for_dev", "type": "role_action",
-     "label": "PM marks ready", "hitl": true},
+     "label": "product-manager marks ready", "hitl": true},
     {"source": "refining", "destination": "wont_fix", "type": "role_action",
-     "label": "PM marks wont-fix", "hitl": true},
+     "label": "product-manager marks wont-fix", "hitl": true},
     {"source": "ready_for_dev", "destination": "[*]", "type": "cross_process",
      "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"}
   ]
@@ -48,9 +49,8 @@ are gone — the schema demands intent.
 
 ### Top-level
 - `name` (string, optional): workflow name. Defaults to the file's stem with
-  `-workflow` stripped.
-- `canonical_catalog_path` (string, optional): pointer to the HCP catalog
-  file or process-doc section. Carried through to `StateMachine.canonical_catalog_path`.
+  `-states` stripped. The HCP catalog path is derived from this by convention
+  (`<name>-hcps.json`).
 - `states` (object, required): map of state-id → state spec.
 - `transitions` (list, required): ordered list of transition specs.
 
@@ -59,9 +59,16 @@ are gone — the schema demands intent.
 - `reversibility` (string, optional): `"irreversible"` | `"reversible-fast"` |
   `"reversible-slow"`.
 - `terminal_taxonomy` (string, required when `class=terminal`):
-  `"shipped"` | `"reverted"` | `"abandoned"` | `"deduplicated"` | `"iterated"` |
-  `"aborted"` | `"stabilized"` | `"resolved"`.
-- `claim_role` (string, optional): role id that claims this state.
+  `"shipped"` | `"resolved"` | `"reverted"` | `"abandoned"` | `"deduplicated"` | `"superseded"`.
+- `roles` (list of strings, optional): role ids permitted to occupy this
+  state. Only valid on working states — the role-restriction lives on the
+  working state, not on the resting queue it's claimed from. Resting
+  states are open queues; downstream working states declare who may pick
+  items up.
+- `issue_types` (list of strings, optional): subset of the process-level
+  `issue_types` this working state accepts. Only valid on working states.
+  Empty / absent = accepts any process-level type. The validator
+  cross-checks that every entry is in the process-level set.
 - `notes` (list of strings, optional): free prose for the emitter to render
   alongside the state. Not parsed for semantics — structured metadata goes
   in the typed fields above.
@@ -176,10 +183,6 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
         )
     name = declared_name or name or "unnamed"
 
-    canonical_catalog_path = data.get("canonical_catalog_path")
-    if canonical_catalog_path is not None and not isinstance(canonical_catalog_path, str):
-        raise ParseError("`canonical_catalog_path` must be a string if present.")
-
     issue_types_raw = data.get("issue_types", [])
     if not isinstance(issue_types_raw, list):
         raise ParseError(
@@ -244,7 +247,6 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
         states=states,
         transitions=transitions,
         issue_types=issue_types,
-        canonical_catalog_path=canonical_catalog_path,
         gates_in_legend=gates_in_legend,
         source_path=source_path,
     )
@@ -290,14 +292,65 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"`class: terminal`."
         )
 
-    claim_role_raw = spec.get("claim_role")
-    claim_role: str | None = None
-    if claim_role_raw is not None:
-        if not isinstance(claim_role_raw, str) or not claim_role_raw.strip():
+    roles_raw = spec.get("roles", [])
+    if not isinstance(roles_raw, list):
+        raise ParseError(
+            f"State {state_id!r}: `roles` must be a list of role ids "
+            f"(got {type(roles_raw).__name__})."
+        )
+    roles_parsed: list[str] = []
+    for i, role in enumerate(roles_raw):
+        if not isinstance(role, str) or not role.strip():
             raise ParseError(
-                f"State {state_id!r}: `claim_role` must be a non-empty string if present."
+                f"State {state_id!r}: `roles[{i}]` must be a non-empty "
+                f"string (got {role!r})."
             )
-        claim_role = claim_role_raw.strip().strip("{}").strip()
+        cleaned = role.strip().strip("{}").strip()
+        if cleaned in roles_parsed:
+            raise ParseError(
+                f"State {state_id!r}: duplicate role {cleaned!r} in `roles`."
+            )
+        roles_parsed.append(cleaned)
+    if roles_parsed and state_class is not StateClass.WORKING:
+        raise ParseError(
+            f"State {state_id!r}: `roles` is only valid on working states "
+            f"(state class is {state_class.value!r})."
+        )
+    # Reject the legacy field outright so authors don't silently lose the
+    # role declaration during migration.
+    if "claim_role" in spec:
+        raise ParseError(
+            f"State {state_id!r}: `claim_role` was removed. Move the role "
+            f"to `roles: [...]` on the working state(s) reached by CLAIM "
+            f"transitions from this state."
+        )
+    roles = tuple(roles_parsed)
+
+    state_issue_types_raw = spec.get("issue_types", [])
+    if not isinstance(state_issue_types_raw, list):
+        raise ParseError(
+            f"State {state_id!r}: `issue_types` must be a list of type ids "
+            f"(got {type(state_issue_types_raw).__name__})."
+        )
+    state_issue_types_parsed: list[str] = []
+    for i, t in enumerate(state_issue_types_raw):
+        if not isinstance(t, str) or not t.strip():
+            raise ParseError(
+                f"State {state_id!r}: `issue_types[{i}]` must be a non-empty "
+                f"string (got {t!r})."
+            )
+        cleaned = t.strip()
+        if cleaned in state_issue_types_parsed:
+            raise ParseError(
+                f"State {state_id!r}: duplicate type {cleaned!r} in `issue_types`."
+            )
+        state_issue_types_parsed.append(cleaned)
+    if state_issue_types_parsed and state_class is not StateClass.WORKING:
+        raise ParseError(
+            f"State {state_id!r}: `issue_types` is only valid on working "
+            f"states (state class is {state_class.value!r})."
+        )
+    state_issue_types = tuple(state_issue_types_parsed)
 
     close_reason_raw = spec.get("close_reason")
     close_reason: str | None = None
@@ -333,7 +386,8 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         state_class=state_class,
         reversibility=reversibility,
         terminal_taxonomy=terminal_taxonomy,
-        claim_role=claim_role,
+        roles=roles,
+        issue_types=state_issue_types,
         close_reason=close_reason,
         notes=notes,
     )

@@ -10,6 +10,7 @@ stateDiagram-v2
     creating_followups --> complete: PM files compensating issues (spawn events to process refinement)
     complete --> [*]: terminal (resolved)
 
-    note left of pending: claim-role=pm, reversible-slow
-    note right of ready_for_followups: claim-role=pm
+    note left of pending: reversible-slow
+    note right of drafting: role=product-manager
+    note right of creating_followups: role=product-manager
     note right of complete: reversible-slow

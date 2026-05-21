@@ -175,7 +175,7 @@ def test_runtime_two_hitl_gates_errors() -> None:
     state = IssueState(
         issue_id="1",
         state="working",
-        agent_claim="pm",
+        agent_claim="product-manager",
         awaiting_gate="ready_for_dev",
         audit_pending="some_audit",
     )
@@ -188,7 +188,7 @@ def test_runtime_two_claim_singletons_errors() -> None:
     state = IssueState(
         issue_id="1",
         state="working",
-        agent_claim="pm",
+        agent_claim="product-manager",
         reviewing=True,
         auditing=True,
     )
