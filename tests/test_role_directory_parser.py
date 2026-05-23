@@ -15,8 +15,6 @@ SAMPLE_ROLES = {
         "product-manager": {
             "name": "Product Manager",
             "responsibility": "Owns refinement",
-            "processes": ["refinement (owner)"],
-            "wakes_on": ["new raw issues"],
             "does_not": ["decide architecture"],
         },
         "developer": {
@@ -33,16 +31,12 @@ def test_parse_roles_directory() -> None:
     pm = directory.roles["product-manager"]
     assert pm.name == "Product Manager"
     assert pm.responsibility == "Owns refinement"
-    assert pm.processes == ["refinement (owner)"]
-    assert pm.wakes_on == ["new raw issues"]
     assert pm.does_not == ["decide architecture"]
     # placeholder helper
     assert pm.placeholder == "{product-manager}"
 
     developer = directory.roles["developer"]
-    # processes / wakes_on / does_not default to empty lists
-    assert developer.processes == []
-    assert developer.wakes_on == []
+    # does_not defaults to empty list when absent
     assert developer.does_not == []
 
 
@@ -71,11 +65,39 @@ def test_wrong_type_in_list_rejected() -> None:
             "product-manager": {
                 "name": "PM",
                 "responsibility": "x",
-                "processes": [123],  # not a string
+                "does_not": [123],  # not a string
             }
         }
     }
-    with pytest.raises(ParseError, match="processes"):
+    with pytest.raises(ParseError, match="does_not"):
+        parse_role_directory(json.dumps(bad))
+
+
+def test_legacy_processes_field_rejected() -> None:
+    bad = {
+        "roles": {
+            "product-manager": {
+                "name": "PM",
+                "responsibility": "owns refinement",
+                "processes": ["refinement (owner)"],
+            }
+        }
+    }
+    with pytest.raises(ParseError, match="processes.*was removed"):
+        parse_role_directory(json.dumps(bad))
+
+
+def test_legacy_wakes_on_field_rejected() -> None:
+    bad = {
+        "roles": {
+            "product-manager": {
+                "name": "PM",
+                "responsibility": "owns refinement",
+                "wakes_on": ["new raw issues"],
+            }
+        }
+    }
+    with pytest.raises(ParseError, match="wakes_on.*was removed"):
         parse_role_directory(json.dumps(bad))
 
 

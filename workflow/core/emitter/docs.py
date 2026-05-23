@@ -72,12 +72,28 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def emit_roles_doc(directory: RoleDirectory) -> str:
-    """Render the role directory as markdown."""
+def emit_roles_doc(
+    directory: RoleDirectory,
+    state_machines: list[StateMachine] | None = None,
+) -> str:
+    """Render the role directory as markdown.
+
+    When `state_machines` is supplied, the doc gains a derived
+    "Participates in" line for each role — every process whose working
+    states declare the role in their `roles` list.
+    """
     out: list[str] = ["# Roles", ""]
     if not directory.roles:
         out.append("_(no roles defined)_")
         return "\n".join(out) + "\n"
+
+    # Derive role → {process name} participation from state machines.
+    participation: dict[str, set[str]] = {}
+    for sm in state_machines or []:
+        for st in sm.states.values():
+            for role in st.roles:
+                participation.setdefault(role, set()).add(sm.name)
+
     out.append("This workflow defines these roles:")
     out.append("")
     for role_id, role in directory.roles.items():
@@ -85,10 +101,12 @@ def emit_roles_doc(directory: RoleDirectory) -> str:
         out.append("")
         out.append(role.responsibility)
         out.append("")
-        if role.processes:
-            out.append(f"- **Processes**: {', '.join(role.processes)}")
-        if role.wakes_on:
-            out.append(f"- **Wakes on**: {', '.join(role.wakes_on)}")
+        procs = sorted(participation.get(role_id, set()))
+        if procs:
+            out.append(
+                f"- **Participates in**: {', '.join(f'`{p}`' for p in procs)} "
+                f"_(derived from working-state `roles`)_"
+            )
         if role.does_not:
             out.append(f"- **Does not**: {', '.join(role.does_not)}")
         out.append("")

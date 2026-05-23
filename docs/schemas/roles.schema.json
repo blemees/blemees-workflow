@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://blemees.io/schemas/blemees-workflow/roles.schema.json",
   "title": "blemees-workflow role directory",
-  "description": "Schema for the shared `roles.json` file. Provides editor / IDE feedback; richer cross-reference checks (claim_role values resolve to declared roles, etc.) run in `workflow validate`.",
+  "description": "Schema for the shared `roles.json` file. Provides editor / IDE feedback. Cross-reference checks (role ids resolve in working states' `roles` lists, etc.) run in `workflow validate`. The processes a role participates in are derived from the state machines, not authored here.",
   "type": "object",
   "additionalProperties": true,
   "required": ["roles"],
@@ -28,21 +28,11 @@
         "responsibility": {
           "type": "string",
           "minLength": 1,
-          "description": "One-line statement of what this role owns."
-        },
-        "processes": {
-          "type": "array",
-          "description": "Processes this role participates in. Free prose.",
-          "items": {"type": "string"}
-        },
-        "wakes_on": {
-          "type": "array",
-          "description": "Events / signals that trigger this role. Free prose.",
-          "items": {"type": "string"}
+          "description": "One-line statement of what this role owns. Fold in any important context that previously lived in `processes` or `wakes_on`."
         },
         "does_not": {
           "type": "array",
-          "description": "Explicit non-responsibilities. Free prose.",
+          "description": "Explicit non-responsibilities. Free prose. The only authored anti-statements — the rest of role behavior is derived from state machines.",
           "items": {"type": "string"}
         }
       }

@@ -21,8 +21,6 @@ class Role:
     role_id: str
     name: str
     responsibility: str  # One-line description
-    processes: list[str] = field(default_factory=list)
-    wakes_on: list[str] = field(default_factory=list)
     does_not: list[str] = field(default_factory=list)
 
     @property

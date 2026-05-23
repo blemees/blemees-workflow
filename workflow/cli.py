@@ -2648,7 +2648,10 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     if workflow_dir is not None:
         if role_directory is not None:
             roles_path = workflow_dir / "roles.md"
-            roles_path.write_text(emit_roles_doc(role_directory), encoding="utf-8")
+            sms = [p.state_machine for p in processes_loaded]
+            roles_path.write_text(
+                emit_roles_doc(role_directory, sms), encoding="utf-8"
+            )
             written.append(str(roles_path))
         if issue_type_directory is not None:
             types_path = workflow_dir / "issue-types.md"

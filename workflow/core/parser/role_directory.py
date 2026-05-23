@@ -8,26 +8,22 @@ makes truncation surface as a parse error rather than as silent corruption.
 ```json
 {
   "roles": {
-    "pm": {
+    "product-manager": {
       "name": "Product Manager",
       "responsibility": "Owns refinement; turns raw issues into ready tickets",
-      "processes": ["refinement (owner)", "inner loop (handoff source)"],
-      "wakes_on": ["new raw issues", "bounce-backs from developer"],
       "does_not": ["decide architecture", "implement tickets"]
     },
     "developer": {
       "name": "Developer",
-      "responsibility": "Implements changes end-to-end",
-      "processes": ["inner loop (owner)"],
-      "wakes_on": [],
-      "does_not": []
+      "responsibility": "Implements changes end-to-end"
     }
   }
 }
 ```
 
-`processes`, `wakes_on`, and `does_not` are optional and default to empty lists.
-`name` and `responsibility` are required for every role.
+`name` and `responsibility` are required. `does_not` is optional. The
+processes a role participates in are derived at doc-generation time from
+the state machines (any working state whose `roles` includes the role).
 
 If the file does not exist, returns an empty `RoleDirectory` with a debug log.
 """
@@ -111,16 +107,24 @@ def _parse_role(role_id: str, entry: dict[str, Any]) -> Role:
             f"Role {role_id!r}: `responsibility` is required and must be a non-empty string."
         )
 
-    processes = _parse_string_list(entry.get("processes"), role_id, "processes")
-    wakes_on = _parse_string_list(entry.get("wakes_on"), role_id, "wakes_on")
+    # The `processes` and `wakes_on` fields were removed — the framework
+    # derives that information from the state machines at doc-gen time.
+    # Reject if present so authors don't carry dead data forward.
+    for legacy in ("processes", "wakes_on"):
+        if legacy in entry:
+            raise ParseError(
+                f"Role {role_id!r}: `{legacy}` was removed. The framework "
+                f"derives this from the state machines (roles on working "
+                f"states). If there's important context, fold it into "
+                f"`responsibility`."
+            )
+
     does_not = _parse_string_list(entry.get("does_not"), role_id, "does_not")
 
     return Role(
         role_id=role_id,
         name=name.strip(),
         responsibility=responsibility.strip(),
-        processes=processes,
-        wakes_on=wakes_on,
         does_not=does_not,
     )
 
