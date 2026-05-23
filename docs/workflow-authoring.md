@@ -19,7 +19,7 @@ file you author for in-editor feedback:
 
 Or rely on the workspace-wide `.vscode/settings.json` mapping that ships
 in this repo. The schema covers enum / type / required-field checks; the
-deeper cross-field rules (terminal-needs-taxonomy, gate-only-when-hitl,
+deeper cross-field rules (terminal-needs-taxonomy, role/issue_types placement,
 cross_process metadata, etc.) remain enforced by the Python parser and
 surface via `workflow validate`.
 
@@ -74,7 +74,7 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 | `issue_types` | array of strings | required on working states, forbidden on resting/terminal | Issue type ids this working state accepts. Checked at claim time: the issue's type must be in this set. The process's overall accepted set is derived as the union of every working state's `issue_types` — there is no separate process-level field. |
 | `close_reason` | string | required on terminal states, forbidden elsewhere | Backend close-reason. For GitHub: `"completed"` or `"not planned"`. Every terminal closes the tracker's issue with this reason. |
 | `handoff` | bool | optional, resting states only | Marks the state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Replaces the old `cross_process` kind:`shared` transitions. |
-| `spawns` | object | optional, working or terminal states only | Subprocess / spawn contract. See "Spawns" below. |
+| `spawns` | object | optional, working / resting / terminal states | Subprocess / spawn contract. See "Spawns" below. |
 | `mark_pr_ready` | bool | optional, not on terminal | When advancing into this state, the backend flips the underlying PR from draft to ready-for-review (`gh pr ready` on GitHub). No-op on non-PR issues. PRs are always created as drafts; this is the only way to flip them. |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
@@ -89,12 +89,9 @@ The parser fails loud on:
 |---|---|---|---|
 | `source` | string | yes | State id, or `"[*]"` for the entry sentinel. |
 | `destination` | string | yes | State id, or `"[*]"` for the exit sentinel. |
-| `type` | string | yes | `"claim"`, `"advance"`, `"event"`, `"cross_process"` |
+| `type` | string | yes | `"claim"`, `"advance"`, `"event"` |
 | `label` | string | optional except on `event` | Human-readable transition label. When absent (and the type isn't `event`), the parser auto-generates a structural label: `{role(s)} claims {source}` for claim, `{role(s)} → {destination}` for advance, `{to\|from} process {other}` for cross-process. Override when the structural default reads awkwardly. |
-| `hitl` | bool | optional, default false | Marks the transition as a HITL gate. Per principle 11, gating is an overlay; the transition type is unchanged. |
-| `gate` | string | required when `hitl=true` | The HCP catalog's `gate_name` for this gate. Must be absent on non-hitl transitions. |
-| `kind` | string | required when `type=cross_process` | `"shared"` (same work item continues on the other process) or `"spawn"` (new work item starts there). |
-| `process` | string | required when `type=cross_process` | The name of the other process. |
+| `gate` | string | optional | The HCP catalog's `gate_name` for this gate. **Presence of `gate` marks the transition as HITL-gated**; absence means ungated. (Replaces the old separate `hitl` boolean.) |
 
 Terminal sinks (`state → [*]: terminal (X)`) are **implicit**: the parser
 expects them not to be authored. The emitter generates them from each
@@ -102,8 +99,8 @@ terminal state's `terminal_taxonomy`.
 
 ## Spawns
 
-A working or terminal state can declare a `spawns` object to create a
-child issue on another process:
+A working, resting, or terminal state can declare a `spawns` object to
+create a child issue on another process:
 
 ```json
 "implementing": {
@@ -114,20 +111,28 @@ child issue on another process:
     "process": "pr",
     "issue_type": "pr",
     "initial_state": "draft",
-    "on_terminal": {"staged": "staged"}
+    "advance_on": {"staged": "staged"}
   }
 }
 ```
 
-**Working-state spawn** (subprocess): the parent stays in this state while
-the child runs. `on_terminal` is REQUIRED and must exhaustively cover
-every terminal of the child process. When the child reaches a terminal,
-`workflow advance` on the child auto-advances the parent to the mapped
-state.
+**Working-state spawn** (subprocess): the parent agent stays in the
+working state while the child runs. `advance_on` is optional and
+**selective** — when the child reaches a terminal listed in the map, the
+framework auto-advances the parent to the mapped state. Child terminals
+not in the map keep the parent in its current state (the agent handles
+the advance manually).
+
+**Resting-state spawn** (waiting queue): the parent waits in a resting
+state while the child runs. Same selective `advance_on` semantic, but
+the auto-advance is **event-style** (no agent claim). Targets MUST be
+non-working — auto-advancing into a working state would bypass the
+claim-before-working invariant. Typical use: a refinement state spawns
+a spike on inner-loop and waits for findings.
 
 **Terminal-state spawn** (independent): the parent closes when it reaches
 this terminal, then a fresh child issue is created on the target process.
-`on_terminal` is FORBIDDEN (the parent has nothing left to advance to).
+`advance_on` is FORBIDDEN (the parent has nothing left to advance to).
 Typical use: incident `stabilized` terminal spawns a postmortem.
 
 The child issue carries a `parent-of:<parent-id>` label and a `Refs
@@ -142,9 +147,9 @@ Use `workflow spawn --issue <parent>` to create the child explicitly.
 | 2 (transition types) | Claim must be resting → working. Role-action must originate in working and land in resting or terminal. External must originate in resting (or `[*]`) and land in resting or terminal (or `[*]`). Cross-process must touch a resting state on the non-`[*]` side. | ERROR |
 | 3 (claim before working) | Every working state is the destination of at least one CLAIM transition; otherwise the working state is unreachable via the documented protocol. | ERROR |
 | 8 (terminal taxonomy) | Every terminal state has a taxonomy tag. Without it, the terminal is incomplete. | parse error (terminal taxonomy is required in JSON) |
-| 9 (cross-process metadata) | Every cross-process transition declares `kind` (`shared` or `spawn`) and `process`. | parse error |
-| 11.1 (irreversible needs `[hitl]`) | Transitions landing on an irreversible destination must have `hitl: true`. | WARNING |
-| 11.2 (legend ↔ catalog) | The gate names on `hitl: true` transitions match the HCP catalog's gate_names. | WARNING |
+| 9 (cross-process interfaces) | Shared handovers use `handoff: true` on the resting state; spawns use `spawns: {...}`. The legacy `cross_process` transition type is rejected with a migration hint. | parse error |
+| 11.1 (irreversible needs a gate) | Transitions landing on an irreversible destination must declare a `gate`. | WARNING |
+| 11.2 (legend ↔ catalog) | The gate names on gated transitions match the HCP catalog's gate_names. | WARNING |
 | 11.3 (reversibility on gate destinations) | States named as gate destinations have a reversibility declared. | WARNING |
 | 11.4 (level info NOT on diagram) | No state's notes mention `block` or `audit` (those belong in trust grants, not diagrams). | WARNING |
 
@@ -179,21 +184,39 @@ CLAIM transitions out of this resting state (e.g., `implementing`'s
 }
 ```
 
-Both files reference the state in their transitions:
+Both files mark the shared state with `handoff: true`:
+
+```json
+// Sender (refinement)
+"ready_for_dev": {
+  "class": "resting",
+  "reversibility": "reversible-slow",
+  "handoff": true
+}
+
+// Receiver (inner-loop)
+"ready_for_dev": {
+  "class": "resting",
+  "reversibility": "reversible-slow",
+  "handoff": true
+}
+```
+
+Each side then references the state in its own transitions:
 
 ```json
 // Sender
 {"source": "refining", "destination": "ready_for_dev", "type": "advance",
- "label": "PM marks ready", "hitl": true, "gate": "ready_for_dev"}
-{"source": "ready_for_dev", "destination": "[*]", "type": "cross_process",
- "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"}
+ "label": "PM marks ready", "gate": "ready_for_dev"}
 
 // Receiver
-{"source": "[*]", "destination": "ready_for_dev", "type": "cross_process",
- "label": "from process refinement", "kind": "shared", "process": "refinement"}
 {"source": "ready_for_dev", "destination": "implementing", "type": "claim",
  "label": "developer claims ready_for_dev"}
 ```
+
+No `[*]` cross-process transitions are needed — the state itself is the
+contract. The validator confirms each `handoff: true` state has at least
+one partner process.
 
 Conventions:
 
@@ -216,7 +239,7 @@ a pre-commit hook or CI check.
 
 The emitter:
 - Emits the cross-process legend block from cross-process transitions.
-- Emits the HITL legend block from `hitl: true` transitions and their
+- Emits the HITL legend block from gated transitions (those with `gate`) and their
   destination states' reversibility.
 - Emits each transition in JSON order. `[hitl]` is appended to gated
   transition labels.

@@ -65,13 +65,13 @@ def _build_workflow() -> StateMachine:
             source="refining",
             destination="ready_for_dev",
             label="PM marks ready",
-            is_gated=True,
+            gate_name="ready_for_dev",
         ),
         Transition(
             source="implementing",
             destination="promoted",
             label="PO promotes",
-            is_gated=True,
+            gate_name="experiment-verdict",
         ),
     ]
     return workflow
@@ -832,7 +832,7 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
             source="working",
             destination="logged",
             label="log finding",
-            is_gated=True,
+            gate_name="logged",
         ),
     ]
     catalog = HCPCatalog(process_name="t")

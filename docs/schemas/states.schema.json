@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://blemees.io/schemas/blemees-workflow/states.schema.json",
   "title": "blemees-workflow state machine",
-  "description": "Schema for `*-states.json` files. Provides editor / IDE feedback on structure and enum values; cross-field rules (terminal-taxonomy presence, claim-only-on-resting, gate-only-when-hitl, cross_process metadata, etc.) are enforced by the Python parser + validator and surface via `workflow validate`.",
+  "description": "Schema for `*-states.json` files. Provides editor / IDE feedback on structure and enum values; cross-field rules (terminal-taxonomy presence, role/issue_types/reversibility placement, handoff partner check, spawns.advance_on key/value resolution, etc.) are enforced by the Python parser + validator and surface via `workflow validate`.",
   "type": "object",
   "additionalProperties": true,
   "required": ["states", "transitions"],
@@ -78,15 +78,15 @@
         },
         "spawns": {
           "type": "object",
-          "description": "Subprocess / spawn contract. Only valid on working or terminal states. Working states wait for the child to close, then auto-advance per `on_terminal`. Terminal states spawn an independent follow-up (no `on_terminal`).",
+          "description": "Subprocess / spawn contract. Valid on working, resting, or terminal states. Working AND resting states optionally declare `advance_on` to auto-advance the parent on selected child terminals; unmapped terminals keep the parent put. Resting-state `advance_on` targets must be non-working (event-style transition). Terminal states spawn an independent follow-up (no `advance_on`).",
           "required": ["process", "issue_type", "initial_state"],
           "properties": {
             "process": {"type": "string", "description": "Target process name."},
             "issue_type": {"type": "string", "description": "Child issue type (must be in target process's accepted types)."},
             "initial_state": {"type": "string", "description": "Child's starting state on the target process (must be resting)."},
-            "on_terminal": {
+            "advance_on": {
               "type": "object",
-              "description": "Map {child-terminal-state: parent-next-state}. Required on working-state spawns; must exhaustively cover every terminal on the target process. Forbidden on terminal-state spawns.",
+              "description": "Map {child-terminal-state: parent-next-state}. Selective auto-advance — parent advances only on listed child terminals; unmapped terminals keep the parent put. Forbidden on terminal-state spawns.",
               "additionalProperties": {"type": "string"}
             }
           }
@@ -112,28 +112,16 @@
           "description": "State id, or `[*]` for the exit sentinel."
         },
         "type": {
-          "enum": ["claim", "advance", "event", "cross_process"],
-          "description": "Transition type per state-machine-principles.md#2."
+          "enum": ["claim", "advance", "event"],
+          "description": "Transition type per state-machine-principles.md#2. Cross-process relationships are not transitions — see `State.handoff` and `State.spawns`."
         },
         "label": {
           "type": "string",
-          "description": "Human-readable transition label. Optional except on `external` transitions (which have no auto-default). When absent, the parser auto-generates a structural label (e.g., `{role} claims {source}` for claim; `{role} → {dest}` for advance)."
-        },
-        "hitl": {
-          "type": "boolean",
-          "description": "Marks the transition as a HITL gate. `gate` becomes required when true."
+          "description": "Human-readable transition label. Optional except on `event` transitions (which have no auto-default). When absent, the parser auto-generates a structural label (e.g., `{role} claims {source}` for claim; `{role} → {dest}` for advance)."
         },
         "gate": {
           "type": "string",
-          "description": "HCP catalog `gate_name`. Required when `hitl: true` (enforced by parser)."
-        },
-        "kind": {
-          "enum": ["shared", "spawn"],
-          "description": "Required when `type` is `cross_process`. `shared` = same work item continues on the other process; `spawn` = new work item starts there."
-        },
-        "process": {
-          "type": "string",
-          "description": "Required when `type` is `cross_process`. Name of the other process."
+          "description": "HCP catalog `gate_name`. Presence marks this transition as HITL-gated; absence means ungated. Replaces the old `hitl` boolean."
         }
       }
     }

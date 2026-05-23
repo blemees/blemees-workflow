@@ -39,7 +39,8 @@ def _irreversible_workflow_without_hitl() -> StateMachine:
             source="working",
             destination="released",
             label="agent releases",
-            is_gated=False,  # the violation
+            # No gate_name → is_gated=False; combined with irreversible
+            # destination this is the principle-11 violation under test.
             transition_type=TransitionType.ADVANCE,
         )
     )
@@ -54,16 +55,16 @@ def test_irreversible_destination_without_hitl_fires_warning() -> None:
     assert any("irreversible" in f.message.lower() and "released" in f.message for f in matches)
 
 
-def test_irreversible_destination_with_hitl_passes() -> None:
+def test_irreversible_destination_with_gate_passes() -> None:
     workflow = _irreversible_workflow_without_hitl()
-    # Re-emit the transition with the gate marker.
+    # Re-emit the transition with the gate set → marks it as HITL-gated.
     workflow.transitions = [
         Transition(
             source="working",
             destination="released",
             label="agent releases",
-            is_gated=True,
             transition_type=TransitionType.ADVANCE,
+            gate_name="release",
         )
     ]
     findings = validate_state_machine(workflow, catalog=None, grants={})
@@ -197,5 +198,69 @@ def test_runtime_two_claim_singletons_errors() -> None:
         f.severity is Severity.ERROR
         and f.principle_cite == "hitl-principles.md#6"
         and "singleton" in f.message.lower()
+        for f in findings
+    )
+
+
+def test_resting_spawn_cannot_advance_into_working() -> None:
+    """Resting-state spawn's advance_on targets must be non-working —
+    auto-advancing into a working state would bypass the
+    claim-before-working invariant."""
+    from workflow.core.model.state_machine import Spawn
+
+    # Parent process with a resting state that spawns and tries to advance
+    # to a working state.
+    parent = StateMachine(name="parent")
+    parent.states = {
+        "waiting": State(
+            name="waiting",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.REVERSIBLE_FAST,
+            spawns=Spawn(
+                process="child",
+                issue_type="bug",
+                initial_state="queue",
+                advance_on=(("done", "doing"),),
+            ),
+        ),
+        "doing": State(
+            name="doing",
+            state_class=StateClass.WORKING,
+            roles=("worker",),
+            issue_types=("bug",),
+        ),
+    }
+    # Child process with the right type + initial state + terminal.
+    child = StateMachine(name="child")
+    child.states = {
+        "queue": State(
+            name="queue",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        ),
+        "doing_child": State(
+            name="doing_child",
+            state_class=StateClass.WORKING,
+            roles=("worker",),
+            issue_types=("bug",),
+        ),
+        "done": State(
+            name="done",
+            state_class=StateClass.TERMINAL,
+            reversibility=ReversibilityClass.REVERSIBLE_FAST,
+            terminal_taxonomy=__import__(
+                "workflow.core.model.state_machine", fromlist=["TerminalTaxonomy"]
+            ).TerminalTaxonomy.SHIPPED,
+            close_reason="completed",
+        ),
+    }
+    findings = validate_state_machine(
+        parent,
+        catalog=None,
+        sibling_machines={"parent": parent, "child": child},
+    )
+    assert any(
+        f.principle_cite == "state-machine-principles.md#3"
+        and "bypassing the claim-before-working invariant" in f.message
         for f in findings
     )

@@ -55,10 +55,6 @@ class AvailableTransition:
     # destination is unrestricted, isn't a working state, or is `[*]`.
     destination_roles: tuple[str, ...] = ()
 
-    # Cross-process metadata (None when transition isn't CROSS_PROCESS)
-    cross_process_kind: str | None = None
-    cross_process_other: str | None = None
-
     @property
     def grant_relaxed(self) -> bool:
         """True when an active trust grant changed the effective level."""
@@ -120,8 +116,6 @@ def available_transitions(
                     dst_state.terminal_taxonomy if dst_state else None
                 ),
                 destination_roles=dst_state.roles if dst_state else (),
-                cross_process_kind=t.cross_process_kind,
-                cross_process_other=t.cross_process_other,
             )
         )
     return out

@@ -147,9 +147,9 @@ def emit_process_map(processes: list[Any]) -> str:
     # 1. Shared handoffs: resting states marked `handoff: true` that appear
     #    in two or more processes. Render as bidirectional thick edges
     #    between every pair of declaring processes. Symbol: `===`.
-    # 2. Spawn cross_process transitions: working / terminal states that
-    #    spawn a new issue on another process. Render as dashed directed
-    #    edges. Symbol: `-.->`.
+    # 2. Spawns: working / terminal states with `spawns: {...}` that create
+    #    a new issue on another process. Render as dashed directed edges.
+    #    Symbol: `-.->`.
     edges: set[tuple[str, str, str, str]] = set()
 
     # Handoffs — pair every (process, other) declaring the same state.
@@ -401,7 +401,7 @@ def _section_cross_process(sm: StateMachine) -> list[str]:
                 f"as `{sp.issue_type}` issue at `{sp.initial_state}`"
             )
             out.append(head)
-            for child_term, parent_next in sp.on_terminal:
+            for child_term, parent_next in sp.advance_on:
                 out.append(
                     f"    - on child `{child_term}` → parent `{parent_next}`"
                 )

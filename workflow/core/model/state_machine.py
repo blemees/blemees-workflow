@@ -72,7 +72,6 @@ class TransitionType(Enum):
     CLAIM = "claim"  # resting → working
     ADVANCE = "advance"  # working → resting or terminal (agent-driven)
     EVENT = "event"  # system/time event (fired by automation, not an agent)
-    CROSS_PROCESS = "cross_process"  # to/from another process's workflow
 
 
 @dataclass(frozen=True)
@@ -80,13 +79,21 @@ class Spawn:
     """Subprocess / spawn contract carried by a working or terminal state.
 
     On a **working** state: the parent stays in the working state while a
-    child issue runs on another process. When the child reaches a
-    terminal, the parent auto-advances to the destination given by
-    `on_terminal[<child-terminal-name>]`. The map MUST cover every terminal
-    of the child process (validator enforces exhaustive coverage).
+    child issue runs on another process. When the child reaches a terminal,
+    the parent auto-advances ONLY if that terminal appears in `advance_on`
+    — the field is selective, not exhaustive. Child terminals not in the
+    map leave the parent in its current state for the agent to advance
+    manually.
+
+    On a **resting** state: the parent waits at this resting queue while
+    a child issue runs. When the child reaches a terminal in `advance_on`,
+    the framework fires an EVENT-style advance on the parent (no agent
+    claim needed). `advance_on` targets MUST be non-working states (you
+    can't auto-advance into a working state — that would bypass the
+    claim-before-working invariant).
 
     On a **terminal** state: an "independent spawn" — when the parent
-    closes, a new child issue is created. `on_terminal` is empty because
+    closes, a new child issue is created. `advance_on` is empty because
     the parent is already terminating; there's nothing left to advance.
     Typical use: postmortem opens when an incident closes.
     """
@@ -94,10 +101,10 @@ class Spawn:
     process: str            # target process name
     issue_type: str         # issue type to create on the target
     initial_state: str      # initial state to create the child at
-    on_terminal: tuple[tuple[str, str], ...] = ()  # (child_terminal, parent_next_state)
+    advance_on: tuple[tuple[str, str], ...] = ()  # (child_terminal, parent_next_state)
 
     def parent_next_state(self, child_terminal: str) -> str | None:
-        for k, v in self.on_terminal:
+        for k, v in self.advance_on:
             if k == child_terminal:
                 return v
         return None
@@ -165,25 +172,25 @@ class State:
 class Transition:
     """A directed edge from one state to another with a label.
 
-    `is_gated` is True if the transition carries the `[hitl]` marker in the
-    workflow file. The HCP catalog row corresponding to this transition lives
-    in the process doc; the validator cross-references the two.
+    `gate_name` names the HCP catalog gate this transition fires (when set).
+    Presence of `gate_name` IS the HITL marker — the standalone `hitl` flag
+    was removed. The validator cross-references the gate name against the
+    HCP catalog.
 
-    `cross_process_kind` and `cross_process_other` carry the principle-9
-    handoff metadata for CROSS_PROCESS transitions. `kind` is `"shared"`
-    (same issue continues on the other process's diagram) or `"spawn"`
-    (this transition creates a new issue on the other diagram). `other`
-    names the other process. Both are None for non-CROSS_PROCESS transitions.
+    Cross-process relationships no longer use a transition type — shared
+    handovers live on resting states (`handoff: true`) and subprocess /
+    independent spawns live on working / terminal states (`spawns: {...}`).
     """
 
     source: str  # State name
     destination: str  # State name
-    label: str  # The transition label, with [hitl] stripped if present
-    is_gated: bool = False
+    label: str  # The transition label
     transition_type: TransitionType = TransitionType.ADVANCE
-    gate_name: str | None = None  # HCP catalog gate_name when is_gated
-    cross_process_kind: str | None = None  # "shared" | "spawn" | None
-    cross_process_other: str | None = None  # name of the other process
+    gate_name: str | None = None  # HCP catalog gate_name; presence = HITL-gated
+
+    @property
+    def is_gated(self) -> bool:
+        return self.gate_name is not None
 
 
 @dataclass

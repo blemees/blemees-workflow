@@ -1042,8 +1042,6 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
                     else None
                 ),
                 "destination_roles": list(a.destination_roles),
-                "cross_process_kind": a.cross_process_kind,
-                "cross_process_other": a.cross_process_other,
             }
         )
     return out
@@ -1089,13 +1087,6 @@ def _print_next_actions(
         return
 
     for a in advance_actions:
-        if a.transition_type is TransitionType.CROSS_PROCESS and a.destination == "[*]":
-            kind = a.cross_process_kind or "shared"
-            verb = "shared with" if kind == "shared" else "spawning into"
-            print(f"  (cross-process exit) {verb} {a.cross_process_other!r}")
-            print(f"    advance --to {a.destination}  # label: {a.label!r}")
-            continue
-
         if a.is_gated:
             lvl = a.effective_level.value if a.effective_level else "?"
             tag = f"[HITL {lvl}]"
@@ -1268,7 +1259,7 @@ def _do_advance(args: argparse.Namespace) -> int:
 
         # If this advance just landed the issue on a terminal AND the issue
         # has a `parent-of:` label, propagate to the parent per the parent
-        # state's spawns.on_terminal mapping.
+        # state's spawns.advance_on mapping.
         if not ctx["dry_run"]:
             _propagate_to_parent_on_terminal(ctx, args.issue, args.destination)
 
@@ -1282,7 +1273,9 @@ def _propagate_to_parent_on_terminal(
     ctx: dict, child_id: str, child_destination: str
 ) -> None:
     """If the child issue advanced to a terminal AND has a parent link,
-    auto-advance the parent per `spawns.on_terminal`.
+    auto-advance the parent per `spawns.advance_on` — but only when the
+    child's terminal is in that map. Unmapped terminals leave the parent
+    in its current state for manual handling.
 
     Lazy / eager: triggered at child-advance time. The parent's transition
     fires as a separate operation (a system-driven event); we log success/
@@ -1336,7 +1329,7 @@ def _propagate_to_parent_on_terminal(
         if not parent_id:
             return
 
-        # Resolve the parent's spawns.on_terminal mapping for this terminal.
+        # Resolve the parent's spawns.advance_on mapping for this terminal.
         parent_now = backend.read_issue(parent_id)
         if parent_now.state is None:
             return
@@ -1351,7 +1344,8 @@ def _propagate_to_parent_on_terminal(
         if parent_next is None:
             print(
                 f"  (parent #{parent_id} not auto-advanced: child terminal "
-                f"{child_destination!r} isn't in spawns.on_terminal.)"
+                f"{child_destination!r} isn't in spawns.advance_on — "
+                f"parent stays in its current state.)"
             )
             return
 
@@ -1364,7 +1358,7 @@ def _propagate_to_parent_on_terminal(
             destination=parent_next,
             body_text=(
                 f"**Auto-advance**: child issue #{child_id} reached terminal "
-                f"`{child_destination}` → parent advanced per spawns.on_terminal."
+                f"`{child_destination}` → parent advanced per spawns.advance_on."
             ),
             actor=None,
         )

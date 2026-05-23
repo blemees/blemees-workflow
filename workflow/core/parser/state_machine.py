@@ -41,8 +41,8 @@ are gone — the schema demands intent.
      "label": "product-manager marks ready", "hitl": true},
     {"source": "refining", "destination": "wont_fix", "type": "advance",
      "label": "product-manager marks wont-fix", "hitl": true},
-    {"source": "ready_for_dev", "destination": "[*]", "type": "cross_process",
-     "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"}
+    {"source": "ready_for_dev", "destination": "refining", "type": "claim",
+     "label": "product-manager claims (revision)"}
   ]
 }
 ```
@@ -80,22 +80,16 @@ are gone — the schema demands intent.
 ### Transitions
 - `source` (string, required): state id or `"[*]"`.
 - `destination` (string, required): state id or `"[*]"`.
-- `type` (string, required): `"claim"` | `"advance"` | `"event"` |
-  `"cross_process"`.
+- `type` (string, required): `"claim"` | `"advance"` | `"event"`.
 - `label` (string, required): the human-readable transition label.
 - `hitl` (bool, optional, default false): marks the transition as a HITL gate.
   Per `hitl-principles.md`, only claim and role-action transitions are
   typically gated; the validator enforces consistency with the HCP catalog.
-- `kind` (string, required when `type=cross_process`): `"shared"` (same issue
-  continues on the other process) or `"spawn"` (new issue starts there).
-- `process` (string, required when `type=cross_process`): name of the other
-  process.
-
 The legend that mermaid uses (HITL gates block, cross-process interfaces
 block) is **not** authored in JSON. Both legends are derived: HITL gates
 from the union of `hitl=true` transitions and the destination state's
-reversibility; cross-process from the cross_process transitions. The
-emitter regenerates them for visualization.
+reversibility; cross-process from each state's `handoff` flag and
+`spawns` field. The emitter regenerates them for visualization.
 """
 
 from __future__ import annotations
@@ -138,7 +132,6 @@ _TRANSITION_TYPE = {
     "claim": TransitionType.CLAIM,
     "advance": TransitionType.ADVANCE,
     "event": TransitionType.EVENT,
-    "cross_process": TransitionType.CROSS_PROCESS,
 }
 
 
@@ -456,24 +449,30 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
 def _parse_spawns(
     state_id: str, state_class: StateClass, raw: Any
 ) -> Spawn | None:
-    """Parse the optional `spawns` field on a working or terminal state.
+    """Parse the optional `spawns` field on any non-`[*]` state.
 
-    Working states require `on_terminal` (the parent advances when the child
-    closes). Terminal states forbid `on_terminal` (the parent is already
-    closed). Resting states forbid `spawns` entirely.
+    Working and resting states may declare `advance_on` (selective auto-
+    advance on the listed child terminals; everything else keeps the
+    parent put). Resting-state `advance_on` targets must be non-working
+    states (event-style transition; no claim). Terminal states forbid
+    `advance_on` (the parent is already closed). Cross-state-class
+    validation of `advance_on` targets lives in the validator.
     """
     if raw is None:
         return None
-    if state_class is StateClass.RESTING:
-        raise ParseError(
-            f"State {state_id!r}: `spawns` is not valid on resting states "
-            f"(spawns happen from working states or as terminal-state "
-            f"independent spawns)."
-        )
     if not isinstance(raw, dict):
         raise ParseError(
             f"State {state_id!r}: `spawns` must be an object "
             f"(got {type(raw).__name__})."
+        )
+    # Reject the legacy field outright so authors don't carry the field
+    # forward with the now-different semantic.
+    if "on_terminal" in raw:
+        raise ParseError(
+            f"State {state_id!r}: `spawns.on_terminal` was renamed to "
+            f"`spawns.advance_on`, and the semantic changed: the map is "
+            f"now SELECTIVE (advance parent only on these child terminals; "
+            f"others keep the parent put), not exhaustive."
         )
     process = raw.get("process")
     if not isinstance(process, str) or not process.strip():
@@ -492,40 +491,41 @@ def _parse_spawns(
             f"(child's starting state)."
         )
 
-    on_terminal_raw = raw.get("on_terminal")
-    on_terminal: list[tuple[str, str]] = []
-    if state_class is StateClass.WORKING:
-        if not isinstance(on_terminal_raw, dict) or not on_terminal_raw:
+    advance_on_raw = raw.get("advance_on")
+    advance_on: list[tuple[str, str]] = []
+    if state_class is StateClass.TERMINAL:
+        if advance_on_raw is not None:
             raise ParseError(
-                f"State {state_id!r}: `spawns.on_terminal` is required "
-                f"on working-state spawns and must be a non-empty object "
-                f"mapping {{child-terminal: parent-next-state}}."
-            )
-        for k, v in on_terminal_raw.items():
-            if not isinstance(k, str) or not k.strip():
-                raise ParseError(
-                    f"State {state_id!r}: `spawns.on_terminal` keys must "
-                    f"be child terminal state names (got {k!r})."
-                )
-            if not isinstance(v, str) or not v.strip():
-                raise ParseError(
-                    f"State {state_id!r}: `spawns.on_terminal[{k!r}]` must "
-                    f"be a parent state name (got {v!r})."
-                )
-            on_terminal.append((k.strip(), v.strip()))
-    else:  # TERMINAL
-        if on_terminal_raw is not None:
-            raise ParseError(
-                f"State {state_id!r}: `spawns.on_terminal` is not valid on "
+                f"State {state_id!r}: `spawns.advance_on` is not valid on "
                 f"terminal-state spawns (the parent is already closed). "
                 f"Remove the field for an independent spawn."
             )
+    else:
+        if advance_on_raw is not None:
+            if not isinstance(advance_on_raw, dict):
+                raise ParseError(
+                    f"State {state_id!r}: `spawns.advance_on` must be an "
+                    f"object mapping {{child-terminal: parent-next-state}} "
+                    f"if present."
+                )
+            for k, v in advance_on_raw.items():
+                if not isinstance(k, str) or not k.strip():
+                    raise ParseError(
+                        f"State {state_id!r}: `spawns.advance_on` keys must "
+                        f"be child terminal state names (got {k!r})."
+                    )
+                if not isinstance(v, str) or not v.strip():
+                    raise ParseError(
+                        f"State {state_id!r}: `spawns.advance_on[{k!r}]` must "
+                        f"be a parent state name (got {v!r})."
+                    )
+                advance_on.append((k.strip(), v.strip()))
 
     return Spawn(
         process=process.strip(),
         issue_type=issue_type.strip(),
         initial_state=initial_state.strip(),
-        on_terminal=tuple(on_terminal),
+        advance_on=tuple(advance_on),
     )
 
 
@@ -544,12 +544,29 @@ def _parse_transition(
         )
 
     type_raw = spec.get("type")
+    if type_raw == "cross_process":
+        raise ParseError(
+            f"transitions[{idx}]: `cross_process` was removed. Shared "
+            f"handovers use `handoff: true` on the resting state; "
+            f"subprocess / independent spawns use `spawns: {{...}}` on "
+            f"the working / terminal state."
+        )
     if not isinstance(type_raw, str) or type_raw not in _TRANSITION_TYPE:
         raise ParseError(
             f"transitions[{idx}]: `type` must be one of "
             f"{sorted(_TRANSITION_TYPE.keys())} (got {type_raw!r})."
         )
     transition_type = _TRANSITION_TYPE[type_raw]
+
+    # `kind` and `process` were cross_process-only metadata. Reject them
+    # outright so authors can't leave them around after migration.
+    if "kind" in spec or "process" in spec:
+        raise ParseError(
+            f"transitions[{idx}]: `kind` and `process` fields were "
+            f"removed along with the cross_process type. Use `handoff: "
+            f"true` on a resting state for shared handovers, or "
+            f"`spawns: {{...}}` on a working / terminal state for spawns."
+        )
 
     # Label is optional for all types except external (which has no good
     # default — it describes the system event that fired). When absent for
@@ -559,11 +576,14 @@ def _parse_transition(
         raise ParseError(f"transitions[{idx}]: `label` must be a string if present.")
     label = label_raw.strip() if isinstance(label_raw, str) else ""
 
-    hitl_raw = spec.get("hitl", False)
-    if not isinstance(hitl_raw, bool):
+    # The standalone `hitl` flag was merged into `gate`: presence of `gate`
+    # IS the HITL marker. Reject `hitl` outright so authors don't carry
+    # the redundant field forward.
+    if "hitl" in spec:
         raise ParseError(
-            f"transitions[{idx}]: `hitl` must be a boolean if present "
-            f"(got {type(hitl_raw).__name__})."
+            f"transitions[{idx}]: `hitl` was removed. The presence of "
+            f"`gate` now marks a transition as HITL-gated — set `gate` "
+            f"to the HCP catalog `gate_name`, omit it for ungated."
         )
 
     gate_name: str | None = None
@@ -574,44 +594,9 @@ def _parse_transition(
                 f"transitions[{idx}]: `gate` must be a non-empty string if present."
             )
         gate_name = gate_raw.strip()
-    if hitl_raw and gate_name is None:
-        raise ParseError(
-            f"transitions[{idx}]: hitl transitions must declare a `gate` field "
-            f"(the HCP catalog gate_name)."
-        )
-    if not hitl_raw and gate_name is not None:
-        raise ParseError(
-            f"transitions[{idx}]: `gate` is only valid on hitl transitions."
-        )
 
-    cross_process_kind: str | None = None
-    cross_process_other: str | None = None
-    if transition_type is TransitionType.CROSS_PROCESS:
-        kind = spec.get("kind")
-        if kind == "shared":
-            raise ParseError(
-                f"transitions[{idx}]: cross_process `kind: shared` was "
-                f"removed. Mark the shared resting state with `handoff: "
-                f"true` on each process's side instead — the state IS the "
-                f"contract; no [*] transition is needed."
-            )
-        if kind != "spawn":
-            raise ParseError(
-                f"transitions[{idx}]: cross_process transitions require "
-                f"`kind: spawn` (got {kind!r}). Shared handovers use the "
-                f"`handoff: true` flag on the resting state."
-            )
-        process = spec.get("process")
-        if not isinstance(process, str) or not process.strip():
-            raise ParseError(
-                f"transitions[{idx}]: cross_process transitions require "
-                f"`process` (the name of the other process)."
-            )
-        cross_process_kind = kind
-        cross_process_other = process.strip()
-
-    # Auto-generate the label when absent (except for external, which has
-    # no good default and stays required for now).
+    # Auto-generate the label when absent (except for event, which has
+    # no good default and stays required).
     if not label:
         if transition_type is TransitionType.EVENT:
             raise ParseError(
@@ -622,8 +607,6 @@ def _parse_transition(
             transition_type,
             source,
             destination,
-            cross_process_kind,
-            cross_process_other,
             states.get(destination),
             states.get(source),
         )
@@ -632,11 +615,8 @@ def _parse_transition(
         source=source,
         destination=destination,
         label=label,
-        is_gated=hitl_raw,
         transition_type=transition_type,
         gate_name=gate_name,
-        cross_process_kind=cross_process_kind,
-        cross_process_other=cross_process_other,
     )
 
 
@@ -644,8 +624,6 @@ def _generate_label(
     transition_type: TransitionType,
     source: str,
     destination: str,
-    cross_process_kind: str | None,
-    cross_process_other: str | None,
     dest_state: State | None,
     source_state: State | None,
 ) -> str:
@@ -653,7 +631,8 @@ def _generate_label(
 
     - CLAIM: `{role(s)} claim {source}` (drawn from destination's roles)
     - ADVANCE: `{role(s)} → {destination}` (drawn from source's roles)
-    - CROSS_PROCESS: `{to|from} process {other}` ([*]-touching form)
+
+    EVENT transitions require an authored label and never reach this path.
     """
     if transition_type is TransitionType.CLAIM:
         if dest_state and dest_state.roles:
@@ -666,13 +645,6 @@ def _generate_label(
             roles_str = ", ".join(source_state.roles)
             return f"{roles_str} → {destination}"
         return f"→ {destination}"
-    if transition_type is TransitionType.CROSS_PROCESS:
-        if source == "[*]":
-            return f"from process {cross_process_other}"
-        if destination == "[*]":
-            return f"to process {cross_process_other}"
-        return f"{cross_process_kind} with process {cross_process_other}"
-    # event falls through; the caller already errored out.
     return ""
 
 

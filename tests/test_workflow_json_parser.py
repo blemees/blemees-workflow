@@ -113,49 +113,53 @@ def test_unknown_endpoint_state_rejected() -> None:
         parse_state_machine(json.dumps(bad))
 
 
-def test_hitl_requires_gate() -> None:
+def test_hitl_field_rejected() -> None:
+    """`hitl` was merged into `gate` — presence of `gate` is the marker.
+    The parser rejects the legacy field outright."""
     bad = _minimal()
     bad["transitions"][2]["hitl"] = True
-    with pytest.raises(ParseError, match="gate"):
+    with pytest.raises(ParseError, match="`hitl` was removed"):
         parse_state_machine(json.dumps(bad))
 
 
-def test_gate_without_hitl_rejected() -> None:
-    bad = _minimal()
-    bad["transitions"][2]["gate"] = "ship"
-    with pytest.raises(ParseError, match="only valid on hitl"):
-        parse_state_machine(json.dumps(bad))
+def test_gate_alone_makes_transition_gated() -> None:
+    """Adding `gate` to a transition marks it as HITL-gated; no `hitl`
+    field needed."""
+    spec = _minimal()
+    spec["transitions"][2]["gate"] = "ship"
+    workflow = parse_state_machine(json.dumps(spec))
+    advance = workflow.transitions[2]
+    assert advance.gate_name == "ship"
+    assert advance.is_gated is True
 
 
-def test_cross_process_requires_metadata() -> None:
+def test_cross_process_transition_type_rejected() -> None:
+    """The `cross_process` transition type was removed in favor of
+    `handoff: true` on resting states and `spawns: {...}` on working /
+    terminal states. The parser rejects authored `cross_process`
+    transitions with a clear migration hint."""
     bad = _minimal()
     bad["transitions"].append(
-        {"source": "c", "destination": "[*]", "type": "cross_process", "label": "to x"}
+        {"source": "c", "destination": "[*]", "type": "cross_process",
+         "label": "to x", "kind": "shared", "process": "x"}
     )
-    with pytest.raises(ParseError, match="cross_process"):
+    with pytest.raises(ParseError, match="cross_process.*removed"):
         parse_state_machine(json.dumps(bad))
 
 
-def test_cross_process_kind_validated() -> None:
-    spec = _minimal()
-    spec["transitions"].append(
-        {
-            "source": "c",
-            "destination": "[*]",
-            "type": "cross_process",
-            "label": "to x",
-            "cross_process": {"kind": "elsewhere", "process": "x"},
-        }
-    )
-    with pytest.raises(ParseError, match="kind"):
-        parse_state_machine(json.dumps(spec))
+def test_kind_field_on_transition_rejected() -> None:
+    """The `kind` field was cross_process-only; reject it outright."""
+    bad = _minimal()
+    bad["transitions"][0]["kind"] = "shared"
+    with pytest.raises(ParseError, match="`kind` and `process` fields were"):
+        parse_state_machine(json.dumps(bad))
 
 
-def test_gates_in_legend_built_from_hitl_transitions() -> None:
+def test_gates_in_legend_built_from_gated_transitions() -> None:
     spec = _minimal()
-    # Make b → c a HITL transition with reversibility on c.
+    # Make b → c a HITL transition by setting `gate` (and update
+    # reversibility on c).
     spec["states"]["c"]["reversibility"] = "reversible-slow"
-    spec["transitions"][2]["hitl"] = True
     spec["transitions"][2]["gate"] = "ship"
     workflow = parse_state_machine(json.dumps(spec))
     assert workflow.gates_in_legend == {"ship": ReversibilityClass.REVERSIBLE_SLOW}
@@ -179,16 +183,6 @@ def test_parses_real_refinement_workflow(refinement_workflow_path: Path) -> None
     assert workflow.states["ready_bounced"].handoff is True
 
 
-def test_shared_cross_process_kind_rejected() -> None:
-    spec = _minimal()
-    spec["transitions"].append({
-        "source": "c", "destination": "[*]", "type": "cross_process",
-        "label": "to other", "kind": "shared", "process": "other",
-    })
-    with pytest.raises(ParseError, match="kind: shared.*removed"):
-        parse_state_machine(json.dumps(spec))
-
-
 def test_handoff_only_on_resting() -> None:
     spec = _minimal()
     spec["states"]["b"]["handoff"] = True  # b is working
@@ -196,38 +190,57 @@ def test_handoff_only_on_resting() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_spawns_on_working_requires_on_terminal() -> None:
+def test_spawns_on_working_advance_on_optional() -> None:
+    """advance_on is now selective and optional — empty/absent means
+    'never auto-advance the parent'."""
     spec = _minimal()
     spec["states"]["b"]["spawns"] = {
         "process": "other",
         "issue_type": "bug",
         "initial_state": "queue",
     }
-    with pytest.raises(ParseError, match="spawns.on_terminal.*required"):
-        parse_state_machine(json.dumps(spec))
+    workflow = parse_state_machine(json.dumps(spec))
+    assert workflow.states["b"].spawns is not None
+    assert workflow.states["b"].spawns.advance_on == ()
 
 
-def test_spawns_on_terminal_forbids_on_terminal_map() -> None:
+def test_legacy_on_terminal_rejected() -> None:
+    """The renamed-from `on_terminal` is rejected with a migration hint."""
     spec = _minimal()
-    spec["states"]["c"]["spawns"] = {
+    spec["states"]["b"]["spawns"] = {
         "process": "other",
         "issue_type": "bug",
         "initial_state": "queue",
         "on_terminal": {"done": "raw"},
     }
-    with pytest.raises(ParseError, match="on_terminal.*not valid on terminal"):
+    with pytest.raises(ParseError, match="renamed to.*advance_on"):
         parse_state_machine(json.dumps(spec))
 
 
-def test_spawns_forbidden_on_resting() -> None:
+def test_spawns_on_terminal_forbids_advance_on() -> None:
+    spec = _minimal()
+    spec["states"]["c"]["spawns"] = {
+        "process": "other",
+        "issue_type": "bug",
+        "initial_state": "queue",
+        "advance_on": {"done": "raw"},
+    }
+    with pytest.raises(ParseError, match="advance_on.*not valid on terminal"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_spawns_allowed_on_resting() -> None:
+    """Resting-state spawns are valid: the parent waits in this state
+    while the child runs."""
     spec = _minimal()
     spec["states"]["a"]["spawns"] = {
         "process": "other",
         "issue_type": "bug",
         "initial_state": "queue",
     }
-    with pytest.raises(ParseError, match="spawns.*not valid on resting"):
-        parse_state_machine(json.dumps(spec))
+    workflow = parse_state_machine(json.dumps(spec))
+    assert workflow.states["a"].spawns is not None
+    assert workflow.states["a"].spawns.process == "other"
 
 
 def test_mark_pr_ready_forbidden_on_terminal() -> None:
@@ -324,4 +337,4 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     assert impl.spawns.process == "pr"
     assert impl.spawns.issue_type == "pr"
     assert impl.spawns.initial_state == "draft"
-    assert impl.spawns.on_terminal == (("staged", "staged"),)
+    assert impl.spawns.advance_on == (("staged", "staged"),)

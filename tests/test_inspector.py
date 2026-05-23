@@ -51,7 +51,6 @@ def _build() -> tuple[StateMachine, HCPCatalog]:
             destination="ready_for_dev",
             label="PM marks ready",
             transition_type=TransitionType.ADVANCE,
-            is_gated=True,
             gate_name="ready_for_dev",
         ),
         Transition(
@@ -59,7 +58,6 @@ def _build() -> tuple[StateMachine, HCPCatalog]:
             destination="wont_fix",
             label="PM marks wont-fix",
             transition_type=TransitionType.ADVANCE,
-            is_gated=True,
             gate_name="wont_fix",
         ),
     ]

@@ -29,7 +29,7 @@
         "process": "pr",
         "issue_type": "pr",
         "initial_state": "draft",
-        "on_terminal": {
+        "advance_on": {
           "staged": "staged"
         }
       }
@@ -42,7 +42,7 @@
         "process": "pr",
         "issue_type": "pr",
         "initial_state": "draft",
-        "on_terminal": {
+        "advance_on": {
           "staged": "staged_experiment"
         }
       }
@@ -60,7 +60,7 @@
         "process": "pr",
         "issue_type": "pr",
         "initial_state": "draft",
-        "on_terminal": {
+        "advance_on": {
           "staged": "staged_hotfix"
         }
       }

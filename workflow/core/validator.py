@@ -379,12 +379,11 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
     - CLAIM: resting → working
     - ADVANCE: working → resting | terminal
     - EVENT: resting → resting | terminal
-    - CROSS_PROCESS: resting → [*] | [*] → resting (handoffs between
-      processes, both endpoints are resting; one side is always [*])
 
     `[*]` endpoints are sentinels, not states, so source/dest checks are
     skipped when an endpoint is `[*]`. ERROR-level — these are hard
-    structural rules.
+    structural rules. Cross-process relationships are not transitions
+    (see `State.handoff` and `State.spawns` for the data model).
     """
     findings: list[ValidationFinding] = []
     for t in state_machine.transitions:
@@ -485,23 +484,6 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
                             location=state_machine.source_path,
                         )
                     )
-
-        # CROSS_PROCESS: one endpoint is [*]; the non-sentinel endpoint must be resting.
-        elif t.transition_type is TransitionType.CROSS_PROCESS:
-            non_sentinel = src_state if src_state is not None else dst_state
-            if non_sentinel is not None and non_sentinel.state_class is not StateClass.RESTING:
-                findings.append(
-                    ValidationFinding(
-                        severity=Severity.ERROR,
-                        principle_cite="state-machine-principles.md#2",
-                        message=(
-                            f"Cross-process transition {t.source!r} → {t.destination!r} "
-                            f"({t.label!r}) must touch a RESTING state on the non-[*] "
-                            f"side; got {non_sentinel.state_class.value}."
-                        ),
-                        location=state_machine.source_path,
-                    )
-                )
 
     return findings
 
@@ -676,11 +658,10 @@ def _check_spawns(
     - issue_type must be in the target's accepted_issue_types (derived
       union of its working-state issue_types).
     - initial_state must exist on the target and be RESTING.
-    - Working-state spawns: on_terminal must EXHAUSTIVELY cover every
-      terminal state on the target process. Any unmapped child terminal
-      is an ERROR.
-    - Each on_terminal value (parent next state) must exist on this
-      state machine.
+    - Working-state spawns: every key in `advance_on` must be a terminal
+      on the target process; every value must be a state on this process.
+      Coverage is NOT required — the map is selective ("advance only on
+      these terminals; everything else keeps the parent put").
     """
     findings: list[ValidationFinding] = []
     for state in state_machine.states.values():
@@ -744,28 +725,18 @@ def _check_spawns(
                 )
             )
 
-        # Working-state spawns require exhaustive on_terminal coverage.
-        if state.state_class is StateClass.WORKING:
+        # Working- AND resting-state spawns: keys must be terminals of
+        # the child; values must be states on the parent process. No
+        # exhaustive coverage required — `advance_on` is selective.
+        # Additionally, resting-state spawn targets must be non-working
+        # (the auto-advance is event-style; can't enter a working state
+        # without a claim).
+        if state.state_class is not StateClass.TERMINAL and spawn.advance_on:
             target_terminals = {
                 s.name for s in target.states.values()
                 if s.state_class is StateClass.TERMINAL
             }
-            declared_terminals = {k for k, _ in spawn.on_terminal}
-            missing = target_terminals - declared_terminals
-            if missing:
-                findings.append(
-                    ValidationFinding(
-                        severity=Severity.ERROR,
-                        principle_cite="state-machine-principles.md#9",
-                        message=(
-                            f"State {state.name!r}: `spawns.on_terminal` "
-                            f"must exhaustively cover every terminal of "
-                            f"process {spawn.process!r}. Missing: "
-                            f"{sorted(missing)}."
-                        ),
-                        location=state_machine.source_path,
-                    )
-                )
+            declared_terminals = {k for k, _ in spawn.advance_on}
             unknown = declared_terminals - target_terminals
             if unknown:
                 findings.append(
@@ -773,24 +744,47 @@ def _check_spawns(
                         severity=Severity.ERROR,
                         principle_cite="state-machine-principles.md#9",
                         message=(
-                            f"State {state.name!r}: `spawns.on_terminal` "
+                            f"State {state.name!r}: `spawns.advance_on` "
                             f"references state(s) {sorted(unknown)} that "
                             f"aren't terminals on process {spawn.process!r}."
                         ),
                         location=state_machine.source_path,
                     )
                 )
-            # Each parent destination must exist on this machine.
-            for child_term, parent_next in spawn.on_terminal:
-                if parent_next not in state_machine.states:
+            for child_term, parent_next in spawn.advance_on:
+                parent_next_state = state_machine.states.get(parent_next)
+                if parent_next_state is None:
                     findings.append(
                         ValidationFinding(
                             severity=Severity.ERROR,
                             principle_cite="state-machine-principles.md#9",
                             message=(
-                                f"State {state.name!r}: `spawns.on_terminal"
+                                f"State {state.name!r}: `spawns.advance_on"
                                 f"[{child_term!r}]` → {parent_next!r} is "
                                 f"not a state on this process."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
+                    continue
+                # Resting-state spawns: auto-advance is event-driven; the
+                # target must not be working (no claim opportunity).
+                if (
+                    state.state_class is StateClass.RESTING
+                    and parent_next_state.state_class is StateClass.WORKING
+                ):
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#3",
+                            message=(
+                                f"State {state.name!r}: resting-state "
+                                f"`spawns.advance_on[{child_term!r}]` → "
+                                f"{parent_next!r} would auto-advance into a "
+                                f"working state, bypassing the "
+                                f"claim-before-working invariant. "
+                                f"Auto-advance must land on a resting or "
+                                f"terminal state."
                             ),
                             location=state_machine.source_path,
                         )
