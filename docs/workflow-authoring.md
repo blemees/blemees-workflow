@@ -75,6 +75,7 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 | `close_reason` | string | required on terminal states, forbidden elsewhere | Backend close-reason. For GitHub: `"completed"` or `"not planned"`. Every terminal closes the tracker's issue with this reason. |
 | `handoff` | bool | optional, resting states only | Marks the state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Replaces the old `cross_process` kind:`shared` transitions. |
 | `spawns` | object | optional, working or terminal states only | Subprocess / spawn contract. See "Spawns" below. |
+| `mark_pr_ready` | bool | optional, not on terminal | When advancing into this state, the backend flips the underlying PR from draft to ready-for-review (`gh pr ready` on GitHub). No-op on non-PR issues. PRs are always created as drafts; this is the only way to flip them. |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
 The parser fails loud on:

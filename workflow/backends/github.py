@@ -314,11 +314,17 @@ class GitHubBackend:
         state: str,
         head: str,
         base: str | None = None,
-        draft: bool = False,
+        draft: bool = True,  # kept for backwards compat; always passed as draft
         extra_labels: list[str] | None = None,
     ) -> str:
         """Create a GitHub PR via `gh pr create --head H --base B --title T
-        --body-file F [--draft] --label L1,L2`.
+        --body-file F --draft --label L1,L2`.
+
+        Every framework-created PR opens as a GitHub draft PR regardless of
+        the `draft` argument — the framework's PR lifecycle starts at
+        `draft` and the `mark_pr_ready` state field is what flips the PR
+        to ready-for-review (via `mark_ready_for_review`). The `draft`
+        parameter is retained for protocol compatibility but ignored.
 
         The framework's `state:<name>` label is attached atomically with
         creation (gh `pr create` accepts `--label`). Labels are ensured to
@@ -356,8 +362,10 @@ class GitHubBackend:
             ]
             if base:
                 args += ["--base", base]
-            if draft:
-                args.append("--draft")
+            # Always create PRs as drafts — the framework's PR lifecycle
+            # starts at `draft`, and the `mark_pr_ready` state field is the
+            # explicit signal to flip the PR to ready-for-review.
+            args.append("--draft")
             output = self._gh(*args)
         finally:
             try:
@@ -445,6 +453,29 @@ class GitHubBackend:
         # Close the issue when the advance lands on a terminal-done state.
         if change.close_issue:
             self.close_issue(issue_id, reason=change.close_reason)
+
+        # Flip the PR from draft → ready-for-review when the destination
+        # state declared `mark_pr_ready: true`. No-op (logged warning) when
+        # the issue isn't actually a PR — gh errors out gracefully.
+        if change.set_pr_ready:
+            self.mark_pr_ready(issue_id)
+
+    def mark_pr_ready(self, pr_id: str) -> None:
+        """Flip the PR from draft to ready-for-review via `gh pr ready`.
+
+        Non-fatal: if the issue isn't a PR, gh exits non-zero — we log
+        and continue. This keeps the framework's "set_pr_ready on every
+        mark_pr_ready state" semantic from breaking advances on
+        non-PR issues that happen to land on a state with the flag.
+        """
+        try:
+            self._gh("pr", "ready", str(pr_id), "--repo", self.repo)
+        except BackendError as exc:
+            logger.warning(
+                "gh pr ready %s failed (non-fatal; not a PR or already ready?): %s",
+                pr_id,
+                exc,
+            )
 
     def post_comment(self, issue_id: str, body: str) -> None:
         with tempfile.NamedTemporaryFile(

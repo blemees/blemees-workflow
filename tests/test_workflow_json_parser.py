@@ -230,6 +230,20 @@ def test_spawns_forbidden_on_resting() -> None:
         parse_state_machine(json.dumps(spec))
 
 
+def test_mark_pr_ready_forbidden_on_terminal() -> None:
+    spec = _minimal()
+    spec["states"]["c"]["mark_pr_ready"] = True
+    with pytest.raises(ParseError, match="mark_pr_ready.*not valid on terminal"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_mark_pr_ready_parses_on_resting() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["mark_pr_ready"] = True
+    workflow = parse_state_machine(json.dumps(spec))
+    assert workflow.states["a"].mark_pr_ready is True
+
+
 def test_pr_process_accepts_pr_issue_type(workflow_dir: Path) -> None:
     """The PR process's working states accept the `pr` type; the derived
     umbrella reflects it."""

@@ -410,6 +410,18 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
 
     spawns = _parse_spawns(state_id, state_class, spec.get("spawns"))
 
+    mark_pr_ready_raw = spec.get("mark_pr_ready", False)
+    if not isinstance(mark_pr_ready_raw, bool):
+        raise ParseError(
+            f"State {state_id!r}: `mark_pr_ready` must be a boolean if present "
+            f"(got {type(mark_pr_ready_raw).__name__})."
+        )
+    if mark_pr_ready_raw and state_class is StateClass.TERMINAL:
+        raise ParseError(
+            f"State {state_id!r}: `mark_pr_ready` is not valid on terminal "
+            f"states (terminals have already reached their final form)."
+        )
+
     notes_raw = spec.get("notes", [])
     if notes_raw is None:
         notes_raw = []
@@ -436,6 +448,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         close_reason=close_reason,
         handoff=handoff_raw,
         spawns=spawns,
+        mark_pr_ready=mark_pr_ready_raw,
         notes=notes,
     )
 

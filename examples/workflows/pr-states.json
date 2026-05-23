@@ -13,7 +13,8 @@
     },
     "needs_review": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "mark_pr_ready": true
     },
     "reviewing": {
       "class": "working",

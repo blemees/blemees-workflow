@@ -81,6 +81,11 @@ class MarkerChange:
     # provided reason ("completed" / "not planned" for GitHub).
     close_issue: bool = False
     close_reason: str | None = None
+    # Set when advancing into a state with `mark_pr_ready: true`. The
+    # GitHub backend interprets this as `gh pr ready <id>` — flipping the
+    # PR from draft to ready-for-review. No-op when the issue isn't a
+    # pull request.
+    set_pr_ready: bool = False
 
 
 @dataclass(frozen=True)

@@ -339,6 +339,7 @@ def _plan_advance(
         # role no longer "owns" the issue once it's resting/terminal.
         leaving_working = _is_working_state(state_machine, transition.source)
         close, reason = _terminal_close_info(state_machine, transition.destination)
+        dest = state_machine.states.get(transition.destination)
         change = MarkerChange(
             set_state=transition.destination,
             clear_awaiting_gate=True,
@@ -348,6 +349,7 @@ def _plan_advance(
             clear_last_state=leaving_working,
             close_issue=close,
             close_reason=reason,
+            set_pr_ready=bool(dest and dest.mark_pr_ready),
         )
         audit = (
             f"## state advance: {transition.source} → {transition.destination}\n\n"
@@ -452,6 +454,7 @@ def _advance_audit_gated(
     # Audit-gated advance always leaves a working state (per principle 2,
     # role-action transitions originate in WORKING); clear the claim.
     close, reason = _terminal_close_info(state_machine, transition.destination)
+    dest = state_machine.states.get(transition.destination)
     change = MarkerChange(
         set_state=transition.destination,
         set_audit_pending=hcp.gate_name,
@@ -459,6 +462,7 @@ def _advance_audit_gated(
         clear_last_state=True,
         close_issue=close,
         close_reason=reason,
+        set_pr_ready=bool(dest and dest.mark_pr_ready),
     )
     audit = (
         f"## record-action: {transition.source} → {transition.destination} "
@@ -544,10 +548,12 @@ def _plan_claim(
 
     # Record the origin so `release` can return the issue here.
     origin = state.state
+    new_dest = state_machine.states.get(new_state) if new_state else None
     change = MarkerChange(
         set_state=new_state if new_state != state.state else None,
         set_agent_claim=role,
         set_last_state=origin,
+        set_pr_ready=bool(new_dest and new_dest.mark_pr_ready),
     )
     audit = f"## claim: agent {role!r} claims issue" + (
         f" → {transition.destination!r}" if transition is not None else ""
@@ -710,6 +716,7 @@ def _plan_approve(
     # working state is now done, so clear the claim. The original source
     # (the working state) was the agent's seat.
     close, reason = _terminal_close_info(state_machine, destination)
+    dest = state_machine.states.get(destination)
     change = MarkerChange(
         set_state=destination,
         clear_awaiting_gate=True,
@@ -719,6 +726,7 @@ def _plan_approve(
         clear_last_state=True,
         close_issue=close,
         close_reason=reason,
+        set_pr_ready=bool(dest and dest.mark_pr_ready),
     )
     audit = (
         f"## approve: gate {hcp.gate_name!r} → {destination}\n\nAuthorized via approve operation."

@@ -72,6 +72,10 @@
           "type": "boolean",
           "description": "Marks a resting state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Only valid on resting states."
         },
+        "mark_pr_ready": {
+          "type": "boolean",
+          "description": "When True, advancing into this state flips the underlying PR from draft to ready-for-review on the tracker (`gh pr ready` on GitHub). No-op when the issue isn't a pull request. Not valid on terminal states."
+        },
         "spawns": {
           "type": "object",
           "description": "Subprocess / spawn contract. Only valid on working or terminal states. Working states wait for the child to close, then auto-advance per `on_terminal`. Terminal states spawn an independent follow-up (no `on_terminal`).",

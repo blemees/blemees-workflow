@@ -997,6 +997,49 @@ def test_claim_allows_matching_issue_type() -> None:
     assert plan.change.set_state == "implementing_experiment"
 
 
+def test_advance_into_mark_pr_ready_sets_marker() -> None:
+    """Advancing into a state with mark_pr_ready: true sets MarkerChange.set_pr_ready."""
+    workflow = _build_workflow()
+    rfd = workflow.states["ready_for_dev"]
+    workflow.states["ready_for_dev"] = State(
+        name=rfd.name,
+        state_class=rfd.state_class,
+        reversibility=rfd.reversibility,
+        terminal_taxonomy=rfd.terminal_taxonomy,
+        roles=rfd.roles,
+        issue_types=rfd.issue_types,
+        close_reason=rfd.close_reason,
+        handoff=rfd.handoff,
+        spawns=rfd.spawns,
+        mark_pr_ready=True,
+        notes=rfd.notes,
+    )
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.ADVANCE, issue_id="1", destination="ready_for_dev"
+        ),
+        state,
+        workflow,
+        catalog=None,
+    )
+    assert plan.change.set_pr_ready is True
+
+
+def test_advance_into_normal_state_does_not_set_pr_ready() -> None:
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.ADVANCE, issue_id="1", destination="ready_for_dev"
+        ),
+        state,
+        workflow,
+        catalog=None,
+    )
+    assert plan.change.set_pr_ready is False
+
+
 def test_claim_role_match_succeeds() -> None:
     """Claiming with a role in the destination state's `roles` passes."""
     from workflow.core.model.state_machine import (

@@ -129,6 +129,17 @@ The backend dispatches to `create_pull_request` (which shells out to `gh pr crea
 
 One ticket can spawn zero (spike findings doc only), one (typical), or many PRs (incident mitigation chain, hotfix + backports, multi-component feature) — the cardinality between an issue and its PRs is **1:N**, and the framework does not gate the parent ticket's advancement on the PR set. Each PR is an independent work item; the agent decides when the parent advances. The spawn from `inner-loop.implementing → pr.draft` is modelled on `pr-states.json` for documentation; agents may also create PRs directly with `workflow create --to draft --head ... --refs ...` (e.g., for backports that don't pass through inner-loop).
 
+#### PR draft / ready lifecycle
+
+Every PR the framework creates is opened as a **GitHub draft PR** (`gh pr create --draft` is always passed). The framework's `pr-states.json` starts new PRs at `state:draft`, and that aligns with the tracker's draft state.
+
+To flip a PR from draft → ready-for-review, the destination state declares `mark_pr_ready: true`. When the framework advances into that state, the backend calls `gh pr ready <id>`. The example pr process marks `needs_review` with the flag, so:
+
+- `draft → drafting` (claim by developer) — still draft on tracker.
+- `drafting → needs_review` (advance) — `mark_pr_ready: true` fires → `gh pr ready`.
+
+The flag is a no-op when applied to non-PR issues (gh errors out cleanly; the framework logs the warning and continues). Use it freely on shared states that might host both PRs and other types.
+
 #### Standard PR message format
 
 The framework appends a footer to whatever body the user supplies:

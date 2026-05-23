@@ -139,6 +139,11 @@ class State:
     # Subprocess / spawn contract. Only valid on working or terminal states.
     # See Spawn docstring for the working-vs-terminal distinction.
     spawns: Spawn | None = None
+    # When True, advancing into this state flips the underlying PR from
+    # draft to ready-for-review on the tracker (via `gh pr ready` on GitHub).
+    # No-op when the issue isn't a pull request. Only valid on resting or
+    # working states — terminals have already reached final form.
+    mark_pr_ready: bool = False
     # Backend-specific close reason for terminal states. REQUIRED on
     # terminals — every terminal closes the tracker's issue with this
     # reason (GitHub: "completed" or "not planned"). FORBIDDEN on resting
