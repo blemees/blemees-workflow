@@ -1,12 +1,5 @@
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): accumulating from process inner-loop
-    %%   Entry (spawn ): accumulating from process backport
-    %%
-
     [*] --> accumulating: new train opens (on cadence, or after previous release closes)
-    [*] --> accumulating: new patch train opens (from process inner-loop — hotfix merged)
-    [*] --> accumulating: new patch train opens (from process backport — backport merged)
     accumulating --> cut: cadence timer elapses (time)
     accumulating --> cut: RM triggers cut script
     cut --> preparing: RM claims train

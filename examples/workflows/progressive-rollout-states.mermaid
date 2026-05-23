@@ -1,9 +1,4 @@
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): soaking from process release
-    %%
-
-    [*] --> soaking: from process release (first stage activated)
     soaking --> ready_for_stage_analysis: soak window elapses (time)
     ready_for_stage_analysis --> analyzing: on-call claims stage analysis
     analyzing --> soaking: on-call advances to next stage
@@ -15,7 +10,7 @@ stateDiagram-v2
     complete --> [*]: terminal (shipped)
     kill_switched --> [*]: terminal (reverted)
 
-    note left of soaking: reversible-slow
+    note right of soaking: reversible-slow
     note right of ready_for_stage_analysis: reversible-fast
     note right of analyzing: role=developer, types=release
     note right of holding: reversible-fast

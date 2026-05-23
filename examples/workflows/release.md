@@ -10,14 +10,7 @@
 
 ```mermaid
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): accumulating from process inner-loop
-    %%   Entry (spawn ): accumulating from process backport
-    %%
-
     [*] --> accumulating: new train opens (on cadence, or after previous release closes)
-    [*] --> accumulating: new patch train opens (from process inner-loop — hotfix merged)
-    [*] --> accumulating: new patch train opens (from process backport — backport merged)
     accumulating --> cut: cadence timer elapses (time)
     accumulating --> cut: RM triggers cut script
     cut --> preparing: RM claims train
@@ -79,29 +72,20 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `accumulating` | external | 'new train opens (on cadence, or after previous release closes)' | — | — |
-| `[*]` | `accumulating` | cross_process | 'new patch train opens (from process inner-loop — hotfix merged)' | — | — |
-| `[*]` | `accumulating` | cross_process | 'new patch train opens (from process backport — backport merged)' | — | — |
-| `accumulating` | `cut` | external | 'cadence timer elapses (time)' | — | — |
-| `accumulating` | `cut` | external | 'RM triggers cut script' | — | — |
+| `[*]` | `accumulating` | event | 'new train opens (on cadence, or after previous release closes)' | — | — |
+| `accumulating` | `cut` | event | 'cadence timer elapses (time)' | — | — |
+| `accumulating` | `cut` | event | 'RM triggers cut script' | — | — |
 | `cut` | `preparing` | claim | 'RM claims train' | — | — |
-| `preparing` | `ready_for_release_decision` | role_action | 'RM publishes release notes, tags release candidate' | — | — |
+| `preparing` | `ready_for_release_decision` | advance | 'RM publishes release notes, tags release candidate' | — | — |
 | `ready_for_release_decision` | `reviewing_release` | claim | 'PO claims train' | — | — |
-| `reviewing_release` | `gated_nogo` | role_action | 'PO defers with blocking reason' | — | — |
-| `reviewing_release` | `deploying` | role_action | 'PO approves go (or IC approves for patch train)' | — | — |
+| `reviewing_release` | `gated_nogo` | advance | 'PO defers with blocking reason' | — | — |
+| `reviewing_release` | `deploying` | advance | 'PO approves go (or IC approves for patch train)' | — | — |
 | `gated_nogo` | `reviewing_release` | claim | 'PO re-claims deferred train' | — | — |
 | `gated_nogo` | `abandoning` | claim | 'PO claims to abandon train' | — | — |
-| `abandoning` | `abandoned` | role_action | 'PO closes train, issues revert to inner-loop.staged for next train' | — | — |
-| `deploying` | `rolling_out` | external | 'production deploy completes (external — progressive rollout starts)' | — | — |
-| `rolling_out` | `ready_for_monitoring` | external | 'rollout reaches 100% (from process progressive-rollout)' | — | — |
+| `abandoning` | `abandoned` | advance | 'PO closes train, issues revert to inner-loop.staged for next train' | — | — |
+| `deploying` | `rolling_out` | event | 'production deploy completes (external — progressive rollout starts)' | — | — |
+| `rolling_out` | `ready_for_monitoring` | event | 'rollout reaches 100% (from process progressive-rollout)' | — | — |
 | `ready_for_monitoring` | `monitoring` | claim | 'on-call claims post-deploy watch' | — | — |
-| `monitoring` | `released` | role_action | 'on-call confirms post-deploy window clean' | — | — |
-| `monitoring` | `rolling_back` | role_action | 'on-call triggers rollback' | — | — |
-| `rolling_back` | `rolled_back` | role_action | 'rollback completes' | — | — |
-
-## Cross-process handoffs
-
-**Entries** (issues arriving from other processes):
-
-- `accumulating` ← process `inner-loop` (spawn) — `new patch train opens (from process inner-loop — hotfix merged)`
-- `accumulating` ← process `backport` (spawn) — `new patch train opens (from process backport — backport merged)`
+| `monitoring` | `released` | advance | 'on-call confirms post-deploy window clean' | — | — |
+| `monitoring` | `rolling_back` | advance | 'on-call triggers rollback' | — | — |
+| `rolling_back` | `rolled_back` | advance | 'rollback completes' | — | — |

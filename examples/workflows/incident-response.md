@@ -10,6 +10,10 @@
 
 ```mermaid
 stateDiagram-v2
+    %% Cross-process interfaces:
+    %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
+    %%
+
     [*] --> declared: alert / report triggers incident (external)
     declared --> triaging: IC claims incident
     triaging --> needs_diagnosis: IC assigns severity, assigns responder
@@ -51,13 +55,19 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `declared` | external | 'alert / report triggers incident (external)' | — | — |
+| `[*]` | `declared` | event | 'alert / report triggers incident (external)' | — | — |
 | `declared` | `triaging` | claim | 'IC claims incident' | — | — |
-| `triaging` | `needs_diagnosis` | role_action | 'IC assigns severity, assigns responder' | — | — |
+| `triaging` | `needs_diagnosis` | advance | 'IC assigns severity, assigns responder' | — | — |
 | `needs_diagnosis` | `diagnosing` | claim | 'responder claims diagnosis' | — | — |
-| `diagnosing` | `cause_identified` | role_action | 'responder reports root cause' | — | — |
+| `diagnosing` | `cause_identified` | advance | 'responder reports root cause' | — | — |
 | `cause_identified` | `mitigating` | claim | 'IC claims incident for mitigation' | — | — |
-| `mitigating` | `needs_verification` | role_action | 'IC requests verification (spawns work items on process mitigation)' | — | — |
+| `mitigating` | `needs_verification` | advance | 'IC requests verification (spawns work items on process mitigation)' | — | — |
 | `needs_verification` | `verifying` | claim | 'responder claims verification' | — | — |
-| `verifying` | `cause_identified` | role_action | 'responder reports mitigation failed' | — | — |
-| `verifying` | `stabilized` | role_action | 'responder confirms production stable (spawns postmortem on process postmortem)' | — | — |
+| `verifying` | `cause_identified` | advance | 'responder reports mitigation failed' | — | — |
+| `verifying` | `stabilized` | advance | 'responder confirms production stable (spawns postmortem on process postmortem)' | — | — |
+
+## Cross-process handoffs
+
+**Spawns** (states that create child issues on other processes):
+
+- `stabilized` (independent) → process `postmortem` as `postmortem` issue at `pending`

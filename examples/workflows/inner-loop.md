@@ -16,20 +16,15 @@
 ```mermaid
 stateDiagram-v2
     %% Cross-process interfaces:
-    %%   Entry (shared): ready_for_dev from process refinement
-    %%   Entry (shared): ready_for_experiment from process refinement
-    %%   Entry (spawn ): ready_for_spike from process refinement
-    %%   Entry (shared): ready_for_hotfix from process mitigation
-    %%   Exit  (shared): ready_bounced to process refinement
-    %%   Exit  (spawn ): staged to process release
-    %%   Exit  (spawn ): staged_experiment to process release
-    %%   Exit  (spawn ): staged_hotfix to process release
+    %%   Handoff: ready_for_dev (shared resting state)
+    %%   Handoff: ready_for_experiment (shared resting state)
+    %%   Handoff: ready_for_hotfix (shared resting state)
+    %%   Handoff: ready_bounced (shared resting state)
+    %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
+    %%   Spawn:   implementing_experiment → process pr (issue_type=pr, initial=draft)
+    %%   Spawn:   implementing_hotfix → process pr (issue_type=pr, initial=draft)
     %%
 
-    [*] --> ready_for_dev: from process refinement
-    [*] --> ready_for_experiment: from process refinement
-    [*] --> ready_for_spike: from process refinement (spawn — consultant creates spike sub-issue)
-    [*] --> ready_for_hotfix: from process mitigation
     ready_for_dev --> implementing: developer claims issue
     ready_for_experiment --> implementing_experiment: developer claims experiment
     ready_for_spike --> implementing_spike: developer claims spike
@@ -42,16 +37,12 @@ stateDiagram-v2
     pr_review --> staged: from process pr-review (PR merged)
     pr_review_experiment --> staged_experiment: from process pr-review (PR merged)
     pr_review_hotfix --> staged_hotfix: from process pr-review (PR merged)
-    ready_bounced --> [*]: to process refinement
-    staged --> [*]: to process release (standard train)
-    staged_experiment --> [*]: to process release (standard train)
-    staged_hotfix --> [*]: to process release (hotfix patch train)
     spike_completed --> [*]: terminal (resolved)
 
-    note left of ready_for_dev: reversible-slow
-    note right of ready_for_experiment: reversible-slow
+    note right of ready_for_dev: handoff, reversible-slow
+    note right of ready_for_experiment: handoff, reversible-slow
     note right of ready_for_spike: reversible-slow
-    note right of ready_for_hotfix: reversible-fast
+    note right of ready_for_hotfix: handoff, reversible-fast
     note right of implementing: role=developer, types=bug, feature, chore
     note right of implementing_experiment: role=developer, types=experiment
     note right of implementing_spike: role=developer, types=spike
@@ -63,7 +54,7 @@ stateDiagram-v2
     note right of staged_experiment: reversible-slow
     note right of staged_hotfix: reversible-slow
     note right of spike_completed: reversible-fast
-    note right of ready_bounced: reversible-fast
+    note right of ready_bounced: handoff, reversible-fast
 ```
 
 ## States
@@ -91,39 +82,33 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `ready_for_dev` | cross_process | 'from process refinement' | — | — |
-| `[*]` | `ready_for_experiment` | cross_process | 'from process refinement' | — | — |
-| `[*]` | `ready_for_spike` | cross_process | 'from process refinement (spawn — consultant creates spike sub-issue)' | — | — |
-| `[*]` | `ready_for_hotfix` | cross_process | 'from process mitigation' | — | — |
 | `ready_for_dev` | `implementing` | claim | 'developer claims issue' | — | — |
 | `ready_for_experiment` | `implementing_experiment` | claim | 'developer claims experiment' | — | — |
 | `ready_for_spike` | `implementing_spike` | claim | 'developer claims spike' | — | — |
 | `ready_for_hotfix` | `implementing_hotfix` | claim | 'developer claims hotfix' | — | — |
-| `implementing` | `ready_bounced` | role_action | 'developer bounces ticket' | — | — |
-| `implementing` | `pr_review` | role_action | 'developer requests PR review' | — | — |
-| `implementing_experiment` | `pr_review_experiment` | role_action | 'developer requests PR review' | — | — |
-| `implementing_hotfix` | `pr_review_hotfix` | role_action | 'developer requests PR review' | — | — |
-| `implementing_spike` | `spike_completed` | role_action | 'developer posts spike findings' | — | — |
-| `pr_review` | `staged` | external | 'from process pr-review (PR merged)' | — | — |
-| `pr_review_experiment` | `staged_experiment` | external | 'from process pr-review (PR merged)' | — | — |
-| `pr_review_hotfix` | `staged_hotfix` | external | 'from process pr-review (PR merged)' | — | — |
-| `ready_bounced` | `[*]` | cross_process | 'to process refinement' | — | — |
-| `staged` | `[*]` | cross_process | 'to process release (standard train)' | — | — |
-| `staged_experiment` | `[*]` | cross_process | 'to process release (standard train)' | — | — |
-| `staged_hotfix` | `[*]` | cross_process | 'to process release (hotfix patch train)' | — | — |
+| `implementing` | `ready_bounced` | advance | 'developer bounces ticket' | — | — |
+| `implementing` | `pr_review` | advance | 'developer requests PR review' | — | — |
+| `implementing_experiment` | `pr_review_experiment` | advance | 'developer requests PR review' | — | — |
+| `implementing_hotfix` | `pr_review_hotfix` | advance | 'developer requests PR review' | — | — |
+| `implementing_spike` | `spike_completed` | advance | 'developer posts spike findings' | — | — |
+| `pr_review` | `staged` | event | 'from process pr-review (PR merged)' | — | — |
+| `pr_review_experiment` | `staged_experiment` | event | 'from process pr-review (PR merged)' | — | — |
+| `pr_review_hotfix` | `staged_hotfix` | event | 'from process pr-review (PR merged)' | — | — |
 
 ## Cross-process handoffs
 
-**Entries** (issues arriving from other processes):
+**Handoff states** (shared resting states declared in ≥2 processes):
 
-- `ready_for_dev` ← process `refinement` (shared) — `from process refinement`
-- `ready_for_experiment` ← process `refinement` (shared) — `from process refinement`
-- `ready_for_spike` ← process `refinement` (spawn) — `from process refinement (spawn — consultant creates spike sub-issue)`
-- `ready_for_hotfix` ← process `mitigation` (shared) — `from process mitigation`
+- `ready_for_dev` — interface state, also declared by the partner process(es).
+- `ready_for_experiment` — interface state, also declared by the partner process(es).
+- `ready_for_hotfix` — interface state, also declared by the partner process(es).
+- `ready_bounced` — interface state, also declared by the partner process(es).
 
-**Exits** (issues handed to other processes):
+**Spawns** (states that create child issues on other processes):
 
-- `ready_bounced` → process `refinement` (shared) — `to process refinement`
-- `staged` → process `release` (spawn) — `to process release (standard train)`
-- `staged_experiment` → process `release` (spawn) — `to process release (standard train)`
-- `staged_hotfix` → process `release` (spawn) — `to process release (hotfix patch train)`
+- `implementing` (subprocess) → process `pr` as `pr` issue at `draft`
+    - on child `staged` → parent `staged`
+- `implementing_experiment` (subprocess) → process `pr` as `pr` issue at `draft`
+    - on child `staged` → parent `staged_experiment`
+- `implementing_hotfix` (subprocess) → process `pr` as `pr` issue at `draft`
+    - on child `staged` → parent `staged_hotfix`

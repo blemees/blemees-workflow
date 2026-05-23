@@ -345,7 +345,7 @@ def _plan_advance(
             clear_audit_pending=True,
             set_awaiting_input=False,
             clear_agent_claim=leaving_working,
-            clear_wip_from=leaving_working,
+            clear_last_state=leaving_working,
             close_issue=close,
             close_reason=reason,
         )
@@ -456,7 +456,7 @@ def _advance_audit_gated(
         set_state=transition.destination,
         set_audit_pending=hcp.gate_name,
         clear_agent_claim=True,
-        clear_wip_from=True,
+        clear_last_state=True,
         close_issue=close,
         close_reason=reason,
     )
@@ -547,7 +547,7 @@ def _plan_claim(
     change = MarkerChange(
         set_state=new_state if new_state != state.state else None,
         set_agent_claim=role,
-        set_wip_from=origin,
+        set_last_state=origin,
     )
     audit = f"## claim: agent {role!r} claims issue" + (
         f" → {transition.destination!r}" if transition is not None else ""
@@ -566,35 +566,35 @@ def _plan_release(
 ) -> OperationPlan:
     if not state.agent_claim:
         raise OperationError("Cannot release: no agent claim is active.")
-    if state.wip_from is None:
+    if state.last_state is None:
         raise OperationError(
-            "Cannot release: no wip-from marker recorded. The issue must have "
+            "Cannot release: no last-state marker recorded. The issue must have "
             "been claimed via `workflow claim` (which sets the origin) for "
             "release to know where to return it."
         )
-    # Sanity: a CLAIM transition from wip_from → current must exist. If not,
+    # Sanity: a CLAIM transition from last_state → current must exist. If not,
     # the marker has drifted and we'd put the issue in an invalid state.
     if state.state is not None:
         valid = any(
-            t.source == state.wip_from
+            t.source == state.last_state
             and t.destination == state.state
             and t.transition_type is TransitionType.CLAIM
             for t in state_machine.transitions
         )
         if not valid:
             raise OperationError(
-                f"wip-from marker {state.wip_from!r} → {state.state!r} does "
+                f"last-state marker {state.last_state!r} → {state.state!r} does "
                 f"not match any CLAIM transition. The marker has drifted; "
                 f"investigate before releasing."
             )
     change = MarkerChange(
-        set_state=state.wip_from,
+        set_state=state.last_state,
         clear_agent_claim=True,
-        clear_wip_from=True,
+        clear_last_state=True,
     )
     audit = (
         f"## release: agent {state.agent_claim!r} releases issue "
-        f"→ {state.wip_from!r}"
+        f"→ {state.last_state!r}"
     )
     return OperationPlan(
         operation=request.operation,
@@ -716,7 +716,7 @@ def _plan_approve(
         set_reviewing=False,
         record_approval=destination,
         clear_agent_claim=True,
-        clear_wip_from=True,
+        clear_last_state=True,
         close_issue=close,
         close_reason=reason,
     )
@@ -803,7 +803,7 @@ def _plan_record_action(
         set_state=destination,
         set_audit_pending=hcp.gate_name,
         clear_agent_claim=True,
-        clear_wip_from=True,
+        clear_last_state=True,
         close_issue=close,
         close_reason=reason,
     )

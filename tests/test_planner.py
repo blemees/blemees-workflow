@@ -153,7 +153,7 @@ def test_plan_claim() -> None:
     )
     assert plan.change.set_agent_claim == "product-manager"
     # Claim records the origin so `release` can return the issue here.
-    assert plan.change.set_wip_from == "raw"
+    assert plan.change.set_last_state == "raw"
     # The single CLAIM transition out of `raw` is auto-picked → `refining`.
     assert plan.change.set_state == "refining"
 
@@ -175,22 +175,22 @@ def test_plan_claim_already_claimed_errors() -> None:
 
 def test_plan_release() -> None:
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", wip_from="raw")
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", last_state="raw")
     plan = plan_operation(
         OperationRequest(operation=Operation.RELEASE, issue_id="1"),
         state,
         workflow,
     )
     assert plan.change.clear_agent_claim is True
-    assert plan.change.clear_wip_from is True
+    assert plan.change.clear_last_state is True
     assert plan.change.set_state == "raw"
 
 
-def test_plan_release_without_wip_from_errors() -> None:
+def test_plan_release_without_last_state_errors() -> None:
     """A working state with no origin marker can't determine where to return."""
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", wip_from=None)
-    with pytest.raises(OperationError, match="wip-from"):
+    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", last_state=None)
+    with pytest.raises(OperationError, match="last-state"):
         plan_operation(
             OperationRequest(operation=Operation.RELEASE, issue_id="1"),
             state,
@@ -207,7 +207,7 @@ def test_terminal_advance_closes_issue_as_completed() -> None:
             source="implementing",
             destination="merged",
             label="developer ships",
-            transition_type=TransitionType.ROLE_ACTION,
+            transition_type=TransitionType.ADVANCE,
         )
     )
     workflow.states["merged"] = State(
@@ -218,7 +218,7 @@ def test_terminal_advance_closes_issue_as_completed() -> None:
         close_reason="completed",
     )
     state = IssueState(
-        issue_id="1", state="implementing", agent_claim="developer", wip_from="ready_for_dev"
+        issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
     )
     plan = plan_operation(
         OperationRequest(
@@ -241,7 +241,7 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
             source="implementing",
             destination="bounced",
             label="developer bounces",
-            transition_type=TransitionType.ROLE_ACTION,
+            transition_type=TransitionType.ADVANCE,
         )
     )
     workflow.states["bounced"] = State(
@@ -252,7 +252,7 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
         # No close_reason — handoff terminal, issue stays open.
     )
     state = IssueState(
-        issue_id="1", state="implementing", agent_claim="developer", wip_from="ready_for_dev"
+        issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
     )
     plan = plan_operation(
         OperationRequest(
@@ -272,7 +272,7 @@ def test_abandoned_terminal_closes_as_not_planned() -> None:
             source="implementing",
             destination="wont",
             label="developer abandons",
-            transition_type=TransitionType.ROLE_ACTION,
+            transition_type=TransitionType.ADVANCE,
         )
     )
     workflow.states["wont"] = State(
@@ -283,7 +283,7 @@ def test_abandoned_terminal_closes_as_not_planned() -> None:
         close_reason="not planned",
     )
     state = IssueState(
-        issue_id="1", state="implementing", agent_claim="developer", wip_from="ready_for_dev"
+        issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
     )
     plan = plan_operation(
         OperationRequest(
@@ -296,11 +296,11 @@ def test_abandoned_terminal_closes_as_not_planned() -> None:
     assert plan.change.close_reason == "not planned"
 
 
-def test_plan_release_with_drifted_wip_from_errors() -> None:
-    """If wip_from points at a state with no CLAIM transition to current, error."""
+def test_plan_release_with_drifted_last_state_errors() -> None:
+    """If last_state points at a state with no CLAIM transition to current, error."""
     workflow = _build_workflow()
     state = IssueState(
-        issue_id="1", state="refining", agent_claim="product-manager", wip_from="ready_for_dev"
+        issue_id="1", state="refining", agent_claim="product-manager", last_state="ready_for_dev"
     )
     with pytest.raises(OperationError, match="drifted"):
         plan_operation(
@@ -715,7 +715,7 @@ def test_plan_resolve(tmp_path: Path) -> None:
                     issue_id="1",
                     state="refining",
                     agent_claim="product-manager",
-                    wip_from="raw",
+                    last_state="raw",
                 ),
             ),
         ),

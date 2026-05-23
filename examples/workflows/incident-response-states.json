@@ -42,19 +42,24 @@
       "class": "terminal",
       "reversibility": "reversible-fast",
       "terminal_taxonomy": "superseded",
-      "close_reason": "completed"
+      "close_reason": "completed",
+      "spawns": {
+        "process": "postmortem",
+        "issue_type": "postmortem",
+        "initial_state": "pending"
+      }
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "declared", "type": "external", "label": "alert / report triggers incident (external)"},
+    {"source": "[*]", "destination": "declared", "type": "event", "label": "alert / report triggers incident (external)"},
     {"source": "declared", "destination": "triaging", "type": "claim", "label": "IC claims incident"},
-    {"source": "triaging", "destination": "needs_diagnosis", "type": "role_action", "label": "IC assigns severity, assigns responder"},
+    {"source": "triaging", "destination": "needs_diagnosis", "type": "advance", "label": "IC assigns severity, assigns responder"},
     {"source": "needs_diagnosis", "destination": "diagnosing", "type": "claim", "label": "responder claims diagnosis"},
-    {"source": "diagnosing", "destination": "cause_identified", "type": "role_action", "label": "responder reports root cause"},
+    {"source": "diagnosing", "destination": "cause_identified", "type": "advance", "label": "responder reports root cause"},
     {"source": "cause_identified", "destination": "mitigating", "type": "claim", "label": "IC claims incident for mitigation"},
-    {"source": "mitigating", "destination": "needs_verification", "type": "role_action", "label": "IC requests verification (spawns work items on process mitigation)"},
+    {"source": "mitigating", "destination": "needs_verification", "type": "advance", "label": "IC requests verification (spawns work items on process mitigation)"},
     {"source": "needs_verification", "destination": "verifying", "type": "claim", "label": "responder claims verification"},
-    {"source": "verifying", "destination": "cause_identified", "type": "role_action", "label": "responder reports mitigation failed"},
-    {"source": "verifying", "destination": "stabilized", "type": "role_action", "label": "responder confirms production stable (spawns postmortem on process postmortem)"}
+    {"source": "verifying", "destination": "cause_identified", "type": "advance", "label": "responder reports mitigation failed"},
+    {"source": "verifying", "destination": "stabilized", "type": "advance", "label": "responder confirms production stable (spawns postmortem on process postmortem)"}
   ]
 }

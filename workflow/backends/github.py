@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 _LABEL_COLORS = {
     "state": "1f6feb",  # blue
     "wip": "fbca04",  # yellow
-    "wip-from": "fef2c0",  # pale yellow — adjacent to wip
+    "last-state": "fef2c0",  # pale yellow — adjacent to wip
     "hitl": "8957e5",  # purple
 }
 
@@ -611,7 +611,7 @@ class GitHubBackend:
     def _labels_to_state(self, issue_id: str, labels: list[str]) -> IssueState:
         state: str | None = None
         agent_claim: str | None = None
-        wip_from: str | None = None
+        last_state: str | None = None
         awaiting_gate: str | None = None
         audit_pending: str | None = None
         issue_type: str | None = None
@@ -625,9 +625,9 @@ class GitHubBackend:
             if label.startswith("state:"):
                 state = label[len("state:") :]
                 continue
-            # `wip-from:` is checked before `wip:` because both share a prefix.
-            if label.startswith("wip-from:"):
-                wip_from = label[len("wip-from:") :]
+            # `last-state:` is checked before `wip:` because both share a prefix.
+            if label.startswith("last-state:"):
+                last_state = label[len("last-state:") :]
                 continue
             if label.startswith("wip:"):
                 agent_claim = label[len("wip:") :]
@@ -659,7 +659,7 @@ class GitHubBackend:
             issue_id=str(issue_id),
             state=state,
             agent_claim=agent_claim,
-            wip_from=wip_from,
+            last_state=last_state,
             issue_type=issue_type,
             awaiting_gate=awaiting_gate,
             reviewing=reviewing,
@@ -692,12 +692,12 @@ class GitHubBackend:
             add.add(f"wip:{change.set_agent_claim}")
 
         # Origin marker (the resting state we came from on claim).
-        if change.clear_wip_from and current.wip_from:
-            remove.add(f"wip-from:{current.wip_from}")
-        if change.set_wip_from:
-            if current.wip_from and current.wip_from != change.set_wip_from:
-                remove.add(f"wip-from:{current.wip_from}")
-            add.add(f"wip-from:{change.set_wip_from}")
+        if change.clear_last_state and current.last_state:
+            remove.add(f"last-state:{current.last_state}")
+        if change.set_last_state:
+            if current.last_state and current.last_state != change.set_last_state:
+                remove.add(f"last-state:{current.last_state}")
+            add.add(f"last-state:{change.set_last_state}")
 
         # Awaiting gate.
         if change.clear_awaiting_gate and current.awaiting_gate:

@@ -28,10 +28,9 @@
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "pending", "type": "cross_process", "label": "from process incident-response (incident stabilized)", "kind": "spawn", "process": "incident-response"},
     {"source": "pending", "destination": "drafting", "type": "claim", "label": "PM claims postmortem"},
-    {"source": "drafting", "destination": "ready_for_followups", "type": "role_action", "label": "PM completes postmortem narrative"},
+    {"source": "drafting", "destination": "ready_for_followups", "type": "advance", "label": "PM completes postmortem narrative"},
     {"source": "ready_for_followups", "destination": "creating_followups", "type": "claim", "label": "PM claims for follow-up filing"},
-    {"source": "creating_followups", "destination": "complete", "type": "role_action", "label": "PM files compensating issues (spawn events to process refinement)"}
+    {"source": "creating_followups", "destination": "complete", "type": "advance", "label": "PM files compensating issues (spawn events to process refinement)"}
   ]
 }

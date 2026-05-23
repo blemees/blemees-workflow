@@ -43,9 +43,9 @@ surface via `workflow validate`.
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "raw", "type": "external", "label": "issue created (external)"},
+    {"source": "[*]", "destination": "raw", "type": "event", "label": "issue created"},
     {"source": "raw", "destination": "refining", "type": "claim", "label": "product-manager claims raw"},
-    {"source": "refining", "destination": "done", "type": "role_action", "label": "product-manager ships"}
+    {"source": "refining", "destination": "done", "type": "advance", "label": "product-manager ships"}
   ]
 }
 ```
@@ -73,6 +73,8 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 | `roles` | array of strings | required on working states, forbidden on resting/terminal | Role ids permitted to occupy this state. Non-empty. Resting / terminal states must NOT carry this field. |
 | `issue_types` | array of strings | required on working states, forbidden on resting/terminal | Issue type ids this working state accepts. Checked at claim time: the issue's type must be in this set. The process's overall accepted set is derived as the union of every working state's `issue_types` — there is no separate process-level field. |
 | `close_reason` | string | required on terminal states, forbidden elsewhere | Backend close-reason. For GitHub: `"completed"` or `"not planned"`. Every terminal closes the tracker's issue with this reason. |
+| `handoff` | bool | optional, resting states only | Marks the state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Replaces the old `cross_process` kind:`shared` transitions. |
+| `spawns` | object | optional, working or terminal states only | Subprocess / spawn contract. See "Spawns" below. |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
 The parser fails loud on:
@@ -86,8 +88,8 @@ The parser fails loud on:
 |---|---|---|---|
 | `source` | string | yes | State id, or `"[*]"` for the entry sentinel. |
 | `destination` | string | yes | State id, or `"[*]"` for the exit sentinel. |
-| `type` | string | yes | `"claim"`, `"role_action"`, `"external"`, `"cross_process"` |
-| `label` | string | yes | The human-readable transition label. Per principle 4, conventions: `{role} claims {what}` for claims; `{role} {verb}` for role actions; `... (external)` / `(time)` for externals; `to process X` / `from process X` for cross-process. |
+| `type` | string | yes | `"claim"`, `"advance"`, `"event"`, `"cross_process"` |
+| `label` | string | optional except on `event` | Human-readable transition label. When absent (and the type isn't `event`), the parser auto-generates a structural label: `{role(s)} claims {source}` for claim, `{role(s)} → {destination}` for advance, `{to\|from} process {other}` for cross-process. Override when the structural default reads awkwardly. |
 | `hitl` | bool | optional, default false | Marks the transition as a HITL gate. Per principle 11, gating is an overlay; the transition type is unchanged. |
 | `gate` | string | required when `hitl=true` | The HCP catalog's `gate_name` for this gate. Must be absent on non-hitl transitions. |
 | `kind` | string | required when `type=cross_process` | `"shared"` (same work item continues on the other process) or `"spawn"` (new work item starts there). |
@@ -96,6 +98,40 @@ The parser fails loud on:
 Terminal sinks (`state → [*]: terminal (X)`) are **implicit**: the parser
 expects them not to be authored. The emitter generates them from each
 terminal state's `terminal_taxonomy`.
+
+## Spawns
+
+A working or terminal state can declare a `spawns` object to create a
+child issue on another process:
+
+```json
+"implementing": {
+  "class": "working",
+  "roles": ["developer"],
+  "issue_types": ["bug", "feature", "chore"],
+  "spawns": {
+    "process": "pr",
+    "issue_type": "pr",
+    "initial_state": "draft",
+    "on_terminal": {"staged": "staged"}
+  }
+}
+```
+
+**Working-state spawn** (subprocess): the parent stays in this state while
+the child runs. `on_terminal` is REQUIRED and must exhaustively cover
+every terminal of the child process. When the child reaches a terminal,
+`workflow advance` on the child auto-advances the parent to the mapped
+state.
+
+**Terminal-state spawn** (independent): the parent closes when it reaches
+this terminal, then a fresh child issue is created on the target process.
+`on_terminal` is FORBIDDEN (the parent has nothing left to advance to).
+Typical use: incident `stabilized` terminal spawns a postmortem.
+
+The child issue carries a `parent-of:<parent-id>` label and a `Refs
+#<parent-id>` body footer. The parent carries `subprocess:<child-id>`.
+Use `workflow spawn --issue <parent>` to create the child explicitly.
 
 ## What the validator enforces
 
@@ -146,7 +182,7 @@ Both files reference the state in their transitions:
 
 ```json
 // Sender
-{"source": "refining", "destination": "ready_for_dev", "type": "role_action",
+{"source": "refining", "destination": "ready_for_dev", "type": "advance",
  "label": "PM marks ready", "hitl": true, "gate": "ready_for_dev"}
 {"source": "ready_for_dev", "destination": "[*]", "type": "cross_process",
  "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"}

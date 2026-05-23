@@ -1,9 +1,4 @@
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): measuring from process release
-    %%
-
-    [*] --> measuring: from process release (experiment released to production)
     measuring --> measurement_complete: measurement window elapses (time)
     measuring --> aborting: PO claims to abort
     aborting --> aborted: PO publishes abort reason
@@ -17,7 +12,7 @@ stateDiagram-v2
     iterated --> [*]: terminal (superseded)
     aborted --> [*]: terminal (abandoned)
 
-    note left of measuring: reversible-slow
+    note right of measuring: reversible-slow
     note right of measurement_complete: reversible-fast
     note right of analyzing: role=product-owner, types=experiment
     note right of aborting: role=product-owner, types=experiment

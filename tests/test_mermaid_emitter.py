@@ -17,7 +17,16 @@ def test_emit_is_deterministic(refinement_workflow_path: Path) -> None:
 def test_emit_includes_cross_process_legend(refinement_workflow_path: Path) -> None:
     text = emit_mermaid(parse_state_machine(refinement_workflow_path))
     assert "%% Cross-process interfaces:" in text
-    assert "to process inner-loop" in text
+    # Handoff states appear in the legend as shared resting interfaces.
+    assert "Handoff: ready_for_dev" in text
+
+
+def test_emit_legend_lists_spawns(inner_loop_workflow_path: Path) -> None:
+    """Spawns appear in the cross-process legend with `Spawn: <state> →
+    process <other>` lines."""
+    text = emit_mermaid(parse_state_machine(inner_loop_workflow_path))
+    assert "%% Cross-process interfaces:" in text
+    assert "Spawn:   implementing → process pr" in text
 
 
 def test_emit_terminal_sink_has_taxonomy(refinement_workflow_path: Path) -> None:
@@ -57,13 +66,12 @@ def test_process_map_lists_all_processes_and_handoffs(
         node_id = p.process_name.replace("-", "_")
         assert f"{node_id}({p.process_name})" in text
 
-    # Known shared handoffs render with `==>`:
-    assert "refinement ==>|ready_for_dev| inner_loop" in text
-    assert "mitigation ==>|ready_for_hotfix| inner_loop" in text
-    assert "inner_loop ==>|ready_bounced| refinement" in text
+    # Known handoff resting states render as `===` (alphabetically-ordered pair).
+    assert "inner_loop ===|ready_for_dev| refinement" in text
+    assert "inner_loop ===|ready_for_hotfix| mitigation" in text
+    assert "inner_loop ===|ready_bounced| refinement" in text
 
-    # Known spawn handoffs render with `-.->`:
-    assert "incident_response -.->|pending| postmortem" in text
-    # Refinement spawns a spike issue on inner-loop (entry-only, no exit
-    # on refinement side — still surfaces on the map).
-    assert "refinement -.->|ready_for_spike| inner_loop" in text
+    # Subprocess spawn: inner-loop.implementing → pr.
+    assert "inner_loop -.->|implementing→draft| pr" in text
+    # Independent spawn: incident-response.stabilized → postmortem.
+    assert "incident_response -.->|stabilized→pending| postmortem" in text

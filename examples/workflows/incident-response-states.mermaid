@@ -1,4 +1,8 @@
 stateDiagram-v2
+    %% Cross-process interfaces:
+    %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
+    %%
+
     [*] --> declared: alert / report triggers incident (external)
     declared --> triaging: IC claims incident
     triaging --> needs_diagnosis: IC assigns severity, assigns responder

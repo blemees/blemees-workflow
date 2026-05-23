@@ -142,29 +142,41 @@ def emit_process_map(processes: list[Any]) -> str:
     if not sorted_processes:
         return "\n".join(lines) + "\n"
 
-    # Collect edges from both sides. Shared handoffs use the same state
-    # name on both ends, so the dedup (src, dst, label, kind) collapses
-    # them. Spawn handoffs may use different state names on each side —
-    # we keep both edges, since either may carry information the other
-    # doesn't (e.g., a spawn entry with no corresponding exit on the
-    # source diagram still represents a real handoff).
+    # Two edge sources:
+    #
+    # 1. Shared handoffs: resting states marked `handoff: true` that appear
+    #    in two or more processes. Render as bidirectional thick edges
+    #    between every pair of declaring processes. Symbol: `===`.
+    # 2. Spawn cross_process transitions: working / terminal states that
+    #    spawn a new issue on another process. Render as dashed directed
+    #    edges. Symbol: `-.->`.
     edges: set[tuple[str, str, str, str]] = set()
+
+    # Handoffs — pair every (process, other) declaring the same state.
+    handoff_by_state: dict[str, list[str]] = {}
     for p in processes:
-        for t in p.state_machine.transitions:
-            if t.transition_type is not TransitionType.CROSS_PROCESS:
+        for s in p.state_machine.states.values():
+            if s.handoff:
+                handoff_by_state.setdefault(s.name, []).append(p.process_name)
+    for state_name, procs in handoff_by_state.items():
+        sorted_procs = sorted(procs)
+        for i, a in enumerate(sorted_procs):
+            for b in sorted_procs[i + 1 :]:
+                edges.add((a, b, state_name, "handoff"))
+
+    # Spawns — walk every state's `spawns` field. Subprocess spawns (working
+    # states) and independent spawns (terminal states) both contribute edges.
+    for p in processes:
+        for s in p.state_machine.states.values():
+            if s.spawns is None:
                 continue
-            if t.cross_process_other is None:
-                continue
-            kind = t.cross_process_kind or "shared"
-            if t.destination == "[*]":
-                edges.add((p.process_name, t.cross_process_other, t.source, kind))
-            elif t.source == "[*]":
-                edges.add((t.cross_process_other, p.process_name, t.destination, kind))
+            label = f"{s.name}→{s.spawns.initial_state}"
+            edges.add((p.process_name, s.spawns.process, label, "spawn"))
 
     if edges:
         lines.append("")
     for src, dst, label, kind in sorted(edges):
-        arrow = "==>" if kind == "shared" else "-.->"
+        arrow = "===" if kind == "handoff" else "-.->"
         lines.append(f"    {_node_id(src)} {arrow}|{label}| {_node_id(dst)}")
 
     return "\n".join(lines) + "\n"
@@ -366,31 +378,33 @@ def _section_hcps(
 
 
 def _section_cross_process(sm: StateMachine) -> list[str]:
-    cross = [t for t in sm.transitions if t.transition_type is TransitionType.CROSS_PROCESS]
-    if not cross:
+    handoffs = [s for s in sm.states.values() if s.handoff]
+    spawners = [s for s in sm.states.values() if s.spawns is not None]
+    if not handoffs and not spawners:
         return []
     out = ["## Cross-process handoffs", ""]
-    entries = [t for t in cross if t.source == "[*]"]
-    exits = [t for t in cross if t.destination == "[*]"]
-    if entries:
-        out.append("**Entries** (issues arriving from other processes):")
+    if handoffs:
+        out.append("**Handoff states** (shared resting states declared in ≥2 processes):")
         out.append("")
-        for t in entries:
-            kind = t.cross_process_kind or "shared"
-            other = t.cross_process_other or "?"
-            out.append(
-                f"- `{t.destination}` ← process `{other}` ({kind}) — `{t.label}`"
+        for s in handoffs:
+            out.append(f"- `{s.name}` — interface state, also declared by the partner process(es).")
+        out.append("")
+    if spawners:
+        out.append("**Spawns** (states that create child issues on other processes):")
+        out.append("")
+        for s in spawners:
+            sp = s.spawns
+            assert sp is not None
+            kind = "subprocess" if s.state_class is StateClass.WORKING else "independent"
+            head = (
+                f"- `{s.name}` ({kind}) → process `{sp.process}` "
+                f"as `{sp.issue_type}` issue at `{sp.initial_state}`"
             )
-        out.append("")
-    if exits:
-        out.append("**Exits** (issues handed to other processes):")
-        out.append("")
-        for t in exits:
-            kind = t.cross_process_kind or "shared"
-            other = t.cross_process_other or "?"
-            out.append(
-                f"- `{t.source}` → process `{other}` ({kind}) — `{t.label}`"
-            )
+            out.append(head)
+            for child_term, parent_next in sp.on_terminal:
+                out.append(
+                    f"    - on child `{child_term}` → parent `{parent_next}`"
+                )
         out.append("")
     return out
 

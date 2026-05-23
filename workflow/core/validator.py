@@ -52,8 +52,17 @@ def validate_state_machine(
     catalog: HCPCatalog | None,
     grants: dict[str, TrustGrant] | None = None,
     issue_type_directory: IssueTypeDirectory | None = None,
+    handoff_index: dict[str, set[str]] | None = None,
+    sibling_machines: dict[str, StateMachine] | None = None,
 ) -> list[ValidationFinding]:
-    """Run every static cross-artifact check; return findings."""
+    """Run every static cross-artifact check; return findings.
+
+    `handoff_index`, when provided, maps `state_name → {process_name, ...}` —
+    the set of processes that declare each `handoff: true` state. The
+    validator checks every `handoff: true` state in this state machine
+    has at least one OTHER process declaring the same state (handovers
+    are interfaces and require two parties).
+    """
     grants = grants or {}
     findings: list[ValidationFinding] = []
 
@@ -64,6 +73,10 @@ def validate_state_machine(
     findings.extend(_check_working_states_are_claim_destinations(state_machine))
     findings.extend(_check_level_keywords_not_on_diagram(state_machine))
     findings.extend(_check_issue_types_resolved(state_machine, issue_type_directory))
+    if handoff_index is not None:
+        findings.extend(_check_handoffs_have_partners(state_machine, handoff_index))
+    if sibling_machines is not None:
+        findings.extend(_check_spawns(state_machine, sibling_machines))
 
     if catalog is not None:
         findings.extend(_check_legend_catalog_sync(state_machine, catalog))
@@ -364,8 +377,8 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
     source/destination state-class rules:
 
     - CLAIM: resting → working
-    - ROLE_ACTION: working → resting | terminal
-    - EXTERNAL: resting → resting | terminal
+    - ADVANCE: working → resting | terminal
+    - EVENT: resting → resting | terminal
     - CROSS_PROCESS: resting → [*] | [*] → resting (handoffs between
       processes, both endpoints are resting; one side is always [*])
 
@@ -407,8 +420,8 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
                     )
                 )
 
-        # ROLE_ACTION: working → resting | terminal
-        elif t.transition_type is TransitionType.ROLE_ACTION:
+        # ADVANCE: working → resting | terminal
+        elif t.transition_type is TransitionType.ADVANCE:
             if src_state is not None and src_state.state_class is not StateClass.WORKING:
                 findings.append(
                     ValidationFinding(
@@ -437,12 +450,12 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
                     )
                 )
 
-        # EXTERNAL: resting → resting | terminal.
+        # EVENT: resting → resting | terminal.
         # Note: `terminal_state → [*]` is the conventional sink marker for a
         # terminal — visual, not a real transition. Skip class checks when the
         # destination is `[*]` (the sink). When the source is `[*]` (entry),
         # the destination must be RESTING.
-        elif t.transition_type is TransitionType.EXTERNAL:
+        elif t.transition_type is TransitionType.EVENT:
             if t.destination == "[*]":
                 pass  # sink marker; no class rule applies
             else:
@@ -619,4 +632,167 @@ def _check_issue_types_resolved(
                     location=state_machine.source_path,
                 )
             )
+    return findings
+
+
+def _check_handoffs_have_partners(
+    state_machine: StateMachine,
+    handoff_index: dict[str, set[str]],
+) -> list[ValidationFinding]:
+    """Every `handoff: true` resting state must be declared in at least one
+    OTHER process. A handover with no partner is misconfigured.
+    """
+    findings: list[ValidationFinding] = []
+    for state in state_machine.states.values():
+        if not state.handoff:
+            continue
+        partners = handoff_index.get(state.name, set()) - {state_machine.name}
+        if not partners:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r} is marked `handoff: true` "
+                        f"but no other process declares the same state. A "
+                        f"handover requires at least two parties — either "
+                        f"add the state (with `handoff: true`) to the "
+                        f"receiving / sending process, or remove the flag "
+                        f"if this isn't actually a cross-process interface."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+    return findings
+
+
+def _check_spawns(
+    state_machine: StateMachine,
+    sibling_machines: dict[str, StateMachine],
+) -> list[ValidationFinding]:
+    """Validate every state's `spawns` declaration against the target process.
+
+    - Target process must exist in the sibling machines map.
+    - issue_type must be in the target's accepted_issue_types (derived
+      union of its working-state issue_types).
+    - initial_state must exist on the target and be RESTING.
+    - Working-state spawns: on_terminal must EXHAUSTIVELY cover every
+      terminal state on the target process. Any unmapped child terminal
+      is an ERROR.
+    - Each on_terminal value (parent next state) must exist on this
+      state machine.
+    """
+    findings: list[ValidationFinding] = []
+    for state in state_machine.states.values():
+        spawn = state.spawns
+        if spawn is None:
+            continue
+        target = sibling_machines.get(spawn.process)
+        if target is None:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r}: `spawns.process` "
+                        f"{spawn.process!r} is not a known process."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+            continue
+        if spawn.issue_type not in target.accepted_issue_types:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r}: `spawns.issue_type` "
+                        f"{spawn.issue_type!r} is not accepted by process "
+                        f"{spawn.process!r} (accepts: "
+                        f"{target.accepted_issue_types})."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+        target_initial = target.states.get(spawn.initial_state)
+        if target_initial is None:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r}: `spawns.initial_state` "
+                        f"{spawn.initial_state!r} is not declared on "
+                        f"process {spawn.process!r}."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+        elif target_initial.state_class is not StateClass.RESTING:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r}: `spawns.initial_state` "
+                        f"{spawn.initial_state!r} on process "
+                        f"{spawn.process!r} must be resting, not "
+                        f"{target_initial.state_class.value}."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+
+        # Working-state spawns require exhaustive on_terminal coverage.
+        if state.state_class is StateClass.WORKING:
+            target_terminals = {
+                s.name for s in target.states.values()
+                if s.state_class is StateClass.TERMINAL
+            }
+            declared_terminals = {k for k, _ in spawn.on_terminal}
+            missing = target_terminals - declared_terminals
+            if missing:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `spawns.on_terminal` "
+                            f"must exhaustively cover every terminal of "
+                            f"process {spawn.process!r}. Missing: "
+                            f"{sorted(missing)}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            unknown = declared_terminals - target_terminals
+            if unknown:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `spawns.on_terminal` "
+                            f"references state(s) {sorted(unknown)} that "
+                            f"aren't terminals on process {spawn.process!r}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            # Each parent destination must exist on this machine.
+            for child_term, parent_next in spawn.on_terminal:
+                if parent_next not in state_machine.states:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#9",
+                            message=(
+                                f"State {state.name!r}: `spawns.on_terminal"
+                                f"[{child_term!r}]` → {parent_next!r} is "
+                                f"not a state on this process."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
     return findings

@@ -322,6 +322,35 @@ def build_parser() -> argparse.ArgumentParser:
     _add_body_args(p_advance, required=False)
     p_advance.set_defaults(func=_do_advance)
 
+    p_event = subparsers.add_parser(
+        "event",
+        help="Fire a system/event-type transition (no agent role required).",
+        description=(
+            "Fire an `event`-type transition. Distinct from `advance`: events "
+            "represent system or time triggers (webhook, cron, SLA expiry), "
+            "not agent-driven progress. No agent-role check is performed. "
+            "Use --triggered-by to record the source of the event in the "
+            "audit comment (e.g., 'github-webhook:pr_merged', 'cron:sla_check'). "
+            "Refuses if the resolved transition isn't type `event`."
+        ),
+    )
+    p_event.add_argument(
+        "--to",
+        dest="destination",
+        required=True,
+        help="Target state for the event transition.",
+    )
+    p_event.add_argument("--issue", required=True, help="Issue identifier.")
+    p_event.add_argument(
+        "--triggered-by",
+        dest="triggered_by",
+        default=None,
+        help="String identifying the event source (e.g., "
+        "'github-webhook:pr_merged'). Recorded in the audit comment.",
+    )
+    _add_body_args(p_event, required=False)
+    p_event.set_defaults(func=_do_event)
+
     p_claim = subparsers.add_parser(
         "claim",
         help="Take responsibility for a resting issue.",
@@ -342,6 +371,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_release.add_argument("--issue", required=True)
     p_release.set_defaults(func=_do_release)
+
+    p_spawn = subparsers.add_parser(
+        "spawn",
+        help="Spawn a subprocess / follow-up issue per the parent state's `spawns` config.",
+        description=(
+            "Spawn a child issue on the target process declared by the "
+            "parent state's `spawns` field. The child gets a Refs #<parent> "
+            "footer plus a `parent-of:<parent>` label; the parent gets a "
+            "`subprocess:<child>` label so the auto-advance on child close "
+            "can resolve the relationship. For pr-typed spawns, --head is "
+            "required (PRs need a source branch)."
+        ),
+    )
+    p_spawn.add_argument("--issue", required=True, help="Parent issue identifier.")
+    p_spawn.add_argument(
+        "--title",
+        default=None,
+        help="Child issue title. Defaults to '<spawn-state> follow-up for #<parent>'.",
+    )
+    p_spawn.add_argument(
+        "--head",
+        default=None,
+        help="(PR-typed spawns only) Source branch for the child pull request.",
+    )
+    p_spawn.add_argument(
+        "--base",
+        default=None,
+        help="(PR-typed spawns only) Target branch.",
+    )
+    _add_body_args(p_spawn, required=False)
+    p_spawn.set_defaults(func=_do_spawn)
 
     # --- Catalogued — block-level ---
 
@@ -993,7 +1053,7 @@ def _print_next_actions(
     actions: list[Any],
     *,
     current_state: str | None,
-    wip_from: str | None,
+    last_state: str | None,
 ) -> None:
     """Human/agent-readable next-actions block.
 
@@ -1068,8 +1128,8 @@ def _print_next_actions(
         if dst_bits:
             print(f"    destination: {', '.join(dst_bits)}")
 
-    if wip_from is not None:
-        print(f"  release  # returns to {wip_from!r}")
+    if last_state is not None:
+        print(f"  release  # returns to {last_state!r}")
 
 
 def _print_result(
@@ -1142,10 +1202,10 @@ def _print_result(
                 context.grants,
                 state.state,
             )
-            if actions or state.wip_from is not None:
+            if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, wip_from=state.wip_from
+                    actions, current_state=state.state, last_state=state.last_state
                 )
 
 
@@ -1205,6 +1265,167 @@ def _do_advance(args: argparse.Namespace) -> int:
             actor=context.agent_role,
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
+
+        # If this advance just landed the issue on a terminal AND the issue
+        # has a `parent-of:` label, propagate to the parent per the parent
+        # state's spawns.on_terminal mapping.
+        if not ctx["dry_run"]:
+            _propagate_to_parent_on_terminal(ctx, args.issue, args.destination)
+
+        return 0
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+
+
+def _propagate_to_parent_on_terminal(
+    ctx: dict, child_id: str, child_destination: str
+) -> None:
+    """If the child issue advanced to a terminal AND has a parent link,
+    auto-advance the parent per `spawns.on_terminal`.
+
+    Lazy / eager: triggered at child-advance time. The parent's transition
+    fires as a separate operation (a system-driven event); we log success/
+    failure but don't fail the child advance if the parent advance fails.
+    """
+    from workflow.config import build_registry
+    from workflow.core.model.state_machine import StateClass
+
+    try:
+        registry = build_registry(
+            agent_home=ctx.get("agent_home"),
+            workflow_dir=ctx.get("workflow_dir"),
+            backend=None,
+            grants_dir=ctx.get("grants_dir"),
+        )
+        if registry is None:
+            return
+
+        # Confirm the child landed on a terminal.
+        child_process = registry.find_process_for_state(child_destination)
+        if child_process is None:
+            return
+        child_ctx = registry.get_process(child_process)
+        child_state_decl = child_ctx.state_machine.states.get(child_destination)
+        if child_state_decl is None or child_state_decl.state_class is not StateClass.TERMINAL:
+            return
+
+        # Look up the child's parent via the `parent-of:` label.
+        backend = _build_backend(ctx)
+        child_now = backend.read_issue(child_id)
+        parent_id = None
+        for label, val in (child_now.extras or {}).items():
+            if label == "parent-of":
+                parent_id = val
+                break
+        # Fallback: read labels directly via gh.
+        if parent_id is None:
+            try:
+                raw = backend._gh(
+                    "issue", "view", str(child_id),
+                    "--repo", backend.repo, "--json", "labels",
+                )
+                import json as _j
+                for lbl in (_j.loads(raw).get("labels") or []):
+                    name = lbl.get("name", "")
+                    if name.startswith("parent-of:"):
+                        parent_id = name[len("parent-of:"):]
+                        break
+            except Exception:
+                pass
+        if not parent_id:
+            return
+
+        # Resolve the parent's spawns.on_terminal mapping for this terminal.
+        parent_now = backend.read_issue(parent_id)
+        if parent_now.state is None:
+            return
+        parent_process = registry.find_process_for_state(parent_now.state)
+        if parent_process is None:
+            return
+        parent_ctx = registry.get_process(parent_process)
+        parent_state_decl = parent_ctx.state_machine.states.get(parent_now.state)
+        if parent_state_decl is None or parent_state_decl.spawns is None:
+            return
+        parent_next = parent_state_decl.spawns.parent_next_state(child_destination)
+        if parent_next is None:
+            print(
+                f"  (parent #{parent_id} not auto-advanced: child terminal "
+                f"{child_destination!r} isn't in spawns.on_terminal.)"
+            )
+            return
+
+        # Fire the parent advance. Use the advance_op with actor=None — the
+        # advance is system-driven, triggered by child close.
+        parent_controller = _build_controller(parent_ctx, dry_run=False)
+        advance_op.run(
+            parent_controller,
+            issue_id=parent_id,
+            destination=parent_next,
+            body_text=(
+                f"**Auto-advance**: child issue #{child_id} reached terminal "
+                f"`{child_destination}` → parent advanced per spawns.on_terminal."
+            ),
+            actor=None,
+        )
+        print(f"  Auto-advanced parent #{parent_id} → {parent_next!r}.")
+    except Exception as exc:
+        logger.warning("Auto-advance to parent failed (non-fatal): %s", exc)
+
+
+def _do_event(args: argparse.Namespace) -> int:
+    """Fire an event-type transition (no agent role required).
+
+    Verifies the resolved transition is of type EVENT — refuses otherwise so
+    automations can't accidentally trip role_action / claim paths. Prepends
+    the `--triggered-by` source to the body comment for audit clarity.
+    """
+    from workflow.core.model.state_machine import TransitionType
+
+    ctx = _ctx_obj_from_args(args)
+    try:
+        context = _build_context_for_issue(ctx, args.issue, fallback_state=args.destination)
+
+        # Resolve the issue's current state so we can verify the transition type.
+        backend = _build_backend(ctx)
+        state = backend.read_issue(args.issue)
+        source = state.state or args.destination  # for fallback on intake events
+
+        matches = [
+            t
+            for t in context.state_machine.transitions
+            if t.source == source and t.destination == args.destination
+        ]
+        if not matches:
+            raise ConfigError(
+                f"No transition from {source!r} to {args.destination!r} in "
+                f"workflow {context.state_machine.name!r}."
+            )
+        if matches[0].transition_type is not TransitionType.EVENT:
+            raise ConfigError(
+                f"Transition {source!r} → {args.destination!r} is type "
+                f"{matches[0].transition_type.value!r}, not `event`. Use "
+                f"`workflow advance` for agent-driven transitions."
+            )
+
+        # Compose the body with the triggered-by prefix.
+        user_body = _resolve_body(args)
+        triggered_by = getattr(args, "triggered_by", None)
+        if triggered_by:
+            prefix = f"**Triggered by**: `{triggered_by}`"
+            body_text = f"{prefix}\n\n{user_body.rstrip()}" if user_body else prefix
+        else:
+            body_text = user_body
+
+        controller = _build_controller(context, dry_run=ctx["dry_run"])
+        result = advance_op.run(
+            controller,
+            issue_id=args.issue,
+            destination=args.destination,
+            body_text=body_text,
+            actor=None,  # event transitions skip role check
+        )
+        _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
         _handle_workflow_error(exc)
@@ -1228,6 +1449,138 @@ def _do_claim(args: argparse.Namespace) -> int:
             destination=args.destination,
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
+        return 0
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+
+
+def _do_spawn(args: argparse.Namespace) -> int:
+    """Spawn a subprocess / follow-up issue per parent state's `spawns` config."""
+    from workflow.config import build_registry
+
+    ctx = _ctx_obj_from_args(args)
+    try:
+        backend = _build_backend(ctx)
+        parent_state = backend.read_issue(args.issue)
+        if parent_state.state is None:
+            raise ConfigError(
+                f"Issue #{args.issue} has no `state:` label; cannot resolve spawn config."
+            )
+
+        registry = build_registry(
+            agent_home=ctx.get("agent_home"),
+            workflow_dir=ctx.get("workflow_dir"),
+            backend=None,
+            grants_dir=ctx.get("grants_dir"),
+        )
+        if registry is None:
+            raise ConfigError(
+                "No workflows directory found. Pass --workflow-dir or set WORKFLOW_DIR."
+            )
+
+        parent_process = registry.find_process_for_state(parent_state.state)
+        if parent_process is None:
+            raise ConfigError(
+                f"State {parent_state.state!r} is not declared in any process."
+            )
+        parent_ctx = registry.get_process(parent_process)
+        sm_state = parent_ctx.state_machine.states.get(parent_state.state)
+        if sm_state is None or sm_state.spawns is None:
+            raise ConfigError(
+                f"State {parent_state.state!r} has no `spawns` config; "
+                f"nothing to spawn from here."
+            )
+        spawn = sm_state.spawns
+
+        # Resolve child issue type to determine entity (issue vs PR).
+        target_ctx = registry.get_process(spawn.process)
+        type_entry = None
+        if target_ctx.issue_type_directory is not None:
+            try:
+                type_entry = target_ctx.issue_type_directory.get(spawn.issue_type)
+            except KeyError:
+                raise ConfigError(
+                    f"Child issue type {spawn.issue_type!r} not in issue-types.json."
+                )
+        is_pr = type_entry is not None and type_entry.github_entity == "pull_request"
+        if is_pr and not args.head:
+            raise ConfigError(
+                "--head is required for pr-typed spawns (PRs need a source branch)."
+            )
+
+        title = args.title or f"{parent_state.state} follow-up for #{args.issue}"
+        user_body = _resolve_body(args) or ""
+        footer = (
+            f"\n\n---\n\n"
+            f"**Spawned from**: state `{parent_state.state}` of process "
+            f"`{parent_process}` (parent #{args.issue}).\n\n"
+            f"Refs #{args.issue}\n"
+        )
+        body = user_body.rstrip() + footer
+
+        if ctx["dry_run"]:
+            print(f"[dry-run] would spawn child on process {spawn.process!r}:")
+            print(f"  parent:        #{args.issue} (state {parent_state.state!r})")
+            print(f"  issue_type:    {spawn.issue_type}")
+            print(f"  initial_state: {spawn.initial_state}")
+            print(f"  title:         {title}")
+            if is_pr:
+                print(f"  head:          {args.head}")
+                print(f"  base:          {args.base or '(repo default)'}")
+            print(f"  body:          {len(body)} character(s)")
+            return 0
+
+        if is_pr:
+            child_id = backend.create_pull_request(
+                title=title,
+                body=body,
+                state=spawn.initial_state,
+                head=args.head,
+                base=args.base,
+                draft=spawn.initial_state == "draft",
+                extra_labels=[f"parent-of:{args.issue}"],
+            )
+        else:
+            child_id = backend.create_issue(
+                title=title,
+                body=body,
+                state=spawn.initial_state,
+                extra_labels=[
+                    f"parent-of:{args.issue}",
+                    f"type:{spawn.issue_type}",
+                ],
+                issue_type=type_entry.github_issue_type if type_entry else None,
+            )
+
+        # Mark the parent with the subprocess id.
+        from workflow.backends.base import MarkerChange
+
+        backend.apply_marker_change(
+            args.issue,
+            MarkerChange(),  # no marker changes; we add the label out-of-band
+        )
+        backend.ensure_label(f"subprocess:{child_id}")
+        backend._gh(
+            "issue", "edit", str(args.issue),
+            "--repo", backend.repo,
+            "--add-label", f"subprocess:{child_id}",
+        )
+
+        if ctx["json_output"]:
+            print(_json.dumps({
+                "parent": args.issue,
+                "child": child_id,
+                "process": spawn.process,
+                "issue_type": spawn.issue_type,
+                "initial_state": spawn.initial_state,
+            }, indent=2))
+        else:
+            print(
+                f"Spawned child #{child_id} on process {spawn.process!r} "
+                f"(issue_type={spawn.issue_type}, state={spawn.initial_state}) "
+                f"from parent #{args.issue}."
+            )
         return 0
     except WorkflowError as exc:
         _handle_workflow_error(exc)
@@ -1726,7 +2079,7 @@ def _do_create(args: argparse.Namespace) -> int:
 
         # Create at the initial state with no claim label. Claiming, if
         # requested, runs as a second operation so the state machine moves
-        # resting → working properly (sets wip:<role> AND wip-from:<initial_state>).
+        # resting → working properly (sets wip:<role> AND last-state:<initial_state>).
         try:
             new_id = backend.create_issue(
                 title=args.title,
@@ -1770,7 +2123,7 @@ def _do_create(args: argparse.Namespace) -> int:
         }
         if claim_result and claim_result.post_state:
             payload["state"] = claim_result.post_state.state
-            payload["wip_from"] = claim_result.post_state.wip_from
+            payload["last_state"] = claim_result.post_state.last_state
         print(_json.dumps(payload, indent=2))
         return 0
 
@@ -1797,10 +2150,10 @@ def _do_create(args: argparse.Namespace) -> int:
                 claim_context.grants,
                 post.state,
             )
-            if actions or post.wip_from is not None:
+            if actions or post.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=post.state, wip_from=post.wip_from
+                    actions, current_state=post.state, last_state=post.last_state
                 )
     else:
         # No claim: show actions from the resting initial state.
@@ -1817,7 +2170,7 @@ def _do_create(args: argparse.Namespace) -> int:
             )
             if actions:
                 print("")
-                _print_next_actions(actions, current_state=args.initial_state, wip_from=None)
+                _print_next_actions(actions, current_state=args.initial_state, last_state=None)
     return 0
 
 
@@ -2006,10 +2359,10 @@ def _do_comment(args: argparse.Namespace) -> int:
                 context.grants,
                 state.state,
             )
-            if actions or state.wip_from is not None:
+            if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, wip_from=state.wip_from
+                    actions, current_state=state.state, last_state=state.last_state
                 )
     except (BackendError, WorkflowError) as exc:
         logger.debug("comment: could not resolve next actions: %s", exc)
@@ -2085,10 +2438,10 @@ def _do_edit(args: argparse.Namespace) -> int:
                 context.grants,
                 state.state,
             )
-            if actions or state.wip_from is not None:
+            if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, wip_from=state.wip_from
+                    actions, current_state=state.state, last_state=state.last_state
                 )
     except (BackendError, WorkflowError) as exc:
         logger.debug("edit: could not resolve next actions: %s", exc)
@@ -2148,7 +2501,7 @@ def _do_view(args: argparse.Namespace) -> int:
                     "id": state.issue_id,
                     "state": state.state,
                     "claim": state.agent_claim,
-                    "wip_from": state.wip_from,
+                    "last_state": state.last_state,
                     "awaiting_gate": state.awaiting_gate,
                     "reviewing": state.reviewing,
                     "audit_pending": state.audit_pending,
@@ -2171,7 +2524,7 @@ def _do_view(args: argparse.Namespace) -> int:
     print("-" * len(header))
     print(f"state:           {state.state or '-'}")
     print(f"claim:           {state.agent_claim or '-'}")
-    print(f"wip from:        {state.wip_from or '-'}")
+    print(f"wip from:        {state.last_state or '-'}")
     print(f"awaiting gate:   {state.awaiting_gate or '-'}")
     print(f"audit pending:   {state.audit_pending or '-'}")
     print(f"awaiting input:  {'yes' if state.awaiting_input else 'no'}")
@@ -2184,9 +2537,9 @@ def _do_view(args: argparse.Namespace) -> int:
         human_claim = "advising"
     print(f"human claim:     {human_claim or '-'}")
 
-    if actions or state.wip_from is not None:
+    if actions or state.last_state is not None:
         print("")
-        _print_next_actions(actions, current_state=state.state, wip_from=state.wip_from)
+        _print_next_actions(actions, current_state=state.state, last_state=state.last_state)
 
     if comments:
         print("")
@@ -2355,18 +2708,36 @@ def _do_validate(args: argparse.Namespace) -> int:
         )
         return 2
 
-    results: list[tuple[str, Any, Any, list]] = []
+    # Build a cross-process handoff index: state_name → {process names declaring
+    # that state with handoff: true}. The validator uses this to confirm every
+    # handoff has at least one partner process.
+    handoff_index: dict[str, set[str]] = {}
+    contexts: dict[str, Any] = {}
     for wf_name in registry.discovered_processes():
         try:
             wf_context = registry.get_process(wf_name)
         except (ConfigError, ParseError) as exc:
             logger.warning("Skipping workflow %r: %s", wf_name, exc)
             continue
+        contexts[wf_name] = wf_context
+        for state in wf_context.state_machine.states.values():
+            if state.handoff:
+                handoff_index.setdefault(state.name, set()).add(wf_name)
+
+    # Sibling-machine index for cross-process spawn validation.
+    sibling_machines = {
+        name: ctx.state_machine for name, ctx in contexts.items()
+    }
+
+    results: list[tuple[str, Any, Any, list]] = []
+    for wf_name, wf_context in contexts.items():
         findings = validate_state_machine(
             wf_context.state_machine,
             wf_context.catalog,
             wf_context.grants,
             issue_type_directory=wf_context.issue_type_directory,
+            handoff_index=handoff_index,
+            sibling_machines=sibling_machines,
         )
         results.append((wf_name, wf_context.state_machine, wf_context.catalog, findings))
 
@@ -2648,7 +3019,7 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
 
     - `state:<name>` for every state in every workflow.
     - `wip:<role_id>` for every role in roles.json.
-    - `wip-from:<state>` for every resting state (origin marker).
+    - `last-state:<state>` for every resting state (origin marker).
     - The five HITL singleton labels (`hitl:reviewing`, `hitl:auditing`,
       `hitl:advising`, `hitl:awaiting-input`, `hitl:resolved`).
     - `hitl:awaiting-<gate>` / `hitl:audit-<gate>` per catalogued HCP.
@@ -2691,7 +3062,7 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
         for state_name, state in wf_context.state_machine.states.items():
             labels.add(f"state:{state_name}")
             if state.state_class.value == "resting":
-                labels.add(f"wip-from:{state_name}")
+                labels.add(f"last-state:{state_name}")
 
         if wf_context.catalog:
             for hcp in wf_context.catalog.entries.values():

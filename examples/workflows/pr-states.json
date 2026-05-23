@@ -64,22 +64,21 @@
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "draft", "type": "cross_process", "label": "from process inner-loop (developer opens draft PR at ticket claim)", "kind": "spawn", "process": "inner-loop"},
     {"source": "draft", "destination": "drafting", "type": "claim", "label": "developer claims draft"},
-    {"source": "drafting", "destination": "needs_review", "type": "role_action", "label": "developer marks PR ready for review"},
+    {"source": "drafting", "destination": "needs_review", "type": "advance", "label": "developer marks PR ready for review"},
     {"source": "needs_review", "destination": "reviewing", "type": "claim", "label": "reviewer claims PR"},
-    {"source": "reviewing", "destination": "needs_qa", "type": "role_action", "label": "reviewer approves PR"},
-    {"source": "reviewing", "destination": "qa_passed", "type": "role_action", "label": "reviewer approves hotfix PR (QA skipped, IC discretion)"},
-    {"source": "reviewing", "destination": "changes_requested", "type": "role_action", "label": "reviewer requests changes"},
+    {"source": "reviewing", "destination": "needs_qa", "type": "advance", "label": "reviewer approves PR"},
+    {"source": "reviewing", "destination": "qa_passed", "type": "advance", "label": "reviewer approves hotfix PR (QA skipped, IC discretion)"},
+    {"source": "reviewing", "destination": "changes_requested", "type": "advance", "label": "reviewer requests changes"},
     {"source": "changes_requested", "destination": "fixing_review", "type": "claim", "label": "developer claims PR for fixes"},
-    {"source": "fixing_review", "destination": "needs_review", "type": "role_action", "label": "developer re-requests review"},
+    {"source": "fixing_review", "destination": "needs_review", "type": "advance", "label": "developer re-requests review"},
     {"source": "needs_qa", "destination": "verifying", "type": "claim", "label": "QA claims PR"},
-    {"source": "verifying", "destination": "qa_passed", "type": "role_action", "label": "QA posts pass verdict"},
-    {"source": "verifying", "destination": "qa_failed", "type": "role_action", "label": "QA posts fail verdict"},
+    {"source": "verifying", "destination": "qa_passed", "type": "advance", "label": "QA posts pass verdict"},
+    {"source": "verifying", "destination": "qa_failed", "type": "advance", "label": "QA posts fail verdict"},
     {"source": "qa_failed", "destination": "fixing_qa", "type": "claim", "label": "developer claims PR for fixes"},
-    {"source": "fixing_qa", "destination": "needs_review", "type": "role_action", "label": "developer re-requests review"},
+    {"source": "fixing_qa", "destination": "needs_review", "type": "advance", "label": "developer re-requests review"},
     {"source": "qa_passed", "destination": "merging", "type": "claim", "label": "developer claims and merges"},
-    {"source": "merging", "destination": "staged", "type": "role_action", "label": "verified staging deploy"},
-    {"source": "merging", "destination": "needs_review", "type": "role_action", "label": "merge conflict or failed staging deploy"}
+    {"source": "merging", "destination": "staged", "type": "advance", "label": "verified staging deploy"},
+    {"source": "merging", "destination": "needs_review", "type": "advance", "label": "merge conflict or failed staging deploy"}
   ]
 }

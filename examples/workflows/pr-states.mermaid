@@ -1,9 +1,4 @@
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): draft from process inner-loop
-    %%
-
-    [*] --> draft: from process inner-loop (developer opens draft PR at ticket claim)
     draft --> drafting: developer claims draft
     drafting --> needs_review: developer marks PR ready for review
     needs_review --> reviewing: reviewer claims PR
@@ -22,7 +17,7 @@ stateDiagram-v2
     merging --> needs_review: merge conflict or failed staging deploy
     staged --> [*]: terminal (shipped)
 
-    note left of draft: reversible-fast
+    note right of draft: reversible-fast
     note right of drafting: role=developer, types=pr
     note right of needs_review: reversible-fast
     note right of reviewing: role=peer-reviewer, types=pr

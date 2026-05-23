@@ -46,14 +46,13 @@
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "measuring", "type": "cross_process", "label": "from process release (experiment released to production)", "kind": "spawn", "process": "release"},
-    {"source": "measuring", "destination": "measurement_complete", "type": "external", "label": "measurement window elapses (time)"},
+    {"source": "measuring", "destination": "measurement_complete", "type": "event", "label": "measurement window elapses (time)"},
     {"source": "measuring", "destination": "aborting", "type": "claim", "label": "PO claims to abort"},
-    {"source": "aborting", "destination": "aborted", "type": "role_action", "label": "PO publishes abort reason"},
+    {"source": "aborting", "destination": "aborted", "type": "advance", "label": "PO publishes abort reason"},
     {"source": "measurement_complete", "destination": "analyzing", "type": "claim", "label": "PO claims experiment for analysis"},
-    {"source": "analyzing", "destination": "measuring", "type": "role_action", "label": "PO extends experiment, resets window"},
-    {"source": "analyzing", "destination": "promoted", "type": "role_action", "label": "PO promotes experiment to feature (files promotion chore on process refinement)"},
-    {"source": "analyzing", "destination": "killed", "type": "role_action", "label": "PO kills experiment (files cleanup chore on process refinement)"},
-    {"source": "analyzing", "destination": "iterated", "type": "role_action", "label": "PO requests experiment iteration (files new experiment on process refinement)"}
+    {"source": "analyzing", "destination": "measuring", "type": "advance", "label": "PO extends experiment, resets window"},
+    {"source": "analyzing", "destination": "promoted", "type": "advance", "label": "PO promotes experiment to feature (files promotion chore on process refinement)"},
+    {"source": "analyzing", "destination": "killed", "type": "advance", "label": "PO kills experiment (files cleanup chore on process refinement)"},
+    {"source": "analyzing", "destination": "iterated", "type": "advance", "label": "PO requests experiment iteration (files new experiment on process refinement)"}
   ]
 }

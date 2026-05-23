@@ -30,15 +30,18 @@
     },
     "ready_for_dev": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "handoff": true
     },
     "ready_for_experiment": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "handoff": true
     },
     "ready_bounced": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "handoff": true
     },
     "deprioritized": {
       "class": "resting",
@@ -58,26 +61,23 @@
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "raw", "type": "external", "label": "issue created (external)"},
-    {"source": "[*]", "destination": "ready_bounced", "type": "cross_process", "label": "from process inner-loop", "kind": "shared", "process": "inner-loop"},
+    {"source": "[*]", "destination": "raw", "type": "event", "label": "issue created (external)"},
     {"source": "raw", "destination": "refining", "type": "claim", "label": "PM claims raw"},
-    {"source": "refining", "destination": "duplicate", "type": "role_action", "label": "PM marks duplicate"},
-    {"source": "refining", "destination": "wont_fix", "type": "role_action", "label": "PM marks won't-fix"},
-    {"source": "refining", "destination": "consult_requested", "type": "role_action", "label": "PM requests consult"},
+    {"source": "refining", "destination": "duplicate", "type": "advance", "label": "PM marks duplicate"},
+    {"source": "refining", "destination": "wont_fix", "type": "advance", "label": "PM marks won't-fix"},
+    {"source": "refining", "destination": "consult_requested", "type": "advance", "label": "PM requests consult"},
     {"source": "consult_requested", "destination": "consulting", "type": "claim", "label": "consultant claims consult"},
-    {"source": "consulting", "destination": "consult_complete", "type": "role_action", "label": "consultant posts findings"},
+    {"source": "consulting", "destination": "consult_complete", "type": "advance", "label": "consultant posts findings"},
     {"source": "consult_complete", "destination": "refining", "type": "claim", "label": "PM claims consult feedback"},
-    {"source": "consulting", "destination": "spiking", "type": "role_action", "label": "consultant creates spike sub-issue (spawns spike to inner-loop ready_for_spike)"},
+    {"source": "consulting", "destination": "spiking", "type": "advance", "label": "consultant creates spike sub-issue (spawns spike to inner-loop ready_for_spike)"},
     {"source": "spiking", "destination": "consulting", "type": "claim", "label": "consultant claims spike findings"},
-    {"source": "refining", "destination": "ready_for_dev", "type": "role_action", "label": "PM marks ready (feat/bug/chore)"},
-    {"source": "refining", "destination": "ready_for_experiment", "type": "role_action", "label": "PM marks ready (exp)"},
-    {"source": "ready_for_dev", "destination": "[*]", "type": "cross_process", "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"},
-    {"source": "ready_for_experiment", "destination": "[*]", "type": "cross_process", "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"},
+    {"source": "refining", "destination": "ready_for_dev", "type": "advance", "label": "PM marks ready (feat/bug/chore)"},
+    {"source": "refining", "destination": "ready_for_experiment", "type": "advance", "label": "PM marks ready (exp)"},
     {"source": "ready_bounced", "destination": "refining", "type": "claim", "label": "PM claims bounced issue"},
-    {"source": "refining", "destination": "deprioritized", "type": "role_action", "label": "PM parks issue"},
-    {"source": "ready_for_dev", "destination": "deprioritized", "type": "role_action", "label": "PM parks issue"},
-    {"source": "ready_for_experiment", "destination": "deprioritized", "type": "role_action", "label": "PM parks issue"},
+    {"source": "refining", "destination": "deprioritized", "type": "advance", "label": "PM parks issue"},
+    {"source": "ready_for_dev", "destination": "deprioritized", "type": "advance", "label": "PM parks issue"},
+    {"source": "ready_for_experiment", "destination": "deprioritized", "type": "advance", "label": "PM parks issue"},
     {"source": "deprioritized", "destination": "refining", "type": "claim", "label": "PM claims to re-refine (staleness check)"},
-    {"source": "deprioritized", "destination": "wont_fix", "type": "role_action", "label": "PM kills parked issue"}
+    {"source": "deprioritized", "destination": "wont_fix", "type": "advance", "label": "PM kills parked issue"}
   ]
 }

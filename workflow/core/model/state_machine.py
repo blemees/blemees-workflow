@@ -70,9 +70,37 @@ class TransitionType(Enum):
     """
 
     CLAIM = "claim"  # resting → working
-    ROLE_ACTION = "role_action"  # working → resting or terminal
-    EXTERNAL = "external"  # system/time event
+    ADVANCE = "advance"  # working → resting or terminal (agent-driven)
+    EVENT = "event"  # system/time event (fired by automation, not an agent)
     CROSS_PROCESS = "cross_process"  # to/from another process's workflow
+
+
+@dataclass(frozen=True)
+class Spawn:
+    """Subprocess / spawn contract carried by a working or terminal state.
+
+    On a **working** state: the parent stays in the working state while a
+    child issue runs on another process. When the child reaches a
+    terminal, the parent auto-advances to the destination given by
+    `on_terminal[<child-terminal-name>]`. The map MUST cover every terminal
+    of the child process (validator enforces exhaustive coverage).
+
+    On a **terminal** state: an "independent spawn" — when the parent
+    closes, a new child issue is created. `on_terminal` is empty because
+    the parent is already terminating; there's nothing left to advance.
+    Typical use: postmortem opens when an incident closes.
+    """
+
+    process: str            # target process name
+    issue_type: str         # issue type to create on the target
+    initial_state: str      # initial state to create the child at
+    on_terminal: tuple[tuple[str, str], ...] = ()  # (child_terminal, parent_next_state)
+
+    def parent_next_state(self, child_terminal: str) -> str | None:
+        for k, v in self.on_terminal:
+            if k == child_terminal:
+                return v
+        return None
 
 
 @dataclass(frozen=True)
@@ -102,6 +130,15 @@ class State:
     terminal_taxonomy: TerminalTaxonomy | None = None
     roles: tuple[str, ...] = ()
     issue_types: tuple[str, ...] = ()
+    # Handover contract — `handoff: true` on a resting state declares it as
+    # the interface between two processes. The same state name appears in
+    # the other process(es)' state machines, also with `handoff: true`.
+    # The registry resolves the other end(s) by name. Only valid on resting
+    # states. Working / terminal states cannot be handover interfaces.
+    handoff: bool = False
+    # Subprocess / spawn contract. Only valid on working or terminal states.
+    # See Spawn docstring for the working-vs-terminal distinction.
+    spawns: Spawn | None = None
     # Backend-specific close reason for terminal states. REQUIRED on
     # terminals — every terminal closes the tracker's issue with this
     # reason (GitHub: "completed" or "not planned"). FORBIDDEN on resting
@@ -138,7 +175,7 @@ class Transition:
     destination: str  # State name
     label: str  # The transition label, with [hitl] stripped if present
     is_gated: bool = False
-    transition_type: TransitionType = TransitionType.ROLE_ACTION
+    transition_type: TransitionType = TransitionType.ADVANCE
     gate_name: str | None = None  # HCP catalog gate_name when is_gated
     cross_process_kind: str | None = None  # "shared" | "spawn" | None
     cross_process_other: str | None = None  # name of the other process

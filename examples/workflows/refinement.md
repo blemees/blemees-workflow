@@ -14,13 +14,12 @@
 ```mermaid
 stateDiagram-v2
     %% Cross-process interfaces:
-    %%   Entry (shared): ready_bounced from process inner-loop
-    %%   Exit  (shared): ready_for_dev to process inner-loop
-    %%   Exit  (shared): ready_for_experiment to process inner-loop
+    %%   Handoff: ready_for_dev (shared resting state)
+    %%   Handoff: ready_for_experiment (shared resting state)
+    %%   Handoff: ready_bounced (shared resting state)
     %%
 
     [*] --> raw: issue created (external)
-    [*] --> ready_bounced: from process inner-loop
     raw --> refining: PM claims raw
     refining --> duplicate: PM marks duplicate
     refining --> wont_fix: PM marks won't-fix
@@ -32,8 +31,6 @@ stateDiagram-v2
     spiking --> consulting: consultant claims spike findings
     refining --> ready_for_dev: PM marks ready (feat/bug/chore)
     refining --> ready_for_experiment: PM marks ready (exp)
-    ready_for_dev --> [*]: to process inner-loop
-    ready_for_experiment --> [*]: to process inner-loop
     ready_bounced --> refining: PM claims bounced issue
     refining --> deprioritized: PM parks issue
     ready_for_dev --> deprioritized: PM parks issue
@@ -49,9 +46,9 @@ stateDiagram-v2
     note right of consulting: roles=architect, designer, security-engineer, types=bug, feature, chore, experiment
     note right of consult_complete: reversible-fast
     note right of spiking: reversible-fast
-    note right of ready_for_dev: reversible-slow
-    note right of ready_for_experiment: reversible-slow
-    note right of ready_bounced: reversible-fast
+    note right of ready_for_dev: handoff, reversible-slow
+    note right of ready_for_experiment: handoff, reversible-slow
+    note right of ready_bounced: handoff, reversible-fast
     note right of deprioritized: reversible-fast
     note right of duplicate: reversible-fast
     note right of wont_fix: reversible-fast
@@ -78,35 +75,29 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `raw` | external | 'issue created (external)' | — | — |
-| `[*]` | `ready_bounced` | cross_process | 'from process inner-loop' | — | — |
+| `[*]` | `raw` | event | 'issue created (external)' | — | — |
 | `raw` | `refining` | claim | 'PM claims raw' | — | — |
-| `refining` | `duplicate` | role_action | 'PM marks duplicate' | — | — |
-| `refining` | `wont_fix` | role_action | "PM marks won't-fix" | — | — |
-| `refining` | `consult_requested` | role_action | 'PM requests consult' | — | — |
+| `refining` | `duplicate` | advance | 'PM marks duplicate' | — | — |
+| `refining` | `wont_fix` | advance | "PM marks won't-fix" | — | — |
+| `refining` | `consult_requested` | advance | 'PM requests consult' | — | — |
 | `consult_requested` | `consulting` | claim | 'consultant claims consult' | — | — |
-| `consulting` | `consult_complete` | role_action | 'consultant posts findings' | — | — |
+| `consulting` | `consult_complete` | advance | 'consultant posts findings' | — | — |
 | `consult_complete` | `refining` | claim | 'PM claims consult feedback' | — | — |
-| `consulting` | `spiking` | role_action | 'consultant creates spike sub-issue (spawns spike to inner-loop ready_for_spike)' | — | — |
+| `consulting` | `spiking` | advance | 'consultant creates spike sub-issue (spawns spike to inner-loop ready_for_spike)' | — | — |
 | `spiking` | `consulting` | claim | 'consultant claims spike findings' | — | — |
-| `refining` | `ready_for_dev` | role_action | 'PM marks ready (feat/bug/chore)' | — | — |
-| `refining` | `ready_for_experiment` | role_action | 'PM marks ready (exp)' | — | — |
-| `ready_for_dev` | `[*]` | cross_process | 'to process inner-loop' | — | — |
-| `ready_for_experiment` | `[*]` | cross_process | 'to process inner-loop' | — | — |
+| `refining` | `ready_for_dev` | advance | 'PM marks ready (feat/bug/chore)' | — | — |
+| `refining` | `ready_for_experiment` | advance | 'PM marks ready (exp)' | — | — |
 | `ready_bounced` | `refining` | claim | 'PM claims bounced issue' | — | — |
-| `refining` | `deprioritized` | role_action | 'PM parks issue' | — | — |
-| `ready_for_dev` | `deprioritized` | role_action | 'PM parks issue' | — | — |
-| `ready_for_experiment` | `deprioritized` | role_action | 'PM parks issue' | — | — |
+| `refining` | `deprioritized` | advance | 'PM parks issue' | — | — |
+| `ready_for_dev` | `deprioritized` | advance | 'PM parks issue' | — | — |
+| `ready_for_experiment` | `deprioritized` | advance | 'PM parks issue' | — | — |
 | `deprioritized` | `refining` | claim | 'PM claims to re-refine (staleness check)' | — | — |
-| `deprioritized` | `wont_fix` | role_action | 'PM kills parked issue' | — | — |
+| `deprioritized` | `wont_fix` | advance | 'PM kills parked issue' | — | — |
 
 ## Cross-process handoffs
 
-**Entries** (issues arriving from other processes):
+**Handoff states** (shared resting states declared in ≥2 processes):
 
-- `ready_bounced` ← process `inner-loop` (shared) — `from process inner-loop`
-
-**Exits** (issues handed to other processes):
-
-- `ready_for_dev` → process `inner-loop` (shared) — `to process inner-loop`
-- `ready_for_experiment` → process `inner-loop` (shared) — `to process inner-loop`
+- `ready_for_dev` — interface state, also declared by the partner process(es).
+- `ready_for_experiment` — interface state, also declared by the partner process(es).
+- `ready_bounced` — interface state, also declared by the partner process(es).

@@ -1,9 +1,4 @@
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): ready_for_backport from process incident-response
-    %%
-
-    [*] --> ready_for_backport: from process incident-response (IC determines backport required)
     ready_for_backport --> cherry_picking: developer claims backport
     cherry_picking --> backport_pr_review: developer opens backport PR (spawns PR on process pr-review)
     backport_pr_review --> backport_merged: from process pr-review (backport PR merged to release branch)
@@ -11,7 +6,7 @@ stateDiagram-v2
     patch_releasing --> backported: from process release (patch deployed to production)
     backported --> [*]: terminal (shipped)
 
-    note left of ready_for_backport: reversible-slow
+    note right of ready_for_backport: reversible-slow
     note right of cherry_picking: role=developer, types=backport
     note right of backport_pr_review: reversible-fast
     note right of backport_merged: reversible-slow

@@ -26,7 +26,7 @@ class IssueState:
     # Origin marker — the resting state we claimed from. Recorded on `claim`
     # so `release` knows where to return the issue to. Eliminates the need
     # for the user to specify a destination on release.
-    wip_from: str | None = None
+    last_state: str | None = None
     # Framework-canonical issue type id (e.g., "bug", "experiment"). Set
     # at issue creation; immutable. Backends extract this from the type
     # encoding they were configured with — label encoding reads `type:<id>`
@@ -59,8 +59,8 @@ class MarkerChange:
     set_state: str | None = None  # new state name, if state advances
     set_agent_claim: str | None = None  # new agent role, or empty to clear
     clear_agent_claim: bool = False
-    set_wip_from: str | None = None  # origin resting state, set on claim
-    clear_wip_from: bool = False  # cleared on release / advance out of working
+    set_last_state: str | None = None  # origin resting state, set on claim
+    clear_last_state: bool = False  # cleared on release / advance out of working
     set_awaiting_gate: str | None = None
     clear_awaiting_gate: bool = False
     set_reviewing: bool | None = None

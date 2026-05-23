@@ -10,11 +10,6 @@
 
 ```mermaid
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): soaking from process release
-    %%
-
-    [*] --> soaking: from process release (first stage activated)
     soaking --> ready_for_stage_analysis: soak window elapses (time)
     ready_for_stage_analysis --> analyzing: on-call claims stage analysis
     analyzing --> soaking: on-call advances to next stage
@@ -26,7 +21,7 @@ stateDiagram-v2
     complete --> [*]: terminal (shipped)
     kill_switched --> [*]: terminal (reverted)
 
-    note left of soaking: reversible-slow
+    note right of soaking: reversible-slow
     note right of ready_for_stage_analysis: reversible-fast
     note right of analyzing: role=developer, types=release
     note right of holding: reversible-fast
@@ -51,18 +46,11 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `soaking` | cross_process | 'from process release (first stage activated)' | — | — |
-| `soaking` | `ready_for_stage_analysis` | external | 'soak window elapses (time)' | — | — |
+| `soaking` | `ready_for_stage_analysis` | event | 'soak window elapses (time)' | — | — |
 | `ready_for_stage_analysis` | `analyzing` | claim | 'on-call claims stage analysis' | — | — |
-| `analyzing` | `soaking` | role_action | 'on-call advances to next stage' | — | — |
-| `analyzing` | `complete` | role_action | 'on-call confirms final stage healthy' | — | — |
-| `analyzing` | `holding` | role_action | 'on-call pauses rollout' | — | — |
-| `analyzing` | `killing` | role_action | 'on-call claims to kill rollout' | — | — |
+| `analyzing` | `soaking` | advance | 'on-call advances to next stage' | — | — |
+| `analyzing` | `complete` | advance | 'on-call confirms final stage healthy' | — | — |
+| `analyzing` | `holding` | advance | 'on-call pauses rollout' | — | — |
+| `analyzing` | `killing` | advance | 'on-call claims to kill rollout' | — | — |
 | `holding` | `analyzing` | claim | 'on-call re-claims held rollout' | — | — |
-| `killing` | `kill_switched` | role_action | 'on-call disables flag, files compensating bug' | — | — |
-
-## Cross-process handoffs
-
-**Entries** (issues arriving from other processes):
-
-- `soaking` ← process `release` (spawn) — `from process release (first stage activated)`
+| `killing` | `kill_switched` | advance | 'on-call disables flag, files compensating bug' | — | — |

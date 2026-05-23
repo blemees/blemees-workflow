@@ -35,11 +35,11 @@ are gone — the schema demands intent.
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "raw", "type": "external", "label": "issue created"},
+    {"source": "[*]", "destination": "raw", "type": "event", "label": "issue created"},
     {"source": "raw", "destination": "refining", "type": "claim", "label": "product-manager claims raw"},
-    {"source": "refining", "destination": "ready_for_dev", "type": "role_action",
+    {"source": "refining", "destination": "ready_for_dev", "type": "advance",
      "label": "product-manager marks ready", "hitl": true},
-    {"source": "refining", "destination": "wont_fix", "type": "role_action",
+    {"source": "refining", "destination": "wont_fix", "type": "advance",
      "label": "product-manager marks wont-fix", "hitl": true},
     {"source": "ready_for_dev", "destination": "[*]", "type": "cross_process",
      "label": "to process inner-loop", "kind": "shared", "process": "inner-loop"}
@@ -80,7 +80,7 @@ are gone — the schema demands intent.
 ### Transitions
 - `source` (string, required): state id or `"[*]"`.
 - `destination` (string, required): state id or `"[*]"`.
-- `type` (string, required): `"claim"` | `"role_action"` | `"external"` |
+- `type` (string, required): `"claim"` | `"advance"` | `"event"` |
   `"cross_process"`.
 - `label` (string, required): the human-readable transition label.
 - `hitl` (bool, optional, default false): marks the transition as a HITL gate.
@@ -107,6 +107,7 @@ from typing import Any
 
 from workflow.core.model.state_machine import (
     ReversibilityClass,
+    Spawn,
     State,
     StateClass,
     StateMachine,
@@ -135,8 +136,8 @@ _TERMINAL_TAX = {tax.value: tax for tax in TerminalTaxonomy}
 
 _TRANSITION_TYPE = {
     "claim": TransitionType.CLAIM,
-    "role_action": TransitionType.ROLE_ACTION,
-    "external": TransitionType.EXTERNAL,
+    "advance": TransitionType.ADVANCE,
+    "event": TransitionType.EVENT,
     "cross_process": TransitionType.CROSS_PROCESS,
 }
 
@@ -394,6 +395,21 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"GitHub, use 'completed' or 'not planned'."
         )
 
+    handoff_raw = spec.get("handoff", False)
+    if not isinstance(handoff_raw, bool):
+        raise ParseError(
+            f"State {state_id!r}: `handoff` must be a boolean if present "
+            f"(got {type(handoff_raw).__name__})."
+        )
+    if handoff_raw and state_class is not StateClass.RESTING:
+        raise ParseError(
+            f"State {state_id!r}: `handoff` is only valid on resting "
+            f"states (handovers are the interface between processes; "
+            f"working / terminal states aren't interfaces)."
+        )
+
+    spawns = _parse_spawns(state_id, state_class, spec.get("spawns"))
+
     notes_raw = spec.get("notes", [])
     if notes_raw is None:
         notes_raw = []
@@ -418,7 +434,85 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         roles=roles,
         issue_types=state_issue_types,
         close_reason=close_reason,
+        handoff=handoff_raw,
+        spawns=spawns,
         notes=notes,
+    )
+
+
+def _parse_spawns(
+    state_id: str, state_class: StateClass, raw: Any
+) -> Spawn | None:
+    """Parse the optional `spawns` field on a working or terminal state.
+
+    Working states require `on_terminal` (the parent advances when the child
+    closes). Terminal states forbid `on_terminal` (the parent is already
+    closed). Resting states forbid `spawns` entirely.
+    """
+    if raw is None:
+        return None
+    if state_class is StateClass.RESTING:
+        raise ParseError(
+            f"State {state_id!r}: `spawns` is not valid on resting states "
+            f"(spawns happen from working states or as terminal-state "
+            f"independent spawns)."
+        )
+    if not isinstance(raw, dict):
+        raise ParseError(
+            f"State {state_id!r}: `spawns` must be an object "
+            f"(got {type(raw).__name__})."
+        )
+    process = raw.get("process")
+    if not isinstance(process, str) or not process.strip():
+        raise ParseError(
+            f"State {state_id!r}: `spawns.process` is required (target process name)."
+        )
+    issue_type = raw.get("issue_type")
+    if not isinstance(issue_type, str) or not issue_type.strip():
+        raise ParseError(
+            f"State {state_id!r}: `spawns.issue_type` is required (child issue type)."
+        )
+    initial_state = raw.get("initial_state")
+    if not isinstance(initial_state, str) or not initial_state.strip():
+        raise ParseError(
+            f"State {state_id!r}: `spawns.initial_state` is required "
+            f"(child's starting state)."
+        )
+
+    on_terminal_raw = raw.get("on_terminal")
+    on_terminal: list[tuple[str, str]] = []
+    if state_class is StateClass.WORKING:
+        if not isinstance(on_terminal_raw, dict) or not on_terminal_raw:
+            raise ParseError(
+                f"State {state_id!r}: `spawns.on_terminal` is required "
+                f"on working-state spawns and must be a non-empty object "
+                f"mapping {{child-terminal: parent-next-state}}."
+            )
+        for k, v in on_terminal_raw.items():
+            if not isinstance(k, str) or not k.strip():
+                raise ParseError(
+                    f"State {state_id!r}: `spawns.on_terminal` keys must "
+                    f"be child terminal state names (got {k!r})."
+                )
+            if not isinstance(v, str) or not v.strip():
+                raise ParseError(
+                    f"State {state_id!r}: `spawns.on_terminal[{k!r}]` must "
+                    f"be a parent state name (got {v!r})."
+                )
+            on_terminal.append((k.strip(), v.strip()))
+    else:  # TERMINAL
+        if on_terminal_raw is not None:
+            raise ParseError(
+                f"State {state_id!r}: `spawns.on_terminal` is not valid on "
+                f"terminal-state spawns (the parent is already closed). "
+                f"Remove the field for an independent spawn."
+            )
+
+    return Spawn(
+        process=process.strip(),
+        issue_type=issue_type.strip(),
+        initial_state=initial_state.strip(),
+        on_terminal=tuple(on_terminal),
     )
 
 
@@ -444,10 +538,13 @@ def _parse_transition(
         )
     transition_type = _TRANSITION_TYPE[type_raw]
 
+    # Label is optional for all types except external (which has no good
+    # default — it describes the system event that fired). When absent for
+    # other types, a structural label is generated below.
     label_raw = spec.get("label")
-    if not isinstance(label_raw, str):
-        raise ParseError(f"transitions[{idx}]: `label` must be a string.")
-    label = label_raw.strip()
+    if label_raw is not None and not isinstance(label_raw, str):
+        raise ParseError(f"transitions[{idx}]: `label` must be a string if present.")
+    label = label_raw.strip() if isinstance(label_raw, str) else ""
 
     hitl_raw = spec.get("hitl", False)
     if not isinstance(hitl_raw, bool):
@@ -478,10 +575,18 @@ def _parse_transition(
     cross_process_other: str | None = None
     if transition_type is TransitionType.CROSS_PROCESS:
         kind = spec.get("kind")
-        if kind not in ("shared", "spawn"):
+        if kind == "shared":
+            raise ParseError(
+                f"transitions[{idx}]: cross_process `kind: shared` was "
+                f"removed. Mark the shared resting state with `handoff: "
+                f"true` on each process's side instead — the state IS the "
+                f"contract; no [*] transition is needed."
+            )
+        if kind != "spawn":
             raise ParseError(
                 f"transitions[{idx}]: cross_process transitions require "
-                f"`kind` set to 'shared' or 'spawn' (got {kind!r})."
+                f"`kind: spawn` (got {kind!r}). Shared handovers use the "
+                f"`handoff: true` flag on the resting state."
             )
         process = spec.get("process")
         if not isinstance(process, str) or not process.strip():
@@ -491,6 +596,24 @@ def _parse_transition(
             )
         cross_process_kind = kind
         cross_process_other = process.strip()
+
+    # Auto-generate the label when absent (except for external, which has
+    # no good default and stays required for now).
+    if not label:
+        if transition_type is TransitionType.EVENT:
+            raise ParseError(
+                f"transitions[{idx}]: `label` is required on event "
+                f"transitions (describe the system event that fires it)."
+            )
+        label = _generate_label(
+            transition_type,
+            source,
+            destination,
+            cross_process_kind,
+            cross_process_other,
+            states.get(destination),
+            states.get(source),
+        )
 
     return Transition(
         source=source,
@@ -502,6 +625,42 @@ def _parse_transition(
         cross_process_kind=cross_process_kind,
         cross_process_other=cross_process_other,
     )
+
+
+def _generate_label(
+    transition_type: TransitionType,
+    source: str,
+    destination: str,
+    cross_process_kind: str | None,
+    cross_process_other: str | None,
+    dest_state: State | None,
+    source_state: State | None,
+) -> str:
+    """Structural label for a transition when the author omitted one.
+
+    - CLAIM: `{role(s)} claim {source}` (drawn from destination's roles)
+    - ADVANCE: `{role(s)} → {destination}` (drawn from source's roles)
+    - CROSS_PROCESS: `{to|from} process {other}` ([*]-touching form)
+    """
+    if transition_type is TransitionType.CLAIM:
+        if dest_state and dest_state.roles:
+            roles_str = ", ".join(dest_state.roles)
+            verb = "claims" if len(dest_state.roles) == 1 else "claim"
+            return f"{roles_str} {verb} {source}"
+        return f"claim into {destination}"
+    if transition_type is TransitionType.ADVANCE:
+        if source_state and source_state.roles:
+            roles_str = ", ".join(source_state.roles)
+            return f"{roles_str} → {destination}"
+        return f"→ {destination}"
+    if transition_type is TransitionType.CROSS_PROCESS:
+        if source == "[*]":
+            return f"from process {cross_process_other}"
+        if destination == "[*]":
+            return f"to process {cross_process_other}"
+        return f"{cross_process_kind} with process {cross_process_other}"
+    # event falls through; the caller already errored out.
+    return ""
 
 
 def _require_endpoint(spec: dict[str, Any], field: str, idx: int) -> str:

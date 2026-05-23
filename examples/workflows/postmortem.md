@@ -10,18 +10,13 @@
 
 ```mermaid
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): pending from process incident-response
-    %%
-
-    [*] --> pending: from process incident-response (incident stabilized)
     pending --> drafting: PM claims postmortem
     drafting --> ready_for_followups: PM completes postmortem narrative
     ready_for_followups --> creating_followups: PM claims for follow-up filing
     creating_followups --> complete: PM files compensating issues (spawn events to process refinement)
     complete --> [*]: terminal (resolved)
 
-    note left of pending: reversible-slow
+    note right of pending: reversible-slow
     note right of drafting: role=product-manager, types=postmortem
     note right of ready_for_followups: reversible-fast
     note right of creating_followups: role=product-manager, types=postmortem
@@ -42,14 +37,7 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `pending` | cross_process | 'from process incident-response (incident stabilized)' | — | — |
 | `pending` | `drafting` | claim | 'PM claims postmortem' | — | — |
-| `drafting` | `ready_for_followups` | role_action | 'PM completes postmortem narrative' | — | — |
+| `drafting` | `ready_for_followups` | advance | 'PM completes postmortem narrative' | — | — |
 | `ready_for_followups` | `creating_followups` | claim | 'PM claims for follow-up filing' | — | — |
-| `creating_followups` | `complete` | role_action | 'PM files compensating issues (spawn events to process refinement)' | — | — |
-
-## Cross-process handoffs
-
-**Entries** (issues arriving from other processes):
-
-- `pending` ← process `incident-response` (spawn) — `from process incident-response (incident stabilized)`
+| `creating_followups` | `complete` | advance | 'PM files compensating issues (spawn events to process refinement)' | — | — |

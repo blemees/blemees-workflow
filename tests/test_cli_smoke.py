@@ -797,16 +797,16 @@ def test_create_with_claim_creates_then_claims(
 ) -> None:
     """`--claim` creates the issue at the resting initial state, then runs
     a proper `claim` operation against it. This sets `wip:<role>` and
-    `wip-from:<initial_state>` atomically with moving to the working state —
+    `last-state:<initial_state>` atomically with moving to the working state —
     no resting-state-with-wip-label invariant violation."""
     from workflow.backends.base import IssueState
 
-    raw_state = IssueState(issue_id="99", state="raw", agent_claim=None, wip_from=None)
+    raw_state = IssueState(issue_id="99", state="raw", agent_claim=None, last_state=None)
     refining_state = IssueState(
         issue_id="99",
         state="refining",
         agent_claim="product-manager",
-        wip_from="raw",
+        last_state="raw",
     )
     with (
         mock.patch(
@@ -848,12 +848,12 @@ def test_create_with_claim_creates_then_claims(
     # Step 1: create_issue called with no wip label (initial state is resting).
     create_kwargs = create_mock.call_args.kwargs
     assert create_kwargs["extra_labels"] == []
-    # Step 2: claim marker change followed — moves state and sets wip + wip-from.
+    # Step 2: claim marker change followed — moves state and sets wip + last-state.
     assert apply_mock.called
     change = apply_mock.call_args.args[1]
     assert change.set_state == "refining"
     assert change.set_agent_claim == "product-manager"
-    assert change.set_wip_from == "raw"
+    assert change.set_last_state == "raw"
 
 
 def test_create_with_claim_but_no_agent_role_errors(
@@ -1019,7 +1019,7 @@ def test_edit_invokes_backend_with_title_and_body(
     """edit calls TrackerBackend.edit_issue with title and body content."""
     from workflow.backends.base import IssueState
 
-    state_after = IssueState(issue_id="42", state="raw", agent_claim=None, wip_from=None)
+    state_after = IssueState(issue_id="42", state="raw", agent_claim=None, last_state=None)
     with (
         mock.patch(
             "workflow.backends.github.GitHubBackend.edit_issue",

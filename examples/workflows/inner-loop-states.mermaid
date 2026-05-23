@@ -1,19 +1,14 @@
 stateDiagram-v2
     %% Cross-process interfaces:
-    %%   Entry (shared): ready_for_dev from process refinement
-    %%   Entry (shared): ready_for_experiment from process refinement
-    %%   Entry (spawn ): ready_for_spike from process refinement
-    %%   Entry (shared): ready_for_hotfix from process mitigation
-    %%   Exit  (shared): ready_bounced to process refinement
-    %%   Exit  (spawn ): staged to process release
-    %%   Exit  (spawn ): staged_experiment to process release
-    %%   Exit  (spawn ): staged_hotfix to process release
+    %%   Handoff: ready_for_dev (shared resting state)
+    %%   Handoff: ready_for_experiment (shared resting state)
+    %%   Handoff: ready_for_hotfix (shared resting state)
+    %%   Handoff: ready_bounced (shared resting state)
+    %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
+    %%   Spawn:   implementing_experiment → process pr (issue_type=pr, initial=draft)
+    %%   Spawn:   implementing_hotfix → process pr (issue_type=pr, initial=draft)
     %%
 
-    [*] --> ready_for_dev: from process refinement
-    [*] --> ready_for_experiment: from process refinement
-    [*] --> ready_for_spike: from process refinement (spawn — consultant creates spike sub-issue)
-    [*] --> ready_for_hotfix: from process mitigation
     ready_for_dev --> implementing: developer claims issue
     ready_for_experiment --> implementing_experiment: developer claims experiment
     ready_for_spike --> implementing_spike: developer claims spike
@@ -26,16 +21,12 @@ stateDiagram-v2
     pr_review --> staged: from process pr-review (PR merged)
     pr_review_experiment --> staged_experiment: from process pr-review (PR merged)
     pr_review_hotfix --> staged_hotfix: from process pr-review (PR merged)
-    ready_bounced --> [*]: to process refinement
-    staged --> [*]: to process release (standard train)
-    staged_experiment --> [*]: to process release (standard train)
-    staged_hotfix --> [*]: to process release (hotfix patch train)
     spike_completed --> [*]: terminal (resolved)
 
-    note left of ready_for_dev: reversible-slow
-    note right of ready_for_experiment: reversible-slow
+    note right of ready_for_dev: handoff, reversible-slow
+    note right of ready_for_experiment: handoff, reversible-slow
     note right of ready_for_spike: reversible-slow
-    note right of ready_for_hotfix: reversible-fast
+    note right of ready_for_hotfix: handoff, reversible-fast
     note right of implementing: role=developer, types=bug, feature, chore
     note right of implementing_experiment: role=developer, types=experiment
     note right of implementing_spike: role=developer, types=spike
@@ -47,4 +38,4 @@ stateDiagram-v2
     note right of staged_experiment: reversible-slow
     note right of staged_hotfix: reversible-slow
     note right of spike_completed: reversible-fast
-    note right of ready_bounced: reversible-fast
+    note right of ready_bounced: handoff, reversible-fast

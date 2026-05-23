@@ -1,12 +1,11 @@
 stateDiagram-v2
     %% Cross-process interfaces:
-    %%   Entry (shared): ready_bounced from process inner-loop
-    %%   Exit  (shared): ready_for_dev to process inner-loop
-    %%   Exit  (shared): ready_for_experiment to process inner-loop
+    %%   Handoff: ready_for_dev (shared resting state)
+    %%   Handoff: ready_for_experiment (shared resting state)
+    %%   Handoff: ready_bounced (shared resting state)
     %%
 
     [*] --> raw: issue created (external)
-    [*] --> ready_bounced: from process inner-loop
     raw --> refining: PM claims raw
     refining --> duplicate: PM marks duplicate
     refining --> wont_fix: PM marks won't-fix
@@ -18,8 +17,6 @@ stateDiagram-v2
     spiking --> consulting: consultant claims spike findings
     refining --> ready_for_dev: PM marks ready (feat/bug/chore)
     refining --> ready_for_experiment: PM marks ready (exp)
-    ready_for_dev --> [*]: to process inner-loop
-    ready_for_experiment --> [*]: to process inner-loop
     ready_bounced --> refining: PM claims bounced issue
     refining --> deprioritized: PM parks issue
     ready_for_dev --> deprioritized: PM parks issue
@@ -35,9 +32,9 @@ stateDiagram-v2
     note right of consulting: roles=architect, designer, security-engineer, types=bug, feature, chore, experiment
     note right of consult_complete: reversible-fast
     note right of spiking: reversible-fast
-    note right of ready_for_dev: reversible-slow
-    note right of ready_for_experiment: reversible-slow
-    note right of ready_bounced: reversible-fast
+    note right of ready_for_dev: handoff, reversible-slow
+    note right of ready_for_experiment: handoff, reversible-slow
+    note right of ready_bounced: handoff, reversible-fast
     note right of deprioritized: reversible-fast
     note right of duplicate: reversible-fast
     note right of wont_fix: reversible-fast

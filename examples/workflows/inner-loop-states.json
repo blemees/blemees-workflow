@@ -4,11 +4,13 @@
   "states": {
     "ready_for_dev": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "handoff": true
     },
     "ready_for_experiment": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "handoff": true
     },
     "ready_for_spike": {
       "class": "resting",
@@ -16,17 +18,34 @@
     },
     "ready_for_hotfix": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "handoff": true
     },
     "implementing": {
       "class": "working",
       "roles": ["developer"],
-      "issue_types": ["bug", "feature", "chore"]
+      "issue_types": ["bug", "feature", "chore"],
+      "spawns": {
+        "process": "pr",
+        "issue_type": "pr",
+        "initial_state": "draft",
+        "on_terminal": {
+          "staged": "staged"
+        }
+      }
     },
     "implementing_experiment": {
       "class": "working",
       "roles": ["developer"],
-      "issue_types": ["experiment"]
+      "issue_types": ["experiment"],
+      "spawns": {
+        "process": "pr",
+        "issue_type": "pr",
+        "initial_state": "draft",
+        "on_terminal": {
+          "staged": "staged_experiment"
+        }
+      }
     },
     "implementing_spike": {
       "class": "working",
@@ -36,7 +55,15 @@
     "implementing_hotfix": {
       "class": "working",
       "roles": ["developer"],
-      "issue_types": ["hotfix"]
+      "issue_types": ["hotfix"],
+      "spawns": {
+        "process": "pr",
+        "issue_type": "pr",
+        "initial_state": "draft",
+        "on_terminal": {
+          "staged": "staged_hotfix"
+        }
+      }
     },
     "pr_review": {
       "class": "resting",
@@ -70,29 +97,22 @@
     },
     "ready_bounced": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "handoff": true
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "ready_for_dev", "type": "cross_process", "label": "from process refinement", "kind": "shared", "process": "refinement"},
-    {"source": "[*]", "destination": "ready_for_experiment", "type": "cross_process", "label": "from process refinement", "kind": "shared", "process": "refinement"},
-    {"source": "[*]", "destination": "ready_for_spike", "type": "cross_process", "label": "from process refinement (spawn \u2014 consultant creates spike sub-issue)", "kind": "spawn", "process": "refinement"},
-    {"source": "[*]", "destination": "ready_for_hotfix", "type": "cross_process", "label": "from process mitigation", "kind": "shared", "process": "mitigation"},
     {"source": "ready_for_dev", "destination": "implementing", "type": "claim", "label": "developer claims issue"},
     {"source": "ready_for_experiment", "destination": "implementing_experiment", "type": "claim", "label": "developer claims experiment"},
     {"source": "ready_for_spike", "destination": "implementing_spike", "type": "claim", "label": "developer claims spike"},
     {"source": "ready_for_hotfix", "destination": "implementing_hotfix", "type": "claim", "label": "developer claims hotfix"},
-    {"source": "implementing", "destination": "ready_bounced", "type": "role_action", "label": "developer bounces ticket"},
-    {"source": "implementing", "destination": "pr_review", "type": "role_action", "label": "developer requests PR review"},
-    {"source": "implementing_experiment", "destination": "pr_review_experiment", "type": "role_action", "label": "developer requests PR review"},
-    {"source": "implementing_hotfix", "destination": "pr_review_hotfix", "type": "role_action", "label": "developer requests PR review"},
-    {"source": "implementing_spike", "destination": "spike_completed", "type": "role_action", "label": "developer posts spike findings"},
-    {"source": "pr_review", "destination": "staged", "type": "external", "label": "from process pr-review (PR merged)"},
-    {"source": "pr_review_experiment", "destination": "staged_experiment", "type": "external", "label": "from process pr-review (PR merged)"},
-    {"source": "pr_review_hotfix", "destination": "staged_hotfix", "type": "external", "label": "from process pr-review (PR merged)"},
-    {"source": "ready_bounced", "destination": "[*]", "type": "cross_process", "label": "to process refinement", "kind": "shared", "process": "refinement"},
-    {"source": "staged", "destination": "[*]", "type": "cross_process", "label": "to process release (standard train)", "kind": "spawn", "process": "release"},
-    {"source": "staged_experiment", "destination": "[*]", "type": "cross_process", "label": "to process release (standard train)", "kind": "spawn", "process": "release"},
-    {"source": "staged_hotfix", "destination": "[*]", "type": "cross_process", "label": "to process release (hotfix patch train)", "kind": "spawn", "process": "release"}
+    {"source": "implementing", "destination": "ready_bounced", "type": "advance", "label": "developer bounces ticket"},
+    {"source": "implementing", "destination": "pr_review", "type": "advance", "label": "developer requests PR review"},
+    {"source": "implementing_experiment", "destination": "pr_review_experiment", "type": "advance", "label": "developer requests PR review"},
+    {"source": "implementing_hotfix", "destination": "pr_review_hotfix", "type": "advance", "label": "developer requests PR review"},
+    {"source": "implementing_spike", "destination": "spike_completed", "type": "advance", "label": "developer posts spike findings"},
+    {"source": "pr_review", "destination": "staged", "type": "event", "label": "from process pr-review (PR merged)"},
+    {"source": "pr_review_experiment", "destination": "staged_experiment", "type": "event", "label": "from process pr-review (PR merged)"},
+    {"source": "pr_review_hotfix", "destination": "staged_hotfix", "type": "event", "label": "from process pr-review (PR merged)"}
   ]
 }

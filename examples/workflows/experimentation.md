@@ -10,11 +10,6 @@
 
 ```mermaid
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): measuring from process release
-    %%
-
-    [*] --> measuring: from process release (experiment released to production)
     measuring --> measurement_complete: measurement window elapses (time)
     measuring --> aborting: PO claims to abort
     aborting --> aborted: PO publishes abort reason
@@ -28,7 +23,7 @@ stateDiagram-v2
     iterated --> [*]: terminal (superseded)
     aborted --> [*]: terminal (abandoned)
 
-    note left of measuring: reversible-slow
+    note right of measuring: reversible-slow
     note right of measurement_complete: reversible-fast
     note right of analyzing: role=product-owner, types=experiment
     note right of aborting: role=product-owner, types=experiment
@@ -55,18 +50,11 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `measuring` | cross_process | 'from process release (experiment released to production)' | — | — |
-| `measuring` | `measurement_complete` | external | 'measurement window elapses (time)' | — | — |
+| `measuring` | `measurement_complete` | event | 'measurement window elapses (time)' | — | — |
 | `measuring` | `aborting` | claim | 'PO claims to abort' | — | — |
-| `aborting` | `aborted` | role_action | 'PO publishes abort reason' | — | — |
+| `aborting` | `aborted` | advance | 'PO publishes abort reason' | — | — |
 | `measurement_complete` | `analyzing` | claim | 'PO claims experiment for analysis' | — | — |
-| `analyzing` | `measuring` | role_action | 'PO extends experiment, resets window' | — | — |
-| `analyzing` | `promoted` | role_action | 'PO promotes experiment to feature (files promotion chore on process refinement)' | — | — |
-| `analyzing` | `killed` | role_action | 'PO kills experiment (files cleanup chore on process refinement)' | — | — |
-| `analyzing` | `iterated` | role_action | 'PO requests experiment iteration (files new experiment on process refinement)' | — | — |
-
-## Cross-process handoffs
-
-**Entries** (issues arriving from other processes):
-
-- `measuring` ← process `release` (spawn) — `from process release (experiment released to production)`
+| `analyzing` | `measuring` | advance | 'PO extends experiment, resets window' | — | — |
+| `analyzing` | `promoted` | advance | 'PO promotes experiment to feature (files promotion chore on process refinement)' | — | — |
+| `analyzing` | `killed` | advance | 'PO kills experiment (files cleanup chore on process refinement)' | — | — |
+| `analyzing` | `iterated` | advance | 'PO requests experiment iteration (files new experiment on process refinement)' | — | — |

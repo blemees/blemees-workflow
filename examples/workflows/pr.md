@@ -10,11 +10,6 @@
 
 ```mermaid
 stateDiagram-v2
-    %% Cross-process interfaces:
-    %%   Entry (spawn ): draft from process inner-loop
-    %%
-
-    [*] --> draft: from process inner-loop (developer opens draft PR at ticket claim)
     draft --> drafting: developer claims draft
     drafting --> needs_review: developer marks PR ready for review
     needs_review --> reviewing: reviewer claims PR
@@ -33,7 +28,7 @@ stateDiagram-v2
     merging --> needs_review: merge conflict or failed staging deploy
     staged --> [*]: terminal (shipped)
 
-    note left of draft: reversible-fast
+    note right of draft: reversible-fast
     note right of drafting: role=developer, types=pr
     note right of needs_review: reversible-fast
     note right of reviewing: role=peer-reviewer, types=pr
@@ -70,26 +65,19 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `draft` | cross_process | 'from process inner-loop (developer opens draft PR at ticket claim)' | — | — |
 | `draft` | `drafting` | claim | 'developer claims draft' | — | — |
-| `drafting` | `needs_review` | role_action | 'developer marks PR ready for review' | — | — |
+| `drafting` | `needs_review` | advance | 'developer marks PR ready for review' | — | — |
 | `needs_review` | `reviewing` | claim | 'reviewer claims PR' | — | — |
-| `reviewing` | `needs_qa` | role_action | 'reviewer approves PR' | — | — |
-| `reviewing` | `qa_passed` | role_action | 'reviewer approves hotfix PR (QA skipped, IC discretion)' | — | — |
-| `reviewing` | `changes_requested` | role_action | 'reviewer requests changes' | — | — |
+| `reviewing` | `needs_qa` | advance | 'reviewer approves PR' | — | — |
+| `reviewing` | `qa_passed` | advance | 'reviewer approves hotfix PR (QA skipped, IC discretion)' | — | — |
+| `reviewing` | `changes_requested` | advance | 'reviewer requests changes' | — | — |
 | `changes_requested` | `fixing_review` | claim | 'developer claims PR for fixes' | — | — |
-| `fixing_review` | `needs_review` | role_action | 'developer re-requests review' | — | — |
+| `fixing_review` | `needs_review` | advance | 'developer re-requests review' | — | — |
 | `needs_qa` | `verifying` | claim | 'QA claims PR' | — | — |
-| `verifying` | `qa_passed` | role_action | 'QA posts pass verdict' | — | — |
-| `verifying` | `qa_failed` | role_action | 'QA posts fail verdict' | — | — |
+| `verifying` | `qa_passed` | advance | 'QA posts pass verdict' | — | — |
+| `verifying` | `qa_failed` | advance | 'QA posts fail verdict' | — | — |
 | `qa_failed` | `fixing_qa` | claim | 'developer claims PR for fixes' | — | — |
-| `fixing_qa` | `needs_review` | role_action | 'developer re-requests review' | — | — |
+| `fixing_qa` | `needs_review` | advance | 'developer re-requests review' | — | — |
 | `qa_passed` | `merging` | claim | 'developer claims and merges' | — | — |
-| `merging` | `staged` | role_action | 'verified staging deploy' | — | — |
-| `merging` | `needs_review` | role_action | 'merge conflict or failed staging deploy' | — | — |
-
-## Cross-process handoffs
-
-**Entries** (issues arriving from other processes):
-
-- `draft` ← process `inner-loop` (spawn) — `from process inner-loop (developer opens draft PR at ticket claim)`
+| `merging` | `staged` | advance | 'verified staging deploy' | — | — |
+| `merging` | `needs_review` | advance | 'merge conflict or failed staging deploy' | — | — |

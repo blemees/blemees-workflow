@@ -68,6 +68,25 @@
           "type": "string",
           "description": "Backend close-reason hint. REQUIRED on terminal states, FORBIDDEN elsewhere. For GitHub: 'completed' or 'not planned'."
         },
+        "handoff": {
+          "type": "boolean",
+          "description": "Marks a resting state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Only valid on resting states."
+        },
+        "spawns": {
+          "type": "object",
+          "description": "Subprocess / spawn contract. Only valid on working or terminal states. Working states wait for the child to close, then auto-advance per `on_terminal`. Terminal states spawn an independent follow-up (no `on_terminal`).",
+          "required": ["process", "issue_type", "initial_state"],
+          "properties": {
+            "process": {"type": "string", "description": "Target process name."},
+            "issue_type": {"type": "string", "description": "Child issue type (must be in target process's accepted types)."},
+            "initial_state": {"type": "string", "description": "Child's starting state on the target process (must be resting)."},
+            "on_terminal": {
+              "type": "object",
+              "description": "Map {child-terminal-state: parent-next-state}. Required on working-state spawns; must exhaustively cover every terminal on the target process. Forbidden on terminal-state spawns.",
+              "additionalProperties": {"type": "string"}
+            }
+          }
+        },
         "notes": {
           "type": "array",
           "description": "Free prose to render in the mermaid output. Not parsed for semantics.",
@@ -78,7 +97,7 @@
     "transition": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["source", "destination", "type", "label"],
+      "required": ["source", "destination", "type"],
       "properties": {
         "source": {
           "type": "string",
@@ -89,12 +108,12 @@
           "description": "State id, or `[*]` for the exit sentinel."
         },
         "type": {
-          "enum": ["claim", "role_action", "external", "cross_process"],
+          "enum": ["claim", "advance", "event", "cross_process"],
           "description": "Transition type per state-machine-principles.md#2."
         },
         "label": {
           "type": "string",
-          "description": "Human-readable transition label. Conventions per principle 4."
+          "description": "Human-readable transition label. Optional except on `external` transitions (which have no auto-default). When absent, the parser auto-generates a structural label (e.g., `{role} claims {source}` for claim; `{role} → {dest}` for advance)."
         },
         "hitl": {
           "type": "boolean",

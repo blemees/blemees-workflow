@@ -35,9 +35,9 @@ def _minimal() -> dict:
             },
         },
         "transitions": [
-            {"source": "[*]", "destination": "a", "type": "external", "label": "in"},
+            {"source": "[*]", "destination": "a", "type": "event", "label": "in"},
             {"source": "a", "destination": "b", "type": "claim", "label": "pm claims a"},
-            {"source": "b", "destination": "c", "type": "role_action", "label": "pm ships"},
+            {"source": "b", "destination": "c", "type": "advance", "label": "pm ships"},
         ],
     }
 
@@ -107,7 +107,7 @@ def test_unknown_transition_type_rejected() -> None:
 def test_unknown_endpoint_state_rejected() -> None:
     bad = _minimal()
     bad["transitions"].append(
-        {"source": "x", "destination": "b", "type": "role_action", "label": "noop"}
+        {"source": "x", "destination": "b", "type": "advance", "label": "noop"}
     )
     with pytest.raises(ParseError, match="not a declared state"):
         parse_state_machine(json.dumps(bad))
@@ -163,8 +163,8 @@ def test_gates_in_legend_built_from_hitl_transitions() -> None:
 
 def test_parses_real_refinement_workflow(refinement_workflow_path: Path) -> None:
     """The shipped refinement example parses, derives its accepted types
-    from its working states, and carries cross-process transitions to
-    inner-loop (shared) plus an entry from inner-loop for bounced issues."""
+    from its working states, and declares its handoff states with
+    inner-loop."""
     workflow = parse_state_machine(refinement_workflow_path)
     assert workflow.name == "refinement"
     assert "raw" in workflow.states
@@ -174,11 +174,60 @@ def test_parses_real_refinement_workflow(refinement_workflow_path: Path) -> None
     assert "duplicate" in workflow.states
     # Derived umbrella = union of working states' issue_types.
     assert set(workflow.accepted_issue_types) >= {"bug", "feature"}
-    cross = [t for t in workflow.transitions if t.transition_type is TransitionType.CROSS_PROCESS]
-    # At minimum: entry from inner-loop, exit to inner-loop (×2 — ready_for_dev + ready_for_experiment).
-    assert len(cross) >= 3
-    targets = {t.cross_process_other for t in cross}
-    assert "inner-loop" in targets
+    # Shared handover states are flagged, not transitioned via [*].
+    assert workflow.states["ready_for_dev"].handoff is True
+    assert workflow.states["ready_bounced"].handoff is True
+
+
+def test_shared_cross_process_kind_rejected() -> None:
+    spec = _minimal()
+    spec["transitions"].append({
+        "source": "c", "destination": "[*]", "type": "cross_process",
+        "label": "to other", "kind": "shared", "process": "other",
+    })
+    with pytest.raises(ParseError, match="kind: shared.*removed"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_handoff_only_on_resting() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["handoff"] = True  # b is working
+    with pytest.raises(ParseError, match="handoff.*only valid on resting"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_spawns_on_working_requires_on_terminal() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["spawns"] = {
+        "process": "other",
+        "issue_type": "bug",
+        "initial_state": "queue",
+    }
+    with pytest.raises(ParseError, match="spawns.on_terminal.*required"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_spawns_on_terminal_forbids_on_terminal_map() -> None:
+    spec = _minimal()
+    spec["states"]["c"]["spawns"] = {
+        "process": "other",
+        "issue_type": "bug",
+        "initial_state": "queue",
+        "on_terminal": {"done": "raw"},
+    }
+    with pytest.raises(ParseError, match="on_terminal.*not valid on terminal"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_spawns_forbidden_on_resting() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["spawns"] = {
+        "process": "other",
+        "issue_type": "bug",
+        "initial_state": "queue",
+    }
+    with pytest.raises(ParseError, match="spawns.*not valid on resting"):
+        parse_state_machine(json.dumps(spec))
 
 
 def test_pr_process_accepts_pr_issue_type(workflow_dir: Path) -> None:
@@ -217,6 +266,31 @@ def test_terminal_state_requires_close_reason() -> None:
         parse_state_machine(json.dumps(bad))
 
 
+def test_label_auto_generated_for_claim_transition() -> None:
+    spec = _minimal()
+    del spec["transitions"][1]["label"]
+    workflow = parse_state_machine(json.dumps(spec))
+    claim = workflow.transitions[1]
+    assert claim.transition_type is TransitionType.CLAIM
+    assert claim.label == "product-manager claims a"
+
+
+def test_label_auto_generated_for_advance_transition() -> None:
+    spec = _minimal()
+    del spec["transitions"][2]["label"]
+    workflow = parse_state_machine(json.dumps(spec))
+    adv = workflow.transitions[2]
+    assert adv.transition_type is TransitionType.ADVANCE
+    assert adv.label == "product-manager → c"
+
+
+def test_label_required_on_event() -> None:
+    spec = _minimal()
+    del spec["transitions"][0]["label"]
+    with pytest.raises(ParseError, match="event transitions"):
+        parse_state_machine(json.dumps(spec))
+
+
 def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None:
     """Inner-loop has four variation groups (feature/bug/chore, experiment,
     spike, hotfix), each with entry, claim, PR-review, and staged states."""
@@ -230,16 +304,10 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     assert "implementing_experiment" in workflow.states
     assert "implementing_spike" in workflow.states
     assert "implementing_hotfix" in workflow.states
-    # Spike entry is a spawn (new work item starts on inner-loop).
-    spike_entry = next(
-        (
-            t
-            for t in workflow.transitions
-            if t.source == "[*]"
-            and t.destination == "ready_for_spike"
-            and t.transition_type is TransitionType.CROSS_PROCESS
-        ),
-        None,
-    )
-    assert spike_entry is not None
-    assert spike_entry.cross_process_kind == "spawn"
+    # `implementing` declares a subprocess spawn into the pr process.
+    impl = workflow.states["implementing"]
+    assert impl.spawns is not None
+    assert impl.spawns.process == "pr"
+    assert impl.spawns.issue_type == "pr"
+    assert impl.spawns.initial_state == "draft"
+    assert impl.spawns.on_terminal == (("staged", "staged"),)

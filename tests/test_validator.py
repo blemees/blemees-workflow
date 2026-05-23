@@ -40,7 +40,7 @@ def _irreversible_workflow_without_hitl() -> StateMachine:
             destination="released",
             label="agent releases",
             is_gated=False,  # the violation
-            transition_type=TransitionType.ROLE_ACTION,
+            transition_type=TransitionType.ADVANCE,
         )
     )
     return workflow
@@ -63,7 +63,7 @@ def test_irreversible_destination_with_hitl_passes() -> None:
             destination="released",
             label="agent releases",
             is_gated=True,
-            transition_type=TransitionType.ROLE_ACTION,
+            transition_type=TransitionType.ADVANCE,
         )
     ]
     findings = validate_state_machine(workflow, catalog=None, grants={})

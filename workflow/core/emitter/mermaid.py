@@ -75,20 +75,20 @@ def emit_mermaid(state_machine: StateMachine) -> str:
 
 
 def _emit_cross_process_legend(state_machine: StateMachine) -> list[str]:
-    cross = [t for t in state_machine.transitions if t.transition_type is TransitionType.CROSS_PROCESS]
-    if not cross:
+    handoffs = [s for s in state_machine.states.values() if s.handoff]
+    spawners = [s for s in state_machine.states.values() if s.spawns is not None]
+    if not handoffs and not spawners:
         return []
 
     lines: list[str] = ["    %% Cross-process interfaces:"]
-    for t in cross:
-        direction = "Exit" if t.destination == "[*]" else "Entry"
-        non_sentinel = t.source if t.destination == "[*]" else t.destination
-        kind = t.cross_process_kind or "shared"
-        other = t.cross_process_other or "?"
-        verb = "to" if direction == "Exit" else "from"
+    for s in handoffs:
+        lines.append(f"    %%   Handoff: {s.name} (shared resting state)")
+    for s in spawners:
+        sp = s.spawns
+        assert sp is not None
         lines.append(
-            f"    %%   {direction:<5} ({kind:<6}): "
-            f"{non_sentinel} {verb} process {other}"
+            f"    %%   Spawn:   {s.name} → process {sp.process} "
+            f"(issue_type={sp.issue_type}, initial={sp.initial_state})"
         )
     lines.append("    %%")
     return lines
@@ -155,6 +155,8 @@ def _state_note_text(state: State, state_machine: StateMachine) -> str | None:
             parts.append(f"roles={', '.join(state.roles)}")
     if state.issue_types:
         parts.append(f"types={', '.join(state.issue_types)}")
+    if state.handoff:
+        parts.append("handoff")
     # Reversibility on the state node only when it isn't already covered by
     # the HITL legend (the legend's reversibility column propagates back to
     # the state from the parser's view; emit on the state when there's no
