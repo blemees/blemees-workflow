@@ -17,6 +17,7 @@ from enum import Enum
 
 from workflow.backends.base import IssueState
 from workflow.core.model.hcp import HCPCatalog, HCPLevel
+from workflow.core.model.input_topic import InputTopicDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.state_machine import (
     ReversibilityClass,
@@ -52,6 +53,7 @@ def validate_state_machine(
     catalog: HCPCatalog | None,
     grants: dict[str, TrustGrant] | None = None,
     issue_type_directory: IssueTypeDirectory | None = None,
+    input_topic_directory: InputTopicDirectory | None = None,
     handoff_index: dict[str, set[str]] | None = None,
     sibling_machines: dict[str, StateMachine] | None = None,
 ) -> list[ValidationFinding]:
@@ -73,6 +75,8 @@ def validate_state_machine(
     findings.extend(_check_working_states_are_claim_destinations(state_machine))
     findings.extend(_check_level_keywords_not_on_diagram(state_machine))
     findings.extend(_check_issue_types_resolved(state_machine, issue_type_directory))
+    findings.extend(_check_input_topics_resolved(state_machine, input_topic_directory))
+    findings.extend(_check_gates_have_unique_source(state_machine))
     if handoff_index is not None:
         findings.extend(_check_handoffs_have_partners(state_machine, handoff_index))
     if sibling_machines is not None:
@@ -80,11 +84,11 @@ def validate_state_machine(
 
     if catalog is not None:
         findings.extend(_check_legend_catalog_sync(state_machine, catalog))
-        findings.extend(_check_audit_irreversible(catalog))
+        findings.extend(_check_audit_irreversible(state_machine, catalog))
         findings.extend(_check_block_on_timeout(catalog, grants))
         findings.extend(_check_agent_prepares_present(catalog))
 
-    findings.extend(_check_trust_grants(catalog, grants))
+    findings.extend(_check_trust_grants(state_machine, catalog, grants))
 
     return findings
 
@@ -230,36 +234,37 @@ def _check_legend_catalog_sync(
     return findings
 
 
-def _check_audit_irreversible(catalog: HCPCatalog) -> list[ValidationFinding]:
+def _check_audit_irreversible(
+    state_machine: StateMachine, catalog: HCPCatalog
+) -> list[ValidationFinding]:
+    """Audit-level on an irreversible destination is forbidden (principle 4).
+    Reversibility is derived from the gate's destination state(s)."""
     findings: list[ValidationFinding] = []
     for hcp in catalog.entries.values():
-        if (
-            hcp.default_level is HCPLevel.AUDIT
-            and hcp.reversibility is ReversibilityClass.IRREVERSIBLE
-        ):
+        rev = state_machine.gate_reversibility(hcp.gate_name)
+        if rev is not ReversibilityClass.IRREVERSIBLE:
+            continue
+        if hcp.default_level is HCPLevel.AUDIT:
             findings.append(
                 ValidationFinding(
                     severity=Severity.ERROR,
                     principle_cite="hitl-principles.md#4",
                     message=(
                         f"HCP {hcp.gate_name!r} declares default_level=audit "
-                        "but its destination is irreversible. Irreversible "
-                        "destinations require block."
+                        "but its destination is irreversible (derived). "
+                        "Irreversible destinations require block."
                     ),
                     location=catalog.source_path,
                 )
             )
-        if (
-            HCPLevel.AUDIT in hcp.allowed_levels
-            and hcp.reversibility is ReversibilityClass.IRREVERSIBLE
-        ):
+        if HCPLevel.AUDIT in hcp.allowed_levels:
             findings.append(
                 ValidationFinding(
                     severity=Severity.ERROR,
                     principle_cite="hitl-principles.md#4",
                     message=(
                         f"HCP {hcp.gate_name!r} lists audit as an allowed "
-                        "level but the destination is irreversible."
+                        "level but the destination is irreversible (derived)."
                     ),
                     location=catalog.source_path,
                 )
@@ -313,7 +318,9 @@ def _check_agent_prepares_present(catalog: HCPCatalog) -> list[ValidationFinding
 
 
 def _check_trust_grants(
-    catalog: HCPCatalog | None, grants: dict[str, TrustGrant]
+    state_machine: StateMachine,
+    catalog: HCPCatalog | None,
+    grants: dict[str, TrustGrant],
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     today = date.today()
@@ -347,7 +354,8 @@ def _check_trust_grants(
                 )
             if (
                 grant.current_level is HCPLevel.AUDIT
-                and hcp.reversibility is ReversibilityClass.IRREVERSIBLE
+                and state_machine.gate_reversibility(gate)
+                is ReversibilityClass.IRREVERSIBLE
             ):
                 findings.append(
                     ValidationFinding(
@@ -789,4 +797,85 @@ def _check_spawns(
                             location=state_machine.source_path,
                         )
                     )
+    return findings
+
+
+def _check_gates_have_unique_source(
+    state_machine: StateMachine,
+) -> list[ValidationFinding]:
+    """A gate fires from exactly one source state.
+
+    Multiple transitions can share a gate name only when they're verdict-style
+    (same source, different destinations — the human picks the destination
+    on approve). Sharing a gate across different source states is forbidden:
+    the gate's `hitl:awaiting-<gate>` label would be ambiguous about which
+    transition fires.
+    """
+    findings: list[ValidationFinding] = []
+    sources_per_gate: dict[str, set[str]] = {}
+    for t in state_machine.transitions:
+        if t.gate_name is None:
+            continue
+        sources_per_gate.setdefault(t.gate_name, set()).add(t.source)
+    for gate, sources in sources_per_gate.items():
+        if len(sources) > 1:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="hitl-principles.md#6",
+                    message=(
+                        f"Gate {gate!r} fires from multiple source states "
+                        f"{sorted(sources)}. A gate must originate from "
+                        f"exactly one source state — pick one or rename the "
+                        f"gates so each has a single origin."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+    return findings
+
+
+def _check_input_topics_resolved(
+    state_machine: StateMachine,
+    directory: InputTopicDirectory | None,
+) -> list[ValidationFinding]:
+    """Every topic id referenced by a working state must resolve in the
+    shared `input-topics.json`. Missing directory + referenced topics is
+    a WARNING; declared id absent from directory is an ERROR."""
+    findings: list[ValidationFinding] = []
+    referenced: set[str] = set()
+    for st in state_machine.states.values():
+        referenced.update(st.input_topics)
+    if not referenced:
+        return findings
+
+    if directory is None:
+        findings.append(
+            ValidationFinding(
+                severity=Severity.WARNING,
+                principle_cite="hitl-principles.md#7",
+                message=(
+                    f"Process working states reference input_topics "
+                    f"{sorted(referenced)} but no input-topics.json was "
+                    f"found. Topics cannot be resolved."
+                ),
+                location=state_machine.source_path,
+            )
+        )
+        return findings
+
+    for topic_id in sorted(referenced):
+        if not directory.has(topic_id):
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="hitl-principles.md#7",
+                    message=(
+                        f"References input topic {topic_id!r} but it is not "
+                        f"defined in "
+                        f"{directory.source_path or 'input-topics.json'}."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
     return findings

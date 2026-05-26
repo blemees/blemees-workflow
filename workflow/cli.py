@@ -463,9 +463,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_request_input = subparsers.add_parser(
         "request-input",
-        help="Agent recognizes an unanticipated HITL moment; pause for input.",
+        help="Agent escalates to a human operator on a catalogued topic.",
+        description=(
+            "Pause the working state and ask the human operator for input. "
+            "The agent's current state must declare `input_topics`; pass "
+            "--topic <id> with one of the declared ids. The shared "
+            "`input-topics.json` defines each topic. Adds `hitl:awaiting-"
+            "input` + `hitl:topic-<id>` so the operator can filter the queue."
+        ),
     )
     p_request_input.add_argument("--issue", required=True)
+    p_request_input.add_argument(
+        "--topic",
+        required=True,
+        help="Catalogued input topic id (must be declared on the current state).",
+    )
     _add_body_args(p_request_input, required=True)
     p_request_input.set_defaults(func=_do_request_input)
 
@@ -1047,16 +1059,27 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _input_topics_for(state_machine: Any, state_name: str | None) -> tuple[str, ...]:
+    """Derive the current state's input_topics — empty when state is unknown."""
+    if state_name is None:
+        return ()
+    s = state_machine.states.get(state_name) if state_machine else None
+    return s.input_topics if s else ()
+
+
 def _print_next_actions(
     actions: list[Any],
     *,
     current_state: str | None,
     last_state: str | None,
+    input_topics: tuple[str, ...] = (),
 ) -> None:
     """Human/agent-readable next-actions block.
 
-    Each entry leads with the literal `workflow advance` invocation the agent
-    would run, followed by gate / role / template details when relevant.
+    Each entry leads with the literal `workflow advance` / `claim` / `release`
+    invocation the agent would run, followed by gate / role / template
+    details when relevant. When the current state declares `input_topics`,
+    a `request-input` suggestion lists the catalogued topic ids.
     """
     from workflow.core.model.hcp import HCPLevel
     from workflow.core.model.state_machine import TransitionType
@@ -1101,8 +1124,8 @@ def _print_next_actions(
         if a.is_gated:
             if a.gate_name:
                 print(f"    gate: {a.gate_name}")
-            if a.triggering_role:
-                print(f"    triggering role: {a.triggering_role}")
+            if a.triggering_roles:
+                print(f"    triggering role(s): {', '.join(a.triggering_roles)}")
             if a.agent_prepares_path:
                 kind = "required" if a.effective_level is HCPLevel.BLOCK else "optional"
                 print(
@@ -1119,6 +1142,11 @@ def _print_next_actions(
         if dst_bits:
             print(f"    destination: {', '.join(dst_bits)}")
 
+    if input_topics:
+        print(
+            f"  request-input --topic <id> --body \"...\"  # ask the human operator; "
+            f"topics: {', '.join(input_topics)}"
+        )
     if last_state is not None:
         print(f"  release  # returns to {last_state!r}")
 
@@ -1196,7 +1224,8 @@ def _print_result(
             if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, last_state=state.last_state
+                    actions, current_state=state.state, last_state=state.last_state,
+                    input_topics=_input_topics_for(context.state_machine, state.state),
                 )
 
 
@@ -1697,6 +1726,7 @@ def _do_request_input(args: argparse.Namespace) -> int:
             controller,
             issue_id=args.issue,
             body=_resolve_body(args),
+            topic=args.topic,
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
@@ -2147,7 +2177,8 @@ def _do_create(args: argparse.Namespace) -> int:
             if actions or post.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=post.state, last_state=post.last_state
+                    actions, current_state=post.state, last_state=post.last_state,
+                    input_topics=_input_topics_for(claim_context.state_machine, post.state),
                 )
     else:
         # No claim: show actions from the resting initial state.
@@ -2356,7 +2387,8 @@ def _do_comment(args: argparse.Namespace) -> int:
             if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, last_state=state.last_state
+                    actions, current_state=state.state, last_state=state.last_state,
+                    input_topics=_input_topics_for(context.state_machine, state.state),
                 )
     except (BackendError, WorkflowError) as exc:
         logger.debug("comment: could not resolve next actions: %s", exc)
@@ -2435,7 +2467,8 @@ def _do_edit(args: argparse.Namespace) -> int:
             if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, last_state=state.last_state
+                    actions, current_state=state.state, last_state=state.last_state,
+                    input_topics=_input_topics_for(context.state_machine, state.state),
                 )
     except (BackendError, WorkflowError) as exc:
         logger.debug("edit: could not resolve next actions: %s", exc)
@@ -2533,7 +2566,7 @@ def _do_view(args: argparse.Namespace) -> int:
 
     if actions or state.last_state is not None:
         print("")
-        _print_next_actions(actions, current_state=state.state, last_state=state.last_state)
+        _print_next_actions(actions, current_state=state.state, last_state=state.last_state, input_topics=_input_topics_for(context.state_machine, state.state))
 
     if comments:
         print("")
@@ -2564,6 +2597,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     from workflow.core.emitter import (
         ProcessDocInput,
         emit_index_doc,
+        emit_input_topics_doc,
         emit_issue_types_doc,
         emit_mermaid,
         emit_process_doc,
@@ -2593,6 +2627,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     workflow_dir = None
     role_directory = None
     issue_type_directory = None
+    input_topic_directory = None
     processes_loaded: list[Any] = []
     for wf_name in process_names:
         try:
@@ -2609,6 +2644,8 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
             role_directory = process.role_directory
         if issue_type_directory is None and process.issue_type_directory is not None:
             issue_type_directory = process.issue_type_directory
+        if input_topic_directory is None and process.input_topic_directory is not None:
+            input_topic_directory = process.input_topic_directory
 
         if workflow_dir is None:
             # No on-disk target; print to stdout and continue.
@@ -2646,9 +2683,9 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         has_process_map = True
 
     if workflow_dir is not None:
+        sms = [p.state_machine for p in processes_loaded]
         if role_directory is not None:
             roles_path = workflow_dir / "roles.md"
-            sms = [p.state_machine for p in processes_loaded]
             roles_path.write_text(
                 emit_roles_doc(role_directory, sms), encoding="utf-8"
             )
@@ -2657,12 +2694,19 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
             types_path = workflow_dir / "issue-types.md"
             types_path.write_text(emit_issue_types_doc(issue_type_directory), encoding="utf-8")
             written.append(str(types_path))
+        if input_topic_directory is not None:
+            topics_path = workflow_dir / "input-topics.md"
+            topics_path.write_text(
+                emit_input_topics_doc(input_topic_directory, sms), encoding="utf-8"
+            )
+            written.append(str(topics_path))
         readme_path = workflow_dir / "README.md"
         readme_path.write_text(
             emit_index_doc(
                 process_names,
                 has_roles=role_directory is not None,
                 has_issue_types=issue_type_directory is not None,
+                has_input_topics=input_topic_directory is not None,
                 has_process_map=has_process_map,
             ),
             encoding="utf-8",
@@ -2733,6 +2777,7 @@ def _do_validate(args: argparse.Namespace) -> int:
             wf_context.catalog,
             wf_context.grants,
             issue_type_directory=wf_context.issue_type_directory,
+            input_topic_directory=wf_context.input_topic_directory,
             handoff_index=handoff_index,
             sibling_machines=sibling_machines,
         )

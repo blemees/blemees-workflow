@@ -18,7 +18,8 @@
     "diagnosing": {
       "class": "working",
       "roles": ["incident-responder"],
-      "issue_types": ["incident"]
+      "issue_types": ["incident"],
+      "input_topics": ["blocked-on-data", "general"]
     },
     "cause_identified": {
       "class": "resting",
@@ -27,7 +28,8 @@
     "mitigating": {
       "class": "working",
       "roles": ["incident-commander"],
-      "issue_types": ["incident"]
+      "issue_types": ["incident"],
+      "input_topics": ["needs-security-review", "blocked-on-data", "general"]
     },
     "needs_verification": {
       "class": "resting",

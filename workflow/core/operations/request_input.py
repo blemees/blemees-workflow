@@ -17,12 +17,14 @@ def run(
     *,
     issue_id: str,
     body: str,
+    topic: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
         operation=Operation.REQUEST_INPUT,
         issue_id=issue_id,
         body_text=body,
+        topic=topic,
         actor=actor,
     )
     return dispatch(controller, request)

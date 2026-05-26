@@ -9,17 +9,10 @@ and partial-data bugs surface immediately.
 
 ```json
 {
-  "process": "refinement",
   "hcps": [
     {
       "gate_name": "ready_for_dev",
-      "transition": {
-        "source": "refining",
-        "destinations": ["ready_for_dev"]
-      },
-      "triggering_role": "pm",
       "type": "judgment",
-      "reversibility": "reversible-slow",
       "allowed_levels": ["block", "audit"],
       "default_level": "block",
       "agent_prepares": "ready-packet-template.md",
@@ -29,9 +22,11 @@ and partial-data bugs surface immediately.
 }
 ```
 
-For verdict-style HCPs, `transition.destinations` has multiple entries and the
-catalog row's `reversibility` reflects the worst-case among them (per
-`hitl-principles.md` principle 4).
+The HCP carries only **policy** fields. Structural information —
+source state, destinations, triggering roles, reversibility — is
+derived from the paired state machine at lookup time via
+`StateMachine.gate_*` helpers. The process name is derived from the
+filename stem (`<process>-hcps.json`).
 
 The `rationale` field is a string. By convention it is either a one-line
 inline rationale or a filename pointing at a sidecar markdown file (e.g.,
@@ -50,7 +45,6 @@ from pathlib import Path
 from typing import Any
 
 from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
-from workflow.core.model.state_machine import ReversibilityClass
 from workflow.errors import ParseError
 
 logger = logging.getLogger(__name__)
@@ -103,12 +97,10 @@ def parse_hcp_catalog(
             f"HCP catalog must be a JSON object at the top level (got {type(data).__name__})."
         )
 
-    declared_process = data.get("process")
-    if declared_process is not None and not isinstance(declared_process, str):
-        raise ParseError(
-            f"HCP catalog `process` must be a string (got {type(declared_process).__name__})."
-        )
-    process_name = process_name or declared_process or "unnamed"
+    # Top-level `process` field was removed — the process name is derived
+    # from the filename stem (`<process>-hcps.json`). Silently ignore if
+    # present; we don't need it.
+    process_name = process_name or "unnamed"
 
     hcps_raw = data.get("hcps", [])
     if not isinstance(hcps_raw, list):
@@ -132,21 +124,7 @@ def parse_hcp_catalog(
 
 def _parse_entry(entry: dict[str, Any], idx: int, source_path: str | None) -> HCP:
     gate_name = _require_str(entry, "gate_name", idx)
-
-    transition = entry.get("transition")
-    if not isinstance(transition, dict):
-        raise ParseError(f"HCP {gate_name!r}: `transition` must be an object.")
-    source_state = _require_str(transition, "source", idx, parent=f"hcps[{idx}].transition")
-    destinations_raw = transition.get("destinations")
-    if not isinstance(destinations_raw, list) or not destinations_raw:
-        raise ParseError(f"HCP {gate_name!r}: `transition.destinations` must be a non-empty list.")
-    destinations = [_require_str_item(d, idx, "destinations") for d in destinations_raw]
-
-    triggering_role = _require_str(entry, "triggering_role", idx, allow_empty=False)
     hcp_type = _parse_type(_require_str(entry, "type", idx), gate_name=gate_name)
-    reversibility = _parse_reversibility(
-        _require_str(entry, "reversibility", idx), gate_name=gate_name
-    )
 
     allowed_levels_raw = entry.get("allowed_levels")
     if not isinstance(allowed_levels_raw, list) or not allowed_levels_raw:
@@ -173,11 +151,7 @@ def _parse_entry(entry: dict[str, Any], idx: int, source_path: str | None) -> HC
 
     return HCP(
         gate_name=gate_name,
-        source_state=source_state,
-        destinations=destinations,
-        triggering_role=triggering_role,
         hcp_type=hcp_type,
-        reversibility=reversibility,
         allowed_levels=allowed_levels,
         default_level=default_level,
         agent_prepares_path=agent_prepares,
@@ -205,12 +179,6 @@ def _require_str(
     return cleaned
 
 
-def _require_str_item(value: Any, idx: int, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ParseError(f"hcps[{idx}].{field}: every item must be a non-empty string.")
-    return value.strip()
-
-
 def _parse_type(value: str, gate_name: str) -> HCPType:
     lowered = value.lower().strip()
     mapping = {
@@ -223,20 +191,6 @@ def _parse_type(value: str, gate_name: str) -> HCPType:
     if lowered not in mapping:
         raise ParseError(
             f"HCP {gate_name!r}: `type` must be one of {sorted(mapping.keys())} (got {value!r})."
-        )
-    return mapping[lowered]
-
-
-def _parse_reversibility(value: str, gate_name: str) -> ReversibilityClass:
-    lowered = value.lower().strip()
-    mapping = {
-        "irreversible": ReversibilityClass.IRREVERSIBLE,
-        "reversible-fast": ReversibilityClass.REVERSIBLE_FAST,
-        "reversible-slow": ReversibilityClass.REVERSIBLE_SLOW,
-    }
-    if lowered not in mapping:
-        raise ParseError(
-            f"HCP {gate_name!r}: `reversibility` must be one of {sorted(mapping.keys())} (got {value!r})."
         )
     return mapping[lowered]
 

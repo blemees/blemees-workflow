@@ -36,11 +36,15 @@ def _build_workflow() -> StateMachine:
     workflow = StateMachine(name="t")
     workflow.states = {
         "raw": State(name="raw", state_class=StateClass.RESTING),
-        "refining": State(name="refining", state_class=StateClass.WORKING),
+        "refining": State(
+            name="refining",
+            state_class=StateClass.WORKING,
+            roles=("product-manager",),
+            input_topics=("general", "clarify-scope"),
+        ),
         "ready_for_dev": State(
             name="ready_for_dev",
             state_class=StateClass.RESTING,
-            reversibility=ReversibilityClass.REVERSIBLE_SLOW,
         ),
         "promoted": State(
             name="promoted",
@@ -52,7 +56,11 @@ def _build_workflow() -> StateMachine:
             state_class=StateClass.TERMINAL,
             reversibility=ReversibilityClass.IRREVERSIBLE,
         ),
-        "implementing": State(name="implementing", state_class=StateClass.WORKING),
+        "implementing": State(
+            name="implementing",
+            state_class=StateClass.WORKING,
+            roles=("product-owner",),
+        ),
     }
     workflow.transitions = [
         Transition(
@@ -73,6 +81,12 @@ def _build_workflow() -> StateMachine:
             label="PO promotes",
             gate_name="experiment-verdict",
         ),
+        Transition(
+            source="implementing",
+            destination="killed",
+            label="PO kills",
+            gate_name="experiment-verdict",
+        ),
     ]
     return workflow
 
@@ -81,22 +95,14 @@ def _build_catalog() -> HCPCatalog:
     catalog = HCPCatalog(process_name="t")
     catalog.entries["ready_for_dev"] = HCP(
         gate_name="ready_for_dev",
-        source_state="refining",
-        destinations=["ready_for_dev"],
-        triggering_role="{pm}",
         hcp_type=HCPType.AUTHORITY,
-        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
         allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
         default_level=HCPLevel.BLOCK,
         agent_prepares_path="dor.md",
     )
     catalog.entries["experiment-verdict"] = HCP(
         gate_name="experiment-verdict",
-        source_state="implementing",
-        destinations=["promoted", "killed"],
-        triggering_role="{product-owner}",
         hcp_type=HCPType.AUTHORITY,
-        reversibility=ReversibilityClass.IRREVERSIBLE,
         allowed_levels=[HCPLevel.BLOCK],
         default_level=HCPLevel.BLOCK,
         agent_prepares_path="verdict-packet.md",
@@ -213,7 +219,6 @@ def test_terminal_advance_closes_issue_as_completed() -> None:
     workflow.states["merged"] = State(
         name="merged",
         state_class=StateClass.TERMINAL,
-        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
         terminal_taxonomy=TerminalTaxonomy.SHIPPED,
         close_reason="completed",
     )
@@ -247,7 +252,6 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
     workflow.states["bounced"] = State(
         name="bounced",
         state_class=StateClass.TERMINAL,
-        reversibility=ReversibilityClass.REVERSIBLE_FAST,
         terminal_taxonomy=TerminalTaxonomy.SUPERSEDED,
         # No close_reason — handoff terminal, issue stays open.
     )
@@ -278,7 +282,6 @@ def test_abandoned_terminal_closes_as_not_planned() -> None:
     workflow.states["wont"] = State(
         name="wont",
         state_class=StateClass.TERMINAL,
-        reversibility=ReversibilityClass.REVERSIBLE_FAST,
         terminal_taxonomy=TerminalTaxonomy.ABANDONED,
         close_reason="not planned",
     )
@@ -408,7 +411,9 @@ def test_plan_approve_binary() -> None:
     )
     assert plan.change.set_state == "ready_for_dev"
     assert plan.change.clear_awaiting_gate is True
-    assert plan.change.record_approval == "ready_for_dev"
+    # record_approval carries the GATE name (not destination); the
+    # destination is captured via `set_state`.
+    assert plan.change.record_approval == "ready_for_dev"  # gate name happens to match
 
 
 def test_plan_approve_verdict_requires_destination() -> None:
@@ -454,7 +459,9 @@ def test_plan_approve_verdict_with_destination() -> None:
         catalog,
     )
     assert plan.change.set_state == "promoted"
-    assert plan.change.record_approval == "promoted"
+    # Verdict-style: state moves to the chosen destination, but
+    # record_approval carries the gate name (not the destination).
+    assert plan.change.record_approval == "experiment-verdict"
 
 
 def test_plan_reject(tmp_path: Path) -> None:
@@ -611,12 +618,70 @@ def test_plan_request_input(tmp_path: Path) -> None:
             operation=Operation.REQUEST_INPUT,
             issue_id="1",
             body_text=question.read_text(encoding="utf-8"),
+            topic="general",
         ),
         state,
         workflow,
     )
     assert plan.change.set_awaiting_input is True
+    assert plan.change.set_input_topic == "general"
     assert plan.packet_body is not None
+
+
+def test_plan_request_input_requires_declared_topic(tmp_path: Path) -> None:
+    """The state's input_topics list is closed — passing a topic that's
+    not declared is rejected."""
+    workflow = _build_workflow()
+    q = tmp_path / "q.md"
+    q.write_text("question", encoding="utf-8")
+    state = IssueState(
+        issue_id="1",
+        state="refining",
+        agent_claim="product-manager",
+    )
+    with pytest.raises(OperationError, match="is not declared on state"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.REQUEST_INPUT,
+                issue_id="1",
+                body_text=q.read_text(encoding="utf-8"),
+                topic="needs-ux-input",  # not in refining's input_topics
+            ),
+            state,
+            workflow,
+        )
+
+
+def test_plan_request_input_forbidden_when_state_has_no_topics(tmp_path: Path) -> None:
+    """A state without `input_topics` declared can't host request-input
+    at all — agents must release the issue or stay put."""
+    workflow = _build_workflow()
+    # Strip topics from `refining` for this test.
+    refining = workflow.states["refining"]
+    workflow.states["refining"] = State(
+        name=refining.name,
+        state_class=refining.state_class,
+        roles=refining.roles,
+        # input_topics deliberately omitted
+    )
+    q = tmp_path / "q.md"
+    q.write_text("question", encoding="utf-8")
+    state = IssueState(
+        issue_id="1",
+        state="refining",
+        agent_claim="product-manager",
+    )
+    with pytest.raises(OperationError, match="does not declare `input_topics`"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.REQUEST_INPUT,
+                issue_id="1",
+                body_text=q.read_text(encoding="utf-8"),
+                topic="general",
+            ),
+            state,
+            workflow,
+        )
 
 
 def test_plan_request_input_blocks_during_catalogued_gate(tmp_path: Path) -> None:
@@ -635,6 +700,7 @@ def test_plan_request_input_blocks_during_catalogued_gate(tmp_path: Path) -> Non
                 operation=Operation.REQUEST_INPUT,
                 issue_id="1",
                 body_text=q.read_text(encoding="utf-8"),
+                topic="general",
             ),
             state,
             workflow,
@@ -824,7 +890,6 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
         "logged": State(
             name="logged",
             state_class=StateClass.RESTING,
-            reversibility=ReversibilityClass.REVERSIBLE_FAST,
         ),
     }
     workflow.transitions = [
@@ -838,11 +903,7 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
     catalog = HCPCatalog(process_name="t")
     catalog.entries["logged"] = HCP(
         gate_name="logged",
-        source_state="working",
-        destinations=["logged"],
-        triggering_role="{developer}",
         hcp_type=HCPType.KNOWLEDGE,
-        reversibility=ReversibilityClass.REVERSIBLE_FAST,
         allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
         default_level=HCPLevel.AUDIT,
         agent_prepares_path="log-template.md",
@@ -1004,7 +1065,6 @@ def test_advance_into_mark_pr_ready_sets_marker() -> None:
     workflow.states["ready_for_dev"] = State(
         name=rfd.name,
         state_class=rfd.state_class,
-        reversibility=rfd.reversibility,
         terminal_taxonomy=rfd.terminal_taxonomy,
         roles=rfd.roles,
         issue_types=rfd.issue_types,

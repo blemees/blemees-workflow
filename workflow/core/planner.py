@@ -70,6 +70,7 @@ class OperationRequest:
     role: str | None = None  # for claim
     actor: str | None = None  # who is invoking (role or handle)
     body_text: str | None = None  # comment body content (CLI reads --body/--body-from)
+    topic: str | None = None  # for request-input
     extras: dict = field(default_factory=dict)
 
 
@@ -129,7 +130,7 @@ def plan_operation(
         case Operation.REVOKE:
             return _plan_revoke(request, state, catalog)
         case Operation.REQUEST_INPUT:
-            return _plan_request_input(request, state)
+            return _plan_request_input(request, state, state_machine)
         case Operation.ADVISE:
             return _plan_advise(request, state)
         case Operation.RESPOND:
@@ -378,33 +379,31 @@ def _plan_advance(
             f"An audit is pending ({state.audit_pending!r}); cannot start a new gate."
         )
 
-    # Role check: the agent firing the gate must match the catalog's triggering_role.
-    _require_role_match(
+    # Role check: the agent firing the gate must be one of the gate's
+    # triggering roles, derived from the source state's `roles` list.
+    _require_role_in_set(
         actor=request.actor,
-        required=hcp.triggering_role,
+        allowed=state_machine.gate_triggering_roles(hcp.gate_name),
         context=f"firing HCP gate {hcp.gate_name!r}",
     )
 
     if effective_level is HCPLevel.BLOCK:
-        return _advance_block_gated(request, state, transition, hcp)
+        return _advance_block_gated(request, state, transition, hcp, state_machine)
     else:  # AUDIT
         return _advance_audit_gated(request, state, transition, hcp, state_machine)
 
 
 def _find_hcp_for_transition(catalog: HCPCatalog | None, transition: Transition) -> HCP | None:
-    """Find the HCP whose source_state and destinations match the transition.
+    """Find the HCP for the transition by looking up the gate name.
 
-    Returns None when there's no catalog, the transition isn't `[hitl]`-marked,
-    or no matching catalog row exists. The validator surfaces mismatch between
-    `[hitl]` markers and catalog rows as a structural finding; the planner is
-    lenient at runtime — an unmarked transition with no row is just ungated.
+    Returns None when there's no catalog, the transition isn't gated, or
+    no matching catalog row exists. The validator surfaces mismatches; the
+    planner is lenient at runtime — an unmarked transition with no row is
+    just ungated.
     """
-    if catalog is None or not transition.is_gated:
+    if catalog is None or not transition.is_gated or transition.gate_name is None:
         return None
-    for hcp in catalog.entries.values():
-        if hcp.source_state == transition.source and transition.destination in hcp.destinations:
-            return hcp
-    return None
+    return catalog.entries.get(transition.gate_name)
 
 
 def _advance_block_gated(
@@ -412,6 +411,7 @@ def _advance_block_gated(
     state: IssueState,
     transition: Transition,
     hcp: HCP,
+    state_machine: StateMachine,
 ) -> OperationPlan:
     """Block-gated advance: apply awaiting marker, hold claim, no state change."""
     if not request.body_text:
@@ -422,11 +422,13 @@ def _advance_block_gated(
         )
     packet_body = request.body_text
     change = MarkerChange(set_awaiting_gate=hcp.gate_name)
+    triggering = ", ".join(state_machine.gate_triggering_roles(hcp.gate_name)) or "?"
+    destinations = ", ".join(state_machine.gate_destinations(hcp.gate_name)) or "?"
     audit = (
         f"## await-signal: {hcp.gate_name}\n\n"
         f"Triggered via `advance --transition {transition.label!r}`.\n"
-        f"Triggering role: {hcp.triggering_role}\n"
-        f"Destinations: {', '.join(hcp.destinations)}\n"
+        f"Triggering role(s): {triggering}\n"
+        f"Destinations: {destinations}\n"
         f"Agent prepares: {hcp.agent_prepares_path or 'n/a'}"
     )
     return OperationPlan(
@@ -445,7 +447,7 @@ def _advance_audit_gated(
     state_machine: StateMachine,
 ) -> OperationPlan:
     """Audit-gated advance: state changes + audit-pending marker, atomically."""
-    if hcp.reversibility is ReversibilityClass.IRREVERSIBLE:
+    if state_machine.gate_reversibility(hcp.gate_name) is ReversibilityClass.IRREVERSIBLE:
         raise OperationError(
             f"Gate {hcp.gate_name!r} is at audit level but destination is "
             "irreversible — invalid grant per hitl-principles.md#4."
@@ -631,10 +633,11 @@ def _plan_await_signal(
     if not request.gate:
         raise OperationError("await-signal requires --gate.")
     hcp = _require_gate(catalog, request.gate)
-    if state.state and hcp.source_state and state.state != hcp.source_state:
+    gate_source = state_machine.gate_source(hcp.gate_name)
+    if state.state and gate_source and state.state != gate_source:
         raise OperationError(
             f"Cannot await-signal for gate {hcp.gate_name!r}: "
-            f"current state is {state.state!r}; gate fires from {hcp.source_state!r}."
+            f"current state is {state.state!r}; gate fires from {gate_source!r}."
         )
     if state.awaiting_gate and state.awaiting_gate != hcp.gate_name:
         # Principle 6 — one HITL gate in flight at a time.
@@ -653,10 +656,12 @@ def _plan_await_signal(
         )
 
     change = MarkerChange(set_awaiting_gate=hcp.gate_name)
+    triggering = ", ".join(state_machine.gate_triggering_roles(hcp.gate_name)) or "?"
+    destinations = ", ".join(state_machine.gate_destinations(hcp.gate_name)) or "?"
     audit = (
         f"## await-signal: {hcp.gate_name}\n\n"
-        f"Triggering role: {hcp.triggering_role}\n"
-        f"Destinations: {', '.join(hcp.destinations)}\n"
+        f"Triggering role(s): {triggering}\n"
+        f"Destinations: {destinations}\n"
         f"Agent prepares: {hcp.agent_prepares_path or 'n/a'}"
     )
     return OperationPlan(
@@ -697,20 +702,29 @@ def _plan_approve(
             f"Cannot approve {hcp.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
         )
     destination = request.destination
-    if hcp.is_binary:
+    gate_destinations = state_machine.gate_destinations(hcp.gate_name)
+    is_verdict_style = state_machine.gate_is_verdict_style(hcp.gate_name)
+    if not is_verdict_style:
+        if not gate_destinations:
+            raise OperationError(
+                f"Gate {hcp.gate_name!r} has no destinations declared on the "
+                f"state machine."
+            )
+        only = gate_destinations[0]
         if destination is None:
-            destination = hcp.destinations[0]
-        if destination != hcp.destinations[0]:
+            destination = only
+        if destination != only:
             raise OperationError(
                 f"approve destination {destination!r} does not match the gate's "
-                f"binary destination {hcp.destinations[0]!r}."
+                f"binary destination {only!r}."
             )
     else:
         if not destination:
             raise OperationError(f"Verdict-style gate {hcp.gate_name!r} requires --destination.")
-        if destination not in hcp.destinations:
+        if destination not in gate_destinations:
             raise OperationError(
-                f"Destination {destination!r} is not among the gate's options {hcp.destinations!r}."
+                f"Destination {destination!r} is not among the gate's options "
+                f"{gate_destinations!r}."
             )
     # Approve fires the gated transition; the agent who was holding the
     # working state is now done, so clear the claim. The original source
@@ -721,7 +735,7 @@ def _plan_approve(
         set_state=destination,
         clear_awaiting_gate=True,
         set_reviewing=False,
-        record_approval=destination,
+        record_approval=hcp.gate_name,
         clear_agent_claim=True,
         clear_last_state=True,
         close_issue=close,
@@ -782,20 +796,23 @@ def _plan_record_action(
     if not request.gate:
         raise OperationError("record-action requires --gate.")
     hcp = _require_gate(catalog, request.gate)
-    if hcp.reversibility is ReversibilityClass.IRREVERSIBLE:
+    if state_machine.gate_reversibility(hcp.gate_name) is ReversibilityClass.IRREVERSIBLE:
         raise OperationError(
             "record-action requires a reversible destination (hitl-principles.md#4)."
         )
     destination = request.destination
-    if hcp.is_binary:
-        destination = destination or hcp.destinations[0]
+    gate_destinations = state_machine.gate_destinations(hcp.gate_name)
+    if not state_machine.gate_is_verdict_style(hcp.gate_name):
+        destination = destination or (gate_destinations[0] if gate_destinations else None)
     else:
         if not destination:
             raise OperationError(
                 f"Verdict-style audit gate {hcp.gate_name!r} requires --destination."
             )
-        if destination not in hcp.destinations:
-            raise OperationError(f"Destination {destination!r} is not in {hcp.destinations!r}.")
+        if destination not in gate_destinations:
+            raise OperationError(
+                f"Destination {destination!r} is not in {gate_destinations!r}."
+            )
     if request.transition_label:
         transition = _find_transition(state_machine, state.state, request.transition_label)
         if transition.destination != destination:
@@ -899,7 +916,11 @@ def _plan_revoke(
 # ----- recognized operations -----
 
 
-def _plan_request_input(request: OperationRequest, state: IssueState) -> OperationPlan:
+def _plan_request_input(
+    request: OperationRequest,
+    state: IssueState,
+    state_machine: StateMachine,
+) -> OperationPlan:
     if state.awaiting_input:
         raise OperationError("Already awaiting input on this issue.")
     if state.awaiting_gate or state.audit_pending:
@@ -909,10 +930,36 @@ def _plan_request_input(request: OperationRequest, state: IssueState) -> Operati
         )
     if not request.body_text:
         raise OperationError("request-input requires --body or --body-from.")
+
+    # The current state must be a working state that declares input_topics.
+    # The topic must be one of the declared ids — no free-form fallback.
+    current = state_machine.states.get(state.state) if state.state else None
+    if current is None or not current.input_topics:
+        raise OperationError(
+            f"State {state.state!r} does not declare `input_topics`; "
+            f"`request-input` is not available here. Either declare topics "
+            f"on the state (and one in the shared `input-topics.json`) or "
+            f"release the issue."
+        )
+    if not request.topic:
+        raise OperationError(
+            f"request-input requires --topic. Allowed topics at "
+            f"{state.state!r}: {sorted(current.input_topics)}."
+        )
+    if request.topic not in current.input_topics:
+        raise OperationError(
+            f"Topic {request.topic!r} is not declared on state "
+            f"{state.state!r}. Allowed: {sorted(current.input_topics)}."
+        )
+
     question = request.body_text
-    change = MarkerChange(set_awaiting_input=True)
+    change = MarkerChange(
+        set_awaiting_input=True,
+        set_input_topic=request.topic,
+    )
     audit = (
-        "## request-input\n\nAgent recognizes an unanticipated HITL moment; awaiting human input."
+        f"## request-input: {request.topic}\n\n"
+        f"Agent requests human input on topic `{request.topic}`."
     )
     return OperationPlan(
         operation=request.operation,
@@ -947,6 +994,7 @@ def _plan_respond(request: OperationRequest, state: IssueState) -> OperationPlan
     change = MarkerChange(
         set_awaiting_input=False,
         set_advising=False,
+        clear_input_topic=True,
         record_response=True,
     )
     audit = "## resolve: recognized HITL moment closed"

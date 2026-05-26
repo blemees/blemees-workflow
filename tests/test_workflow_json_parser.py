@@ -257,6 +257,27 @@ def test_mark_pr_ready_parses_on_resting() -> None:
     assert workflow.states["a"].mark_pr_ready is True
 
 
+def test_input_topics_only_on_working_states() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["input_topics"] = ["general"]  # `a` is resting
+    with pytest.raises(ParseError, match="input_topics.*only valid on working"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_input_topics_parses_on_working_state() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["input_topics"] = ["general", "clarify-scope"]
+    workflow = parse_state_machine(json.dumps(spec))
+    assert workflow.states["b"].input_topics == ("general", "clarify-scope")
+
+
+def test_input_topics_duplicate_rejected() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["input_topics"] = ["general", "general"]
+    with pytest.raises(ParseError, match="duplicate topic"):
+        parse_state_machine(json.dumps(spec))
+
+
 def test_pr_process_accepts_pr_issue_type(workflow_dir: Path) -> None:
     """The PR process's working states accept the `pr` type; the derived
     umbrella reflects it."""

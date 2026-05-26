@@ -9,7 +9,8 @@
     "refining": {
       "class": "working",
       "roles": ["product-manager"],
-      "issue_types": ["bug", "feature", "chore", "experiment"]
+      "issue_types": ["bug", "feature", "chore", "experiment"],
+      "input_topics": ["clarify-scope", "needs-arch-review", "needs-security-review", "needs-ux-input", "general"]
     },
     "consult_requested": {
       "class": "resting",
@@ -18,7 +19,8 @@
     "consulting": {
       "class": "working",
       "issue_types": ["bug", "feature", "chore", "experiment"],
-      "roles": ["architect", "designer", "security-engineer"]
+      "roles": ["architect", "designer", "security-engineer"],
+      "input_topics": ["needs-arch-review", "needs-security-review", "general"]
     },
     "consult_complete": {
       "class": "resting",

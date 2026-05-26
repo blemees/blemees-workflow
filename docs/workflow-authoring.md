@@ -76,6 +76,7 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 | `handoff` | bool | optional, resting states only | Marks the state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Replaces the old `cross_process` kind:`shared` transitions. |
 | `spawns` | object | optional, working / resting / terminal states | Subprocess / spawn contract. See "Spawns" below. |
 | `mark_pr_ready` | bool | optional, not on terminal | When advancing into this state, the backend flips the underlying PR from draft to ready-for-review (`gh pr ready` on GitHub). No-op on non-PR issues. PRs are always created as drafts; this is the only way to flip them. |
+| `input_topics` | array of strings | optional, working states only | Topic ids from the shared `input-topics.json` that agents may invoke `request-input` on at this state. Empty / absent = `request-input` is forbidden here. Each id must resolve in the directory (cross-checked by the validator). |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
 The parser fails loud on:

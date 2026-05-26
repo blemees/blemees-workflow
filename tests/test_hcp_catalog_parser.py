@@ -1,4 +1,6 @@
-"""HCP catalog parser tests."""
+"""HCP catalog parser tests — schema is policy-only; structural info
+(source state / destinations / triggering roles / reversibility) is
+derived from the paired state machine via `StateMachine.gate_*`."""
 
 from __future__ import annotations
 
@@ -8,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from workflow.core.model.hcp import HCPLevel, HCPType
-from workflow.core.model.state_machine import ReversibilityClass
 from workflow.core.parser.hcp_catalog import parse_hcp_catalog
 from workflow.errors import ParseError
 
@@ -27,17 +28,10 @@ def test_missing_file_yields_empty_catalog(
 
 
 BINARY_HCP_CATALOG = {
-    "process": "refinement",
     "hcps": [
         {
             "gate_name": "ready_for_dev",
-            "transition": {
-                "source": "refining",
-                "destinations": ["ready_for_dev"],
-            },
-            "triggering_role": "product-manager",
             "type": "authority",
-            "reversibility": "reversible-slow",
             "allowed_levels": ["block", "audit"],
             "default_level": "block",
             "agent_prepares": "dor.md",
@@ -53,11 +47,7 @@ def test_parse_binary_hcp_catalog() -> None:
 
     hcp = catalog.entries["ready_for_dev"]
     assert hcp.gate_name == "ready_for_dev"
-    assert hcp.source_state == "refining"
-    assert hcp.destinations == ["ready_for_dev"]
-    assert hcp.is_binary
     assert hcp.hcp_type is HCPType.AUTHORITY
-    assert hcp.reversibility is ReversibilityClass.REVERSIBLE_SLOW
     assert HCPLevel.BLOCK in hcp.allowed_levels
     assert HCPLevel.AUDIT in hcp.allowed_levels
     assert hcp.default_level is HCPLevel.BLOCK
@@ -66,17 +56,10 @@ def test_parse_binary_hcp_catalog() -> None:
 
 
 VERDICT_HCP_CATALOG = {
-    "process": "experimentation",
     "hcps": [
         {
             "gate_name": "experiment-verdict",
-            "transition": {
-                "source": "measurement_complete",
-                "destinations": ["promoted", "killed", "iterated", "aborted"],
-            },
-            "triggering_role": "product-owner",
             "type": "authority",
-            "reversibility": "irreversible",
             "allowed_levels": ["block"],
             "default_level": "block",
             "agent_prepares": "experiment-verdict-packet.md",
@@ -90,9 +73,6 @@ def test_parse_verdict_hcp_catalog() -> None:
     catalog = parse_hcp_catalog(json.dumps(VERDICT_HCP_CATALOG))
     assert "experiment-verdict" in catalog.entries
     hcp = catalog.entries["experiment-verdict"]
-    assert hcp.is_verdict_style
-    assert set(hcp.destinations) == {"promoted", "killed", "iterated", "aborted"}
-    assert hcp.reversibility is ReversibilityClass.IRREVERSIBLE
     assert hcp.allowed_levels == [HCPLevel.BLOCK]
 
 
@@ -105,14 +85,10 @@ def test_truncated_json_fails_loudly() -> None:
 
 def test_default_level_must_be_in_allowed_levels() -> None:
     bad = {
-        "process": "refinement",
         "hcps": [
             {
                 "gate_name": "x",
-                "transition": {"source": "a", "destinations": ["b"]},
-                "triggering_role": "product-manager",
                 "type": "authority",
-                "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
                 "default_level": "audit",
             }
@@ -124,14 +100,10 @@ def test_default_level_must_be_in_allowed_levels() -> None:
 
 def test_unknown_type_rejected() -> None:
     bad = {
-        "process": "refinement",
         "hcps": [
             {
                 "gate_name": "x",
-                "transition": {"source": "a", "destinations": ["b"]},
-                "triggering_role": "product-manager",
                 "type": "uncertainty",  # not in the four-type taxonomy
-                "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
                 "default_level": "block",
             }
@@ -143,14 +115,10 @@ def test_unknown_type_rejected() -> None:
 
 def test_missing_required_field_rejected() -> None:
     bad = {
-        "process": "refinement",
         "hcps": [
             {
                 "gate_name": "x",
-                # missing transition
-                "triggering_role": "product-manager",
-                "type": "authority",
-                "reversibility": "reversible-slow",
+                # missing type
                 "allowed_levels": ["block"],
                 "default_level": "block",
             }
@@ -162,23 +130,16 @@ def test_missing_required_field_rejected() -> None:
 
 def test_duplicate_gate_names_rejected() -> None:
     bad = {
-        "process": "refinement",
         "hcps": [
             {
                 "gate_name": "x",
-                "transition": {"source": "a", "destinations": ["b"]},
-                "triggering_role": "product-manager",
                 "type": "authority",
-                "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
                 "default_level": "block",
             },
             {
                 "gate_name": "x",
-                "transition": {"source": "c", "destinations": ["d"]},
-                "triggering_role": "product-manager",
                 "type": "authority",
-                "reversibility": "reversible-slow",
                 "allowed_levels": ["block"],
                 "default_level": "block",
             },
@@ -189,6 +150,9 @@ def test_duplicate_gate_names_rejected() -> None:
 
 
 def test_empty_catalog_returns_empty() -> None:
-    catalog = parse_hcp_catalog(json.dumps({"process": "x", "hcps": []}))
+    # The top-level `process` field was removed — process name now derives
+    # from the filename stem when loading from disk. From a raw string,
+    # the default is "unnamed".
+    catalog = parse_hcp_catalog(json.dumps({"hcps": []}))
     assert catalog.entries == {}
-    assert catalog.process_name == "x"
+    assert catalog.process_name == "unnamed"

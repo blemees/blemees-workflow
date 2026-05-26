@@ -50,23 +50,23 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `accumulating` | resting | reversible-fast | — | — | — | — |
-| `cut` | resting | reversible-slow | — | — | — | — |
-| `preparing` | working | — | release-manager | release | — | — |
-| `ready_for_release_decision` | resting | reversible-slow | — | — | — | — |
-| `reviewing_release` | working | — | product-owner | release | — | — |
-| `gated_nogo` | resting | reversible-fast | — | — | — | — |
-| `abandoning` | working | — | product-owner | release | — | — |
-| `abandoned` | terminal | reversible-fast | — | — | abandoned | not planned |
-| `deploying` | resting | reversible-slow | — | — | — | — |
-| `rolling_out` | resting | reversible-slow | — | — | — | — |
-| `ready_for_monitoring` | resting | reversible-slow | — | — | — | — |
-| `monitoring` | working | — | developer | release | — | — |
-| `rolling_back` | working | — | incident-commander, release-manager | release | — | — |
-| `rolled_back` | terminal | reversible-slow | — | — | reverted | completed |
-| `released` | terminal | reversible-slow | — | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `accumulating` | resting | reversible-fast | — | — | — | — | — |
+| `cut` | resting | reversible-slow | — | — | — | — | — |
+| `preparing` | working | — | release-manager | release | — | — | — |
+| `ready_for_release_decision` | resting | reversible-slow | — | — | — | — | — |
+| `reviewing_release` | working | — | product-owner | release | — | — | — |
+| `gated_nogo` | resting | reversible-fast | — | — | — | — | — |
+| `abandoning` | working | — | product-owner | release | — | — | — |
+| `abandoned` | terminal | reversible-fast | — | — | — | abandoned | not planned |
+| `deploying` | resting | reversible-slow | — | — | — | — | — |
+| `rolling_out` | resting | reversible-slow | — | — | — | — | — |
+| `ready_for_monitoring` | resting | reversible-slow | — | — | — | — | — |
+| `monitoring` | working | — | developer | release | — | — | — |
+| `rolling_back` | working | — | incident-commander, release-manager | release | — | — | — |
+| `rolled_back` | terminal | reversible-slow | — | — | — | reverted | completed |
+| `released` | terminal | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

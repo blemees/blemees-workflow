@@ -32,15 +32,15 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `soaking` | resting | reversible-slow | — | — | — | — |
-| `ready_for_stage_analysis` | resting | reversible-fast | — | — | — | — |
-| `analyzing` | working | — | developer | release | — | — |
-| `holding` | resting | reversible-fast | — | — | — | — |
-| `killing` | working | — | incident-commander, incident-responder | release | — | — |
-| `complete` | terminal | reversible-slow | — | — | shipped | completed |
-| `kill_switched` | terminal | reversible-slow | — | — | reverted | completed |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `soaking` | resting | reversible-slow | — | — | — | — | — |
+| `ready_for_stage_analysis` | resting | reversible-fast | — | — | — | — | — |
+| `analyzing` | working | — | developer | release | — | — | — |
+| `holding` | resting | reversible-fast | — | — | — | — | — |
+| `killing` | working | — | incident-commander, incident-responder | release | — | — | — |
+| `complete` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `kill_switched` | terminal | reversible-slow | — | — | — | reverted | completed |
 
 ## Transitions
 

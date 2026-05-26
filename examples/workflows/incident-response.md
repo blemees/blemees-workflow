@@ -39,17 +39,17 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `declared` | resting | reversible-fast | — | — | — | — |
-| `triaging` | working | — | incident-commander | incident | — | — |
-| `needs_diagnosis` | resting | reversible-fast | — | — | — | — |
-| `diagnosing` | working | — | incident-responder | incident | — | — |
-| `cause_identified` | resting | reversible-fast | — | — | — | — |
-| `mitigating` | working | — | incident-commander | incident | — | — |
-| `needs_verification` | resting | reversible-fast | — | — | — | — |
-| `verifying` | working | — | incident-responder | incident | — | — |
-| `stabilized` | terminal | reversible-fast | — | — | superseded | completed |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `declared` | resting | reversible-fast | — | — | — | — | — |
+| `triaging` | working | — | incident-commander | incident | — | — | — |
+| `needs_diagnosis` | resting | reversible-fast | — | — | — | — | — |
+| `diagnosing` | working | — | incident-responder | incident | blocked-on-data, general | — | — |
+| `cause_identified` | resting | reversible-fast | — | — | — | — | — |
+| `mitigating` | working | — | incident-commander | incident | needs-security-review, blocked-on-data, general | — | — |
+| `needs_verification` | resting | reversible-fast | — | — | — | — | — |
+| `verifying` | working | — | incident-responder | incident | — | — | — |
+| `stabilized` | terminal | reversible-fast | — | — | — | superseded | completed |
 
 ## Transitions
 

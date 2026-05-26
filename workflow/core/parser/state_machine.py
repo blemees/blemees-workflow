@@ -415,6 +415,31 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"states (terminals have already reached their final form)."
         )
 
+    input_topics_raw = spec.get("input_topics", [])
+    if not isinstance(input_topics_raw, list):
+        raise ParseError(
+            f"State {state_id!r}: `input_topics` must be a list of topic ids "
+            f"(got {type(input_topics_raw).__name__})."
+        )
+    input_topics_parsed: list[str] = []
+    for i, t in enumerate(input_topics_raw):
+        if not isinstance(t, str) or not t.strip():
+            raise ParseError(
+                f"State {state_id!r}: `input_topics[{i}]` must be a non-empty "
+                f"string (got {t!r})."
+            )
+        cleaned = t.strip()
+        if cleaned in input_topics_parsed:
+            raise ParseError(
+                f"State {state_id!r}: duplicate topic {cleaned!r} in `input_topics`."
+            )
+        input_topics_parsed.append(cleaned)
+    if input_topics_parsed and state_class is not StateClass.WORKING:
+        raise ParseError(
+            f"State {state_id!r}: `input_topics` is only valid on working "
+            f"states (state class is {state_class.value!r})."
+        )
+
     notes_raw = spec.get("notes", [])
     if notes_raw is None:
         notes_raw = []
@@ -442,6 +467,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         handoff=handoff_raw,
         spawns=spawns,
         mark_pr_ready=mark_pr_ready_raw,
+        input_topics=tuple(input_topics_parsed),
         notes=notes,
     )
 

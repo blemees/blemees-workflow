@@ -42,6 +42,7 @@ class IssueState:
     auditing: bool = False  # singleton: a human has claimed post-action audit
     # Recognized markers
     awaiting_input: bool = False  # generic queue marker for recognized HCPs
+    input_topic: str | None = None  # topic the agent is awaiting input on
     advising: bool = False  # singleton: a human is advising
     # Misc
     extras: dict[str, str] = field(default_factory=dict)  # backend-specific extras
@@ -68,9 +69,14 @@ class MarkerChange:
     clear_audit_pending: bool = False
     set_auditing: bool | None = None
     set_awaiting_input: bool | None = None
+    # Companion to set_awaiting_input — records the topic the agent is
+    # awaiting input on (`hitl:topic-<topic>` on GitHub). Cleared via
+    # `clear_input_topic` when respond fires.
+    set_input_topic: str | None = None
+    clear_input_topic: bool = False
     set_advising: bool | None = None
     # Outcome markers (audit-trace labels in GitHub encoding; signal events elsewhere)
-    record_approval: str | None = None  # destination approved
+    record_approval: str | None = None  # gate approved (destination is captured via set_state)
     record_rejection: str | None = None  # gate rejected
     record_confirm: str | None = None  # destination checked post-hoc
     record_revoke: str | None = None  # destination revoked

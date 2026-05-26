@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from workflow.core.model.state_machine import ReversibilityClass
-
 
 class HCPType(Enum):
     """Per hitl-principles.md principle 2.
@@ -44,41 +42,20 @@ class HCP:
     `gate_name` is the suffix used in operations: a destination state name for
     binary HCPs, or a named decision for verdict-style HCPs (per principle 8).
 
-    `destinations` lists one state for binary HCPs and multiple for
-    verdict-style. The `approve` operation always names a specific destination
-    (which is the human's choice).
+    The HCP carries only **policy** fields — the kind of input the human
+    is asked for, which levels are allowed, the default, and pointers to
+    a packet template and rationale. Structural information (source
+    state, destinations, triggering roles, reversibility) is derived
+    from the paired state machine via `StateMachine.gate_*` helpers.
     """
 
     gate_name: str
-    source_state: str
-    destinations: list[str]
-    triggering_role: str
     hcp_type: HCPType
-    reversibility: ReversibilityClass  # For verdict-style, the worst-case among destinations
     allowed_levels: list[HCPLevel]
     default_level: HCPLevel
     agent_prepares_path: str | None = None
     rationale: str | None = None
     source_doc: str | None = None  # Process doc filename
-
-    @property
-    def is_verdict_style(self) -> bool:
-        return len(self.destinations) > 1
-
-    @property
-    def is_binary(self) -> bool:
-        return len(self.destinations) == 1
-
-    def can_relax_to_audit(self) -> bool:
-        """Audit is allowed only when the destination is reversible.
-
-        For verdict-style HCPs, the worst-case destination's class governs (per
-        hitl-principles.md principle 4 + 8).
-        """
-        return (
-            self.reversibility is not ReversibilityClass.IRREVERSIBLE
-            and HCPLevel.AUDIT in self.allowed_levels
-        )
 
 
 @dataclass

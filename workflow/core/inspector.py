@@ -39,12 +39,12 @@ class AvailableTransition:
     destination: str  # state name or "[*]" for cross-process exits
     transition_type: TransitionType
 
-    # HITL enrichment (None when transition is not gated)
+    # HITL enrichment (None / empty when transition is not gated)
     is_gated: bool = False
     gate_name: str | None = None
     default_level: HCPLevel | None = None
     effective_level: HCPLevel | None = None
-    triggering_role: str | None = None
+    triggering_roles: tuple[str, ...] = ()
     agent_prepares_path: str | None = None
 
     # Destination state info (None when destination is `[*]`)
@@ -98,6 +98,11 @@ def available_transitions(
             if grant is not None and grant.effective_today:
                 effective_level = grant.current_level
 
+        triggering_roles = (
+            state_machine.gate_triggering_roles(t.gate_name)
+            if hcp is not None and t.gate_name is not None
+            else ()
+        )
         out.append(
             AvailableTransition(
                 label=t.label,
@@ -108,7 +113,7 @@ def available_transitions(
                 gate_name=t.gate_name,
                 default_level=default_level,
                 effective_level=effective_level,
-                triggering_role=hcp.triggering_role if hcp else None,
+                triggering_roles=triggering_roles,
                 agent_prepares_path=hcp.agent_prepares_path if hcp else None,
                 destination_state_class=dst_state.state_class if dst_state else None,
                 destination_reversibility=dst_state.reversibility if dst_state else None,

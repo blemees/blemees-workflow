@@ -27,14 +27,14 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `ready_for_backport` | resting | reversible-slow | — | — | — | — |
-| `cherry_picking` | working | — | developer | backport | — | — |
-| `backport_pr_review` | resting | reversible-fast | — | — | — | — |
-| `backport_merged` | resting | reversible-slow | — | — | — | — |
-| `patch_releasing` | resting | reversible-slow | — | — | — | — |
-| `backported` | terminal | reversible-slow | — | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `ready_for_backport` | resting | reversible-slow | — | — | — | — | — |
+| `cherry_picking` | working | — | developer | backport | — | — | — |
+| `backport_pr_review` | resting | reversible-fast | — | — | — | — | — |
+| `backport_merged` | resting | reversible-slow | — | — | — | — | — |
+| `patch_releasing` | resting | reversible-slow | — | — | — | — | — |
+| `backported` | terminal | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

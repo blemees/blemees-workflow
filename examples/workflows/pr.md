@@ -45,21 +45,21 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `draft` | resting | reversible-fast | — | — | — | — |
-| `drafting` | working | — | developer | pr | — | — |
-| `needs_review` | resting | reversible-fast | — | — | — | — |
-| `reviewing` | working | — | peer-reviewer | pr | — | — |
-| `changes_requested` | resting | reversible-fast | — | — | — | — |
-| `fixing_review` | working | — | developer | pr | — | — |
-| `needs_qa` | resting | reversible-fast | — | — | — | — |
-| `verifying` | working | — | tester | pr | — | — |
-| `qa_passed` | resting | reversible-fast | — | — | — | — |
-| `qa_failed` | resting | reversible-fast | — | — | — | — |
-| `fixing_qa` | working | — | developer | pr | — | — |
-| `merging` | working | — | developer | pr | — | — |
-| `staged` | terminal | reversible-slow | — | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `draft` | resting | reversible-fast | — | — | — | — | — |
+| `drafting` | working | — | developer | pr | — | — | — |
+| `needs_review` | resting | reversible-fast | — | — | — | — | — |
+| `reviewing` | working | — | peer-reviewer | pr | needs-security-review, general | — | — |
+| `changes_requested` | resting | reversible-fast | — | — | — | — | — |
+| `fixing_review` | working | — | developer | pr | clarify-scope, general | — | — |
+| `needs_qa` | resting | reversible-fast | — | — | — | — | — |
+| `verifying` | working | — | tester | pr | — | — | — |
+| `qa_passed` | resting | reversible-fast | — | — | — | — | — |
+| `qa_failed` | resting | reversible-fast | — | — | — | — | — |
+| `fixing_qa` | working | — | developer | pr | — | — | — |
+| `merging` | working | — | developer | pr | — | — | — |
+| `staged` | terminal | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

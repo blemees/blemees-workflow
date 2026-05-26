@@ -35,16 +35,16 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `measuring` | resting | reversible-slow | — | — | — | — |
-| `measurement_complete` | resting | reversible-fast | — | — | — | — |
-| `analyzing` | working | — | product-owner | experiment | — | — |
-| `aborting` | working | — | product-owner | experiment | — | — |
-| `promoted` | terminal | reversible-slow | — | — | shipped | completed |
-| `killed` | terminal | reversible-slow | — | — | abandoned | not planned |
-| `iterated` | terminal | reversible-fast | — | — | superseded | not planned |
-| `aborted` | terminal | reversible-fast | — | — | abandoned | not planned |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `measuring` | resting | reversible-slow | — | — | — | — | — |
+| `measurement_complete` | resting | reversible-fast | — | — | — | — | — |
+| `analyzing` | working | — | product-owner | experiment | — | — | — |
+| `aborting` | working | — | product-owner | experiment | — | — | — |
+| `promoted` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `killed` | terminal | reversible-slow | — | — | — | abandoned | not planned |
+| `iterated` | terminal | reversible-fast | — | — | — | superseded | not planned |
+| `aborted` | terminal | reversible-fast | — | — | — | abandoned | not planned |
 
 ## Transitions
 

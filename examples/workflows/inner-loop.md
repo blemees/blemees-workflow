@@ -59,24 +59,24 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `ready_for_dev` | resting | reversible-slow | — | — | — | — |
-| `ready_for_experiment` | resting | reversible-slow | — | — | — | — |
-| `ready_for_spike` | resting | reversible-slow | — | — | — | — |
-| `ready_for_hotfix` | resting | reversible-fast | — | — | — | — |
-| `implementing` | working | — | developer | bug, feature, chore | — | — |
-| `implementing_experiment` | working | — | developer | experiment | — | — |
-| `implementing_spike` | working | — | developer | spike | — | — |
-| `implementing_hotfix` | working | — | developer | hotfix | — | — |
-| `pr_review` | resting | reversible-fast | — | — | — | — |
-| `pr_review_experiment` | resting | reversible-fast | — | — | — | — |
-| `pr_review_hotfix` | resting | reversible-fast | — | — | — | — |
-| `staged` | resting | reversible-slow | — | — | — | — |
-| `staged_experiment` | resting | reversible-slow | — | — | — | — |
-| `staged_hotfix` | resting | reversible-slow | — | — | — | — |
-| `spike_completed` | terminal | reversible-fast | — | — | resolved | completed |
-| `ready_bounced` | resting | reversible-fast | — | — | — | — |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `ready_for_dev` | resting | reversible-slow | — | — | — | — | — |
+| `ready_for_experiment` | resting | reversible-slow | — | — | — | — | — |
+| `ready_for_spike` | resting | reversible-slow | — | — | — | — | — |
+| `ready_for_hotfix` | resting | reversible-fast | — | — | — | — | — |
+| `implementing` | working | — | developer | bug, feature, chore | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
+| `implementing_experiment` | working | — | developer | experiment | clarify-scope, needs-arch-review, general | — | — |
+| `implementing_spike` | working | — | developer | spike | clarify-scope, needs-arch-review, general | — | — |
+| `implementing_hotfix` | working | — | developer | hotfix | needs-security-review, blocked-on-data, general | — | — |
+| `pr_review` | resting | reversible-fast | — | — | — | — | — |
+| `pr_review_experiment` | resting | reversible-fast | — | — | — | — | — |
+| `pr_review_hotfix` | resting | reversible-fast | — | — | — | — | — |
+| `staged` | resting | reversible-slow | — | — | — | — | — |
+| `staged_experiment` | resting | reversible-slow | — | — | — | — | — |
+| `staged_hotfix` | resting | reversible-slow | — | — | — | — | — |
+| `spike_completed` | terminal | reversible-fast | — | — | — | resolved | completed |
+| `ready_bounced` | resting | reversible-fast | — | — | — | — | — |
 
 ## Transitions
 

@@ -77,7 +77,6 @@ def test_terminal_without_taxonomy_warns() -> None:
     workflow.states["done"] = State(
         name="done",
         state_class=StateClass.TERMINAL,
-        reversibility=ReversibilityClass.REVERSIBLE_FAST,
         terminal_taxonomy=None,
     )
     workflow.transitions.append(
@@ -87,16 +86,104 @@ def test_terminal_without_taxonomy_warns() -> None:
     assert any(f.principle_cite == "state-machine-principles.md#8" for f in findings)
 
 
-def test_audit_with_irreversible_destination_errors() -> None:
+def test_gate_with_multiple_source_states_errors() -> None:
+    """A gate must fire from exactly one source state. Two transitions
+    sharing a gate name but originating from different sources is an
+    error — the `hitl:awaiting-<gate>` label would be ambiguous."""
     workflow = StateMachine(name="t")
+    workflow.states["src_a"] = State(name="src_a", state_class=StateClass.WORKING)
+    workflow.states["src_b"] = State(name="src_b", state_class=StateClass.WORKING)
+    workflow.states["dst"] = State(
+        name="dst",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    workflow.transitions.extend([
+        Transition(
+            source="src_a",
+            destination="dst",
+            label="A fires shared gate",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="shared",
+        ),
+        Transition(
+            source="src_b",
+            destination="dst",
+            label="B fires shared gate",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="shared",
+        ),
+    ])
+    findings = validate_state_machine(workflow, catalog=None, grants={})
+    multi_source = [
+        f for f in findings
+        if f.severity is Severity.ERROR and "multiple source states" in f.message
+    ]
+    assert multi_source, "Expected error about multi-source gate sharing"
+    assert "'shared'" in multi_source[0].message
+
+
+def test_gate_with_same_source_multiple_destinations_passes() -> None:
+    """Verdict-style: same source, several destinations sharing the gate
+    name is fine."""
+    workflow = StateMachine(name="t")
+    workflow.states["src"] = State(name="src", state_class=StateClass.WORKING)
+    workflow.states["a"] = State(
+        name="a",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    workflow.states["b"] = State(
+        name="b",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    workflow.transitions.extend([
+        Transition(
+            source="src",
+            destination="a",
+            label="verdict → a",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="verdict",
+        ),
+        Transition(
+            source="src",
+            destination="b",
+            label="verdict → b",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="verdict",
+        ),
+    ])
+    findings = validate_state_machine(workflow, catalog=None, grants={})
+    assert not any(
+        "multiple source states" in f.message for f in findings
+    )
+
+
+def test_audit_with_irreversible_destination_errors() -> None:
+    """Audit-default-level on a gate that lands on an irreversible state.
+    Reversibility is derived from the destination state via the gated
+    transition, so the state machine and the gate transition must exist."""
+    workflow = StateMachine(name="t")
+    workflow.states["src"] = State(name="src", state_class=StateClass.WORKING)
+    workflow.states["irrev_dst"] = State(
+        name="irrev_dst",
+        state_class=StateClass.TERMINAL,
+        reversibility=ReversibilityClass.IRREVERSIBLE,
+    )
+    workflow.transitions.append(
+        Transition(
+            source="src",
+            destination="irrev_dst",
+            label="fire gate",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="gate",
+        )
+    )
     catalog = HCPCatalog(process_name="t")
     catalog.entries["gate"] = HCP(
         gate_name="gate",
-        source_state="src",
-        destinations=["dst"],
-        triggering_role="{pm}",
         hcp_type=HCPType.AUTHORITY,
-        reversibility=ReversibilityClass.IRREVERSIBLE,
         allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
         default_level=HCPLevel.AUDIT,
     )
@@ -111,11 +198,7 @@ def test_agent_prepares_missing_warns() -> None:
     catalog = HCPCatalog(process_name="t")
     catalog.entries["gate"] = HCP(
         gate_name="gate",
-        source_state="src",
-        destinations=["dst"],
-        triggering_role="{pm}",
         hcp_type=HCPType.AUTHORITY,
-        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
         allowed_levels=[HCPLevel.BLOCK],
         default_level=HCPLevel.BLOCK,
         agent_prepares_path=None,
@@ -133,11 +216,7 @@ def test_legend_catalog_drift_warns() -> None:
     catalog = HCPCatalog(process_name="t")
     catalog.entries["gate_b"] = HCP(
         gate_name="gate_b",
-        source_state="src",
-        destinations=["dst"],
-        triggering_role="{pm}",
         hcp_type=HCPType.AUTHORITY,
-        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
         allowed_levels=[HCPLevel.BLOCK],
         default_level=HCPLevel.BLOCK,
         agent_prepares_path="x.md",
@@ -215,7 +294,6 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
         "waiting": State(
             name="waiting",
             state_class=StateClass.RESTING,
-            reversibility=ReversibilityClass.REVERSIBLE_FAST,
             spawns=Spawn(
                 process="child",
                 issue_type="bug",
@@ -236,7 +314,6 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
         "queue": State(
             name="queue",
             state_class=StateClass.RESTING,
-            reversibility=ReversibilityClass.REVERSIBLE_FAST,
         ),
         "doing_child": State(
             name="doing_child",
@@ -247,7 +324,6 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
         "done": State(
             name="done",
             state_class=StateClass.TERMINAL,
-            reversibility=ReversibilityClass.REVERSIBLE_FAST,
             terminal_taxonomy=__import__(
                 "workflow.core.model.state_machine", fromlist=["TerminalTaxonomy"]
             ).TerminalTaxonomy.SHIPPED,

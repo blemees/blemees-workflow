@@ -56,20 +56,20 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `raw` | resting | reversible-fast | — | — | — | — |
-| `refining` | working | — | product-manager | bug, feature, chore, experiment | — | — |
-| `consult_requested` | resting | reversible-fast | — | — | — | — |
-| `consulting` | working | — | architect, designer, security-engineer | bug, feature, chore, experiment | — | — |
-| `consult_complete` | resting | reversible-fast | — | — | — | — |
-| `spiking` | resting | reversible-fast | — | — | — | — |
-| `ready_for_dev` | resting | reversible-slow | — | — | — | — |
-| `ready_for_experiment` | resting | reversible-slow | — | — | — | — |
-| `ready_bounced` | resting | reversible-fast | — | — | — | — |
-| `deprioritized` | resting | reversible-fast | — | — | — | — |
-| `duplicate` | terminal | reversible-fast | — | — | deduplicated | not planned |
-| `wont_fix` | terminal | reversible-fast | — | — | abandoned | not planned |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `raw` | resting | reversible-fast | — | — | — | — | — |
+| `refining` | working | — | product-manager | bug, feature, chore, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, general | — | — |
+| `consult_requested` | resting | reversible-fast | — | — | — | — | — |
+| `consulting` | working | — | architect, designer, security-engineer | bug, feature, chore, experiment | needs-arch-review, needs-security-review, general | — | — |
+| `consult_complete` | resting | reversible-fast | — | — | — | — | — |
+| `spiking` | resting | reversible-fast | — | — | — | — | — |
+| `ready_for_dev` | resting | reversible-slow | — | — | — | — | — |
+| `ready_for_experiment` | resting | reversible-slow | — | — | — | — | — |
+| `ready_bounced` | resting | reversible-fast | — | — | — | — | — |
+| `deprioritized` | resting | reversible-fast | — | — | — | — | — |
+| `duplicate` | terminal | reversible-fast | — | — | — | deduplicated | not planned |
+| `wont_fix` | terminal | reversible-fast | — | — | — | abandoned | not planned |
 
 ## Transitions
 

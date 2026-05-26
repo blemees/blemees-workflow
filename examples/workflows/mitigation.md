@@ -32,15 +32,15 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `ready_for_rollback` | resting | reversible-fast | — | — | — | — |
-| `ready_for_flag_toggle` | resting | reversible-fast | — | — | — | — |
-| `ready_for_hotfix` | resting | reversible-fast | — | — | — | — |
-| `rolling_back` | working | — | incident-responder | incident | — | — |
-| `rolled_back` | terminal | reversible-slow | — | — | shipped | completed |
-| `toggling_flag` | working | — | incident-responder | incident | — | — |
-| `flag_toggled` | terminal | reversible-slow | — | — | shipped | completed |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `ready_for_rollback` | resting | reversible-fast | — | — | — | — | — |
+| `ready_for_flag_toggle` | resting | reversible-fast | — | — | — | — | — |
+| `ready_for_hotfix` | resting | reversible-fast | — | — | — | — | — |
+| `rolling_back` | working | — | incident-responder | incident | — | — | — |
+| `rolled_back` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `toggling_flag` | working | — | incident-responder | incident | — | — | — |
+| `flag_toggled` | terminal | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

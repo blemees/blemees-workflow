@@ -19,7 +19,8 @@
     "reviewing": {
       "class": "working",
       "roles": ["peer-reviewer"],
-      "issue_types": ["pr"]
+      "issue_types": ["pr"],
+      "input_topics": ["needs-security-review", "general"]
     },
     "changes_requested": {
       "class": "resting",
@@ -28,7 +29,8 @@
     "fixing_review": {
       "class": "working",
       "roles": ["developer"],
-      "issue_types": ["pr"]
+      "issue_types": ["pr"],
+      "input_topics": ["clarify-scope", "general"]
     },
     "needs_qa": {
       "class": "resting",

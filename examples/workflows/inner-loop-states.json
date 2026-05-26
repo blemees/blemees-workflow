@@ -32,7 +32,8 @@
         "advance_on": {
           "staged": "staged"
         }
-      }
+      },
+      "input_topics": ["clarify-scope", "needs-arch-review", "needs-security-review", "blocked-on-data", "general"]
     },
     "implementing_experiment": {
       "class": "working",
@@ -45,12 +46,14 @@
         "advance_on": {
           "staged": "staged_experiment"
         }
-      }
+      },
+      "input_topics": ["clarify-scope", "needs-arch-review", "general"]
     },
     "implementing_spike": {
       "class": "working",
       "roles": ["developer"],
-      "issue_types": ["spike"]
+      "issue_types": ["spike"],
+      "input_topics": ["clarify-scope", "needs-arch-review", "general"]
     },
     "implementing_hotfix": {
       "class": "working",
@@ -63,7 +66,8 @@
         "advance_on": {
           "staged": "staged_hotfix"
         }
-      }
+      },
+      "input_topics": ["needs-security-review", "blocked-on-data", "general"]
     },
     "pr_review": {
       "class": "resting",

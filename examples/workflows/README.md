@@ -22,3 +22,4 @@ Authored sources are the `*.json` files; regenerate with `workflow generate-docs
 
 - [Roles](./roles.md)
 - [Issue types](./issue-types.md)
+- [Input topics](./input-topics.md)

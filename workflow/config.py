@@ -51,6 +51,7 @@ from typing import Any
 
 from workflow.backends.base import TrackerBackend
 from workflow.core.model.hcp import HCPCatalog
+from workflow.core.model.input_topic import InputTopicDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.role import RoleDirectory
 from workflow.core.model.state_machine import StateMachine
@@ -62,6 +63,7 @@ from workflow.core.parser import (
     parse_role_directory,
     parse_state_machine,
 )
+from workflow.core.parser.input_topic_directory import parse_input_topic_directory
 from workflow.errors import ConfigError
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,7 @@ class Process:
     catalog: HCPCatalog | None = None
     role_directory: RoleDirectory | None = None
     issue_type_directory: IssueTypeDirectory | None = None
+    input_topic_directory: InputTopicDirectory | None = None
     grants: dict[str, TrustGrant] = field(default_factory=dict)
     backend: TrackerBackend | None = None
     workflow_dir: Path | None = None  # dir containing *-states.json files
@@ -290,6 +293,12 @@ def load_process(
     if issue_types_path.exists():
         issue_type_directory = parse_issue_type_directory(issue_types_path)
 
+    # Input topic directory (optional, shared across workflows).
+    input_topic_directory: InputTopicDirectory | None = None
+    input_topics_path = workflow_dir / "input-topics.json"
+    if input_topics_path.exists():
+        input_topic_directory = parse_input_topic_directory(input_topics_path)
+
     # Trust grants — priority: explicit grants_dir > env > agent config > default.
     grants: dict[str, TrustGrant] = {}
     if grants_dir is None:
@@ -311,6 +320,7 @@ def load_process(
         catalog=catalog,
         role_directory=role_directory,
         issue_type_directory=issue_type_directory,
+        input_topic_directory=input_topic_directory,
         grants=grants,
         backend=backend,
         workflow_dir=workflow_dir,

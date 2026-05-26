@@ -76,6 +76,12 @@
           "type": "boolean",
           "description": "When True, advancing into this state flips the underlying PR from draft to ready-for-review on the tracker (`gh pr ready` on GitHub). No-op when the issue isn't a pull request. Not valid on terminal states."
         },
+        "input_topics": {
+          "type": "array",
+          "description": "Input topics agents may invoke `request-input` on at this state. Topic ids resolve against the shared `input-topics.json`. Only valid on working states; absence / empty means `request-input` is forbidden here.",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
         "spawns": {
           "type": "object",
           "description": "Subprocess / spawn contract. Valid on working, resting, or terminal states. Working AND resting states optionally declare `advance_on` to auto-advance the parent on selected child terminals; unmapped terminals keep the parent put. Resting-state `advance_on` targets must be non-working (event-style transition). Terminal states spawn an independent follow-up (no `advance_on`).",

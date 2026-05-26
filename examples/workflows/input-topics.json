@@ -1,0 +1,29 @@
+{
+  "$schema": "../../docs/schemas/input-topics.schema.json",
+  "topics": {
+    "general": {
+      "name": "General",
+      "description": "Catch-all for off-catalog questions. Use when none of the specialised topics fits — but prefer a specialised topic when one applies, so the human operator can read the queue at a glance."
+    },
+    "clarify-scope": {
+      "name": "Clarify scope",
+      "description": "Boundaries / out-of-scope confirmation. The agent has hit a question about whether the work should include / exclude something the ticket didn't specify."
+    },
+    "needs-arch-review": {
+      "name": "Needs architecture review",
+      "description": "A cross-module impact or non-trivial design choice the agent isn't comfortable making alone. Prepare an outline of the options considered before invoking."
+    },
+    "needs-security-review": {
+      "name": "Needs security review",
+      "description": "Auth, secrets, PII, threat-model, or supply-chain implications. Operator escalates to the security engineer."
+    },
+    "needs-ux-input": {
+      "name": "Needs UX input",
+      "description": "User-facing flow or copy that the operator should route to the designer."
+    },
+    "blocked-on-data": {
+      "name": "Blocked on data",
+      "description": "The agent needs facts not in the ticket — production traces, customer reports, prior incident notes — that the human operator can fetch."
+    }
+  }
+}

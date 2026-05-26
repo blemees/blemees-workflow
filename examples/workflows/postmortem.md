@@ -25,13 +25,13 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Terminal taxonomy | Close reason |
-|---|---|---|---|---|---|---|
-| `pending` | resting | reversible-slow | — | — | — | — |
-| `drafting` | working | — | product-manager | postmortem | — | — |
-| `ready_for_followups` | resting | reversible-fast | — | — | — | — |
-| `creating_followups` | working | — | product-manager | postmortem | — | — |
-| `complete` | terminal | reversible-slow | — | — | resolved | completed |
+| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+|---|---|---|---|---|---|---|---|
+| `pending` | resting | reversible-slow | — | — | — | — | — |
+| `drafting` | working | — | product-manager | postmortem | — | — | — |
+| `ready_for_followups` | resting | reversible-fast | — | — | — | — | — |
+| `creating_followups` | working | — | product-manager | postmortem | — | — | — |
+| `complete` | terminal | reversible-slow | — | — | — | resolved | completed |
 
 ## Transitions
 

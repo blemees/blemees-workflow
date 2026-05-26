@@ -18,6 +18,7 @@ from typing import Any
 
 from workflow.core.emitter.mermaid import emit_mermaid
 from workflow.core.model.hcp import HCPCatalog, HCPLevel
+from workflow.core.model.input_topic import InputTopicDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.role import RoleDirectory
 from workflow.core.model.state_machine import (
@@ -62,7 +63,7 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
     out.extend(_section_states(sm))
     out.extend(_section_transitions(sm, inputs.catalog, inputs.grants))
     if inputs.catalog is not None and inputs.catalog.entries:
-        out.extend(_section_hcps(inputs.catalog, inputs.grants))
+        out.extend(_section_hcps(sm, inputs.catalog, inputs.grants))
     out.extend(_section_cross_process(sm))
 
     active_grants = _grants_for_process(sm, inputs.grants)
@@ -139,6 +140,51 @@ def emit_issue_types_doc(directory: IssueTypeDirectory) -> str:
         if bits:
             out.append(" · ".join(bits))
             out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def emit_input_topics_doc(
+    directory: InputTopicDirectory,
+    state_machines: list[StateMachine] | None = None,
+) -> str:
+    """Render the input-topic directory as markdown.
+
+    When `state_machines` is supplied, each topic gains a derived
+    "Declared on" line listing every `process.state` where it appears.
+    """
+    out: list[str] = ["# Input topics", ""]
+    if not directory.topics:
+        out.append("_(no input topics defined)_")
+        return "\n".join(out) + "\n"
+
+    declared_on: dict[str, list[str]] = {}
+    for sm in state_machines or []:
+        for st in sm.states.values():
+            for topic in st.input_topics:
+                declared_on.setdefault(topic, []).append(f"{sm.name}.{st.name}")
+
+    out.append(
+        "Topics agents may invoke `request-input` on. Working states "
+        "opt-in by listing topic ids on their `input_topics` field; "
+        "states with no list cannot escalate via `request-input`."
+    )
+    out.append("")
+    for topic_id, t in directory.topics.items():
+        out.append(f"## `{topic_id}` — {t.name}")
+        out.append("")
+        out.append(t.description)
+        out.append("")
+        if t.agent_prepares:
+            out.append(f"- **Agent prepares**: `{t.agent_prepares}`")
+        if t.rationale:
+            out.append(f"- **Rationale**: {t.rationale}")
+        places = sorted(declared_on.get(topic_id, []))
+        if places:
+            out.append(
+                f"- **Declared on**: {', '.join(f'`{p}`' for p in places)} "
+                f"_(derived)_"
+            )
+        out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -243,6 +289,7 @@ def emit_index_doc(
     *,
     has_roles: bool,
     has_issue_types: bool,
+    has_input_topics: bool = False,
     has_process_map: bool = False,
 ) -> str:
     """Top-level README linking to every generated doc."""
@@ -262,7 +309,7 @@ def emit_index_doc(
     ])
     for name in sorted(process_names):
         out.append(f"- [`{name}`](./{name}.md) — state machine, HCPs, handoffs")
-    if has_roles or has_issue_types:
+    if has_roles or has_issue_types or has_input_topics:
         out.append("")
         out.append("## Shared resources")
         out.append("")
@@ -270,6 +317,8 @@ def emit_index_doc(
             out.append("- [Roles](./roles.md)")
         if has_issue_types:
             out.append("- [Issue types](./issue-types.md)")
+        if has_input_topics:
+            out.append("- [Input topics](./input-topics.md)")
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -314,18 +363,19 @@ def _section_states(sm: StateMachine) -> list[str]:
     out = ["## States", ""]
     out.append(
         "| Name | Class | Reversibility | Roles | Issue types | "
-        "Terminal taxonomy | Close reason |"
+        "Input topics | Terminal taxonomy | Close reason |"
     )
-    out.append("|---|---|---|---|---|---|---|")
+    out.append("|---|---|---|---|---|---|---|---|")
     for name, st in sm.states.items():
         cls = st.state_class.value
         rev = st.reversibility.value if st.reversibility else "—"
         roles = ", ".join(st.roles) if st.roles else "—"
         types = ", ".join(st.issue_types) if st.issue_types else "—"
+        topics = ", ".join(st.input_topics) if st.input_topics else "—"
         tax = st.terminal_taxonomy.value if st.terminal_taxonomy else "—"
         close = st.close_reason or "—"
         out.append(
-            f"| `{name}` | {cls} | {rev} | {roles} | {types} | {tax} | {close} |"
+            f"| `{name}` | {cls} | {rev} | {roles} | {types} | {topics} | {tax} | {close} |"
         )
     out.append("")
     return out
@@ -361,8 +411,12 @@ def _section_transitions(
 
 
 def _section_hcps(
-    catalog: HCPCatalog, grants: dict[str, TrustGrant] | None
+    sm: StateMachine,
+    catalog: HCPCatalog,
+    grants: dict[str, TrustGrant] | None,
 ) -> list[str]:
+    """Render the HCP catalog. Structural fields (source, destinations,
+    triggering roles, reversibility) are derived from the state machine."""
     out = ["## HCPs (Human Control Points)", ""]
     for gate_name, hcp in catalog.entries.items():
         effective = hcp.default_level
@@ -377,11 +431,24 @@ def _section_hcps(
                     )
         out.append(f"### `{gate_name}` — {effective.value}{grant_note}")
         out.append("")
-        out.append(f"- **Source state**: `{hcp.source_state}`")
-        out.append(f"- **Destinations**: {', '.join(f'`{d}`' for d in hcp.destinations)}")
-        out.append(f"- **Triggering role**: `{hcp.triggering_role}`")
+        source = sm.gate_source(gate_name) or "?"
+        destinations = sm.gate_destinations(gate_name)
+        triggering = sm.gate_triggering_roles(gate_name)
+        rev = sm.gate_reversibility(gate_name)
+        out.append(f"- **Source state**: `{source}` _(derived)_")
+        out.append(
+            f"- **Destinations**: "
+            f"{', '.join(f'`{d}`' for d in destinations) if destinations else '?'} "
+            f"_(derived)_"
+        )
+        if triggering:
+            out.append(
+                f"- **Triggering role(s)**: "
+                f"{', '.join(f'`{r}`' for r in triggering)} _(derived)_"
+            )
         out.append(f"- **HCP type**: {hcp.hcp_type.value}")
-        out.append(f"- **Destination reversibility**: {hcp.reversibility.value}")
+        if rev is not None:
+            out.append(f"- **Destination reversibility**: {rev.value} _(derived, worst-case)_")
         out.append(
             f"- **Allowed levels**: {', '.join(lvl.value for lvl in hcp.allowed_levels)}"
         )

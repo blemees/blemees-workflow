@@ -216,6 +216,18 @@ The catalogued-HITL operations come in pre/post-action pairs:
 
 The recognized-HITL pair is `request-input` (agent asks) → `respond` (human answers). Don't say `resolve` — it collides with tracker "issue resolved" status semantics. The post-action confirmation verb is `confirm`, not `check`, since `check` is bland and could read as "check the status of…".
 
+## Input topics
+
+`request-input` is now **catalogued at the state level**. A working state declares `input_topics: [...]` — a list of topic ids from the shared `input-topics.json` directory (parallel to `roles.json` and `issue-types.json`). The agent's invocation requires `--topic <id>`; the topic must be one of the declared ids on the current state.
+
+Semantics:
+- States without `input_topics` declared CANNOT host `request-input` — the agent must release the issue or stay put. No free-form fallback.
+- Add a `general` topic to a state's list to keep an explicit escape valve.
+- Topics route to **the human operator** (not a specific framework role) — these are escalations out of the agent loop.
+- Markers: `hitl:awaiting-input` (existing queue marker) + `hitl:topic-<id>` (companion, set on request and cleared on respond). Operators can filter by topic.
+
+Validator: every topic id referenced on a working state must resolve in `input-topics.json` (missing directory → WARNING; declared id absent from directory → ERROR).
+
 ## Cross-process handoff
 
 The mechanism by which a work item passes from one process to another. Two flavors:

@@ -2,16 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://blemees.io/schemas/blemees-workflow/hcps.schema.json",
   "title": "blemees-workflow HCP catalog",
-  "description": "Schema for `*-hcps.json` files. One catalog per process. Cross-reference checks against the state machine (`gate_name` matches a `hitl: true` transition's `gate`, source/destinations exist, etc.) run in `workflow validate`.",
+  "description": "Schema for `*-hcps.json` files. One catalog per process. Carries only **policy** fields — structural info (source state, destinations, triggering roles, reversibility) is derived from the paired state machine via `StateMachine.gate_*`. The process name is derived from the filename stem.",
   "type": "object",
   "additionalProperties": true,
   "required": ["hcps"],
   "properties": {
     "$schema": {"type": "string"},
-    "process": {
-      "type": "string",
-      "description": "Optional process name. Defaults to the file stem with `-hcps` stripped."
-    },
     "hcps": {
       "type": "array",
       "description": "Catalogued Human Control Points (gates) for this process.",
@@ -22,51 +18,16 @@
     "hcp": {
       "type": "object",
       "additionalProperties": true,
-      "required": [
-        "gate_name",
-        "transition",
-        "triggering_role",
-        "type",
-        "reversibility",
-        "allowed_levels",
-        "default_level"
-      ],
+      "required": ["gate_name", "type", "allowed_levels", "default_level"],
       "properties": {
         "gate_name": {
           "type": "string",
           "minLength": 1,
-          "description": "Unique gate identifier. Referenced by `gate` on `hitl: true` transitions in the state machine, and by `control_point` in trust grants."
-        },
-        "transition": {
-          "type": "object",
-          "additionalProperties": true,
-          "required": ["source", "destinations"],
-          "properties": {
-            "source": {
-              "type": "string",
-              "minLength": 1,
-              "description": "State id where the gated transition originates."
-            },
-            "destinations": {
-              "type": "array",
-              "description": "State ids the gate lands on. Verdict-style HCPs have multiple entries.",
-              "minItems": 1,
-              "items": {"type": "string", "minLength": 1}
-            }
-          }
-        },
-        "triggering_role": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Role id that triggers the gate (typically by acting from `source`)."
+          "description": "Unique gate identifier. Referenced by `gate` on transitions in the state machine, and by `control_point` in trust grants."
         },
         "type": {
           "enum": ["authority", "knowledge", "judgment", "taste", "reality"],
           "description": "HCP type per hitl-principles.md. `taste` is an alias for `judgment`."
-        },
-        "reversibility": {
-          "enum": ["irreversible", "reversible-fast", "reversible-slow"],
-          "description": "Worst-case reversibility among destinations (per principle 4)."
         },
         "allowed_levels": {
           "type": "array",

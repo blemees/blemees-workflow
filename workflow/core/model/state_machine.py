@@ -151,6 +151,11 @@ class State:
     # No-op when the issue isn't a pull request. Only valid on resting or
     # working states — terminals have already reached final form.
     mark_pr_ready: bool = False
+    # Input topics agents may invoke `request-input` on at this state.
+    # Topic ids resolve against the shared `input-topics.json`. Only valid
+    # on working states. Empty / absent means `request-input` is forbidden
+    # at this state — agents must release the issue if they're stuck.
+    input_topics: tuple[str, ...] = ()
     # Backend-specific close reason for terminal states. REQUIRED on
     # terminals — every terminal closes the tracker's issue with this
     # reason (GitHub: "completed" or "not planned"). FORBIDDEN on resting
@@ -176,6 +181,18 @@ class Transition:
     Presence of `gate_name` IS the HITL marker — the standalone `hitl` flag
     was removed. The validator cross-references the gate name against the
     HCP catalog.
+
+    Gate-sharing rules:
+
+    - A single transition's `gate_name` may match the destination state name
+      (a useful convention for binary gates — approval directly implies the
+      destination), but doesn't have to.
+    - Multiple transitions may share the same `gate_name` only when they
+      originate from the **same source state** — this is the verdict-style
+      pattern (one gate, several possible destinations, human picks on
+      approve). The validator enforces single-origin.
+    - Sharing a `gate_name` across transitions with different source states
+      is forbidden — the `hitl:awaiting-<gate>` label would be ambiguous.
 
     Cross-process relationships no longer use a transition type — shared
     handovers live on resting states (`handoff: true`) and subprocess /
@@ -233,6 +250,54 @@ class StateMachine:
 
     def gated_transitions(self) -> list[Transition]:
         return [t for t in self.transitions if t.is_gated]
+
+    def transitions_for_gate(self, gate_name: str) -> list[Transition]:
+        """Every transition declaring this `gate_name` (1 for binary HCP,
+        2+ for verdict-style)."""
+        return [t for t in self.transitions if t.gate_name == gate_name]
+
+    def gate_source(self, gate_name: str) -> str | None:
+        """Source state of the gate. All transitions sharing a gate MUST
+        originate from the same working state (the validator enforces
+        this); returns that state name, or None if the gate is unknown."""
+        ts = self.transitions_for_gate(gate_name)
+        return ts[0].source if ts else None
+
+    def gate_destinations(self, gate_name: str) -> list[str]:
+        """All destinations reachable via this gate, declared order."""
+        return [t.destination for t in self.transitions_for_gate(gate_name)]
+
+    def gate_triggering_roles(self, gate_name: str) -> tuple[str, ...]:
+        """Roles that can trigger this gate — derived from the source
+        working state's `roles` list. Empty tuple if the source is
+        unknown or has no `roles`."""
+        src_name = self.gate_source(gate_name)
+        if src_name is None:
+            return ()
+        src = self.states.get(src_name)
+        return src.roles if src is not None else ()
+
+    def gate_reversibility(self, gate_name: str) -> ReversibilityClass | None:
+        """Worst-case reversibility across all destinations of the gate
+        (per principle 4). Returns None if the gate is unknown or no
+        destination declares reversibility."""
+        order = (
+            ReversibilityClass.IRREVERSIBLE,
+            ReversibilityClass.REVERSIBLE_SLOW,
+            ReversibilityClass.REVERSIBLE_FAST,
+        )
+        worst: ReversibilityClass | None = None
+        for t in self.transitions_for_gate(gate_name):
+            dst = self.states.get(t.destination)
+            if dst is None or dst.reversibility is None:
+                continue
+            if worst is None or order.index(dst.reversibility) < order.index(worst):
+                worst = dst.reversibility
+        return worst
+
+    def gate_is_verdict_style(self, gate_name: str) -> bool:
+        """True iff this gate has more than one destination."""
+        return len(self.transitions_for_gate(gate_name)) > 1
 
     def transitions_from(self, state_name: str) -> list[Transition]:
         return [t for t in self.transitions if t.source == state_name]
