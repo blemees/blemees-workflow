@@ -24,45 +24,45 @@ from workflow.backends.github import GitHubBackend
 from workflow.config import Process, load_process
 from workflow.core.controller import Controller, OperationResult
 from workflow.core.operations import (
-    advance as advance_op,
+    advance_issue as advance_issue_op,
 )
 from workflow.core.operations import (
-    advise as advise_op,
+    approve_audit as approve_audit_op,
 )
 from workflow.core.operations import (
-    approve as approve_op,
+    approve_blocked as approve_blocked_op,
 )
 from workflow.core.operations import (
-    audit as audit_op,
+    claim_issue as claim_issue_op,
 )
 from workflow.core.operations import (
-    claim as claim_op,
+    reject_audit as reject_audit_op,
 )
 from workflow.core.operations import (
-    confirm as confirm_op,
+    reject_blocked as reject_blocked_op,
 )
 from workflow.core.operations import (
-    reject as reject_op,
-)
-from workflow.core.operations import (
-    release as release_op,
+    release_issue as release_issue_op,
 )
 from workflow.core.operations import (
     request_input as request_input_op,
 )
 from workflow.core.operations import (
-    respond as respond_op,
+    respond_request as respond_request_op,
 )
 from workflow.core.operations import (
-    review as review_op,
+    review_audit as review_audit_op,
 )
 from workflow.core.operations import (
-    revoke as revoke_op,
+    review_blocked as review_blocked_op,
+)
+from workflow.core.operations import (
+    review_request as review_request_op,
 )
 
 # await_signal and record_action remain importable as internal primitives,
-# but are not exposed as CLI subcommands. `advance` dispatches into them
-# based on the HCP catalog.
+# but are not exposed as CLI subcommands. `advance-issue` dispatches into
+# them based on the human-gate catalog.
 from workflow.core.validator import Severity, validate_state_machine
 from workflow.errors import (
     BackendError,
@@ -155,28 +155,36 @@ def _path_existing_dir(value: str) -> Path:
 _TOP_DESCRIPTION = """Canonical operation mechanism for agent workflows.
 
 Agent-facing commands:
-  create                        — open a new issue in a given initial state
-  advance, claim, release       — workflow ownership and state changes
-  request-input                 — recognized HITL (state-orthogonal pause)
+  create-issue, spawn-issue             — open a new issue in a given initial state
+  advance-issue, claim-issue, release-issue
+                                        — workflow ownership and state changes
+  request-input                         — recognized HITL (state-orthogonal pause)
 
-Human-facing commands:
-  review, approve, reject       — pre-action HITL signals (block level)
-  audit, confirm, revoke        — post-action HITL signals (audit level)
-  advise, respond               — recognized HITL responses
+Human-facing commands (blocked gates):
+  review-blocked, approve-blocked, reject-blocked
+                                        — pre-action HITL signals (block level)
+
+Human-facing commands (audit gates):
+  review-audit, approve-audit, reject-audit
+                                        — post-action HITL signals (audit level)
+
+Human-facing commands (input requests):
+  review-request, respond-request       — recognized HITL responses
 
 Discovery and utility commands (anyone):
-  inbox                         — show this agent's claimable items + actionable wip
-  search                        — find issues by state, claim, or HITL marker
-  view                          — inspect one issue's state and recent comments
-  comment                       — post a free-form comment without advancing state
+  view-inbox                            — show this agent's claimable items + actionable wip
+  search-issues                         — find issues by state, claim, or HITL marker
+  view-issue                            — inspect one issue's state and recent comments
+  post-comment                          — post a free-form comment without advancing state
+  edit-issue                            — edit title or body (no state change)
 
-The agent invokes `advance` for every transition; the tool consults the HCP
-catalog and team trust grants to determine whether the transition is
+The agent invokes `advance-issue` for every transition; the tool consults the
+human-gate catalog and team trust grants to determine whether the transition is
 ungated, block-gated, or audit-gated, and applies the right primitive
 automatically. The `await-signal` and `record-action` primitives exist
 inside the framework but are never invoked directly by the agent.
 
-Plus utility commands: init, validate, doctor, setup-labels.
+Plus utility commands: init-agent, validate-workflow, doctor-workflow, setup-github, capabilities, generate-docs.
 """
 
 
@@ -242,7 +250,7 @@ def _add_global_options(parser: argparse.ArgumentParser) -> None:
         ),
         help="Directory holding this agent's `.workflow/` folder (config "
         "and trust grants). If unset, discovered by walking up from cwd "
-        "for any directory containing `.workflow/`. For `init`, this is "
+        "for any directory containing `.workflow/`. For `init-agent`, this is "
         "the target directory where the agent home will be created "
         "(defaults to cwd in that case). Env: AGENT_HOME.",
     )
@@ -256,7 +264,7 @@ def _add_global_options(parser: argparse.ArgumentParser) -> None:
             else None
         ),
         help="Directory containing the workflow files "
-        "(`*-states.json`, `*-hcps.json`, `roles.json`). "
+        "(`*-states.json`, `*-human-gates.json`, `roles.json`). "
         "If unset, discovered by walking up from cwd for a directory "
         "with `*-states.json` files, or for the legacy "
         "`skills/workflows/shared/resources/` path. "
@@ -298,13 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- StateMachine operations ---
 
-    p_advance = subparsers.add_parser(
-        "advance",
+    p_advance_issue = subparsers.add_parser(
+        "advance-issue",
         help="Advance an issue to a target state.",
         description=(
             "Advance an issue to a target state. The tool finds the "
             "transition from the current state to --to and applies the right "
-            "behavior based on the workflow and HCP catalog: ungated "
+            "behavior based on the workflow and HumanGate catalog: ungated "
             "transitions change state immediately; block-gated transitions "
             "pause for human signal (requires --body or --body-from); "
             "audit-gated transitions change state atomically with the "
@@ -312,21 +320,21 @@ def build_parser() -> argparse.ArgumentParser:
             "path applies — the catalog decides."
         ),
     )
-    p_advance.add_argument(
+    p_advance_issue.add_argument(
         "--to",
         dest="destination",
         required=True,
         help="Target state to advance to (e.g., ready_for_dev).",
     )
-    p_advance.add_argument("--issue", required=True, help="Issue identifier.")
-    _add_body_args(p_advance, required=False)
-    p_advance.set_defaults(func=_do_advance)
+    p_advance_issue.add_argument("--issue", required=True, help="Issue identifier.")
+    _add_body_args(p_advance_issue, required=False)
+    p_advance_issue.set_defaults(func=_do_advance_issue)
 
-    p_event = subparsers.add_parser(
-        "event",
+    p_event_fired = subparsers.add_parser(
+        "event-fired",
         help="Fire a system/event-type transition (no agent role required).",
         description=(
-            "Fire an `event`-type transition. Distinct from `advance`: events "
+            "Fire an `event`-type transition. Distinct from `advance-issue`: events "
             "represent system or time triggers (webhook, cron, SLA expiry), "
             "not agent-driven progress. No agent-role check is performed. "
             "Use --triggered-by to record the source of the event in the "
@@ -334,46 +342,46 @@ def build_parser() -> argparse.ArgumentParser:
             "Refuses if the resolved transition isn't type `event`."
         ),
     )
-    p_event.add_argument(
+    p_event_fired.add_argument(
         "--to",
         dest="destination",
         required=True,
         help="Target state for the event transition.",
     )
-    p_event.add_argument("--issue", required=True, help="Issue identifier.")
-    p_event.add_argument(
+    p_event_fired.add_argument("--issue", required=True, help="Issue identifier.")
+    p_event_fired.add_argument(
         "--triggered-by",
         dest="triggered_by",
         default=None,
         help="String identifying the event source (e.g., "
         "'github-webhook:pr_merged'). Recorded in the audit comment.",
     )
-    _add_body_args(p_event, required=False)
-    p_event.set_defaults(func=_do_event)
+    _add_body_args(p_event_fired, required=False)
+    p_event_fired.set_defaults(func=_do_event_fired)
 
-    p_claim = subparsers.add_parser(
-        "claim",
+    p_claim_issue = subparsers.add_parser(
+        "claim-issue",
         help="Take responsibility for a resting issue.",
     )
-    p_claim.add_argument("--issue", required=True)
-    p_claim.add_argument(
+    p_claim_issue.add_argument("--issue", required=True)
+    p_claim_issue.add_argument(
         "--to",
         dest="destination",
         default=None,
         help="Target working state. Optional when only one CLAIM transition "
         "exists from the current state; required when multiple do.",
     )
-    p_claim.set_defaults(func=_do_claim)
+    p_claim_issue.set_defaults(func=_do_claim_issue)
 
-    p_release = subparsers.add_parser(
-        "release",
+    p_release_issue = subparsers.add_parser(
+        "release-issue",
         help="Give up the claim on an issue.",
     )
-    p_release.add_argument("--issue", required=True)
-    p_release.set_defaults(func=_do_release)
+    p_release_issue.add_argument("--issue", required=True)
+    p_release_issue.set_defaults(func=_do_release_issue)
 
-    p_spawn = subparsers.add_parser(
-        "spawn",
+    p_spawn_issue = subparsers.add_parser(
+        "spawn-issue",
         help="Spawn a subprocess / follow-up issue per the parent state's `spawns` config.",
         description=(
             "Spawn a child issue on the target process declared by the "
@@ -384,80 +392,80 @@ def build_parser() -> argparse.ArgumentParser:
             "required (PRs need a source branch)."
         ),
     )
-    p_spawn.add_argument("--issue", required=True, help="Parent issue identifier.")
-    p_spawn.add_argument(
+    p_spawn_issue.add_argument("--issue", required=True, help="Parent issue identifier.")
+    p_spawn_issue.add_argument(
         "--title",
         default=None,
         help="Child issue title. Defaults to '<spawn-state> follow-up for #<parent>'.",
     )
-    p_spawn.add_argument(
+    p_spawn_issue.add_argument(
         "--head",
         default=None,
         help="(PR-typed spawns only) Source branch for the child pull request.",
     )
-    p_spawn.add_argument(
+    p_spawn_issue.add_argument(
         "--base",
         default=None,
         help="(PR-typed spawns only) Target branch.",
     )
-    _add_body_args(p_spawn, required=False)
-    p_spawn.set_defaults(func=_do_spawn)
+    _add_body_args(p_spawn_issue, required=False)
+    p_spawn_issue.set_defaults(func=_do_spawn_issue)
 
     # --- Catalogued — block-level ---
 
-    p_review = subparsers.add_parser(
-        "review",
-        help="Human claims pre-action review of an awaiting gate.",
+    p_review_blocked = subparsers.add_parser(
+        "review-blocked",
+        help="Human claims pre-action review of an awaiting blocked gate.",
     )
-    p_review.add_argument("--issue", required=True)
-    p_review.set_defaults(func=_do_review)
+    p_review_blocked.add_argument("--issue", required=True)
+    p_review_blocked.set_defaults(func=_do_review_blocked)
 
-    p_approve = subparsers.add_parser(
-        "approve",
-        help="Human approves a catalogued HCP; transition fires.",
+    p_approve_blocked = subparsers.add_parser(
+        "approve-blocked",
+        help="Human approves a blocked human gate; transition fires.",
     )
-    p_approve.add_argument("--gate", required=True)
-    p_approve.add_argument(
-        "--destination", default=None, help="Destination state (for verdict-style HCPs)."
+    p_approve_blocked.add_argument("--gate", required=True)
+    p_approve_blocked.add_argument(
+        "--destination", default=None, help="Destination state (for verdict-style gates)."
     )
-    p_approve.add_argument("--issue", required=True)
-    _add_body_args(p_approve, required=False)
-    p_approve.set_defaults(func=_do_approve)
+    p_approve_blocked.add_argument("--issue", required=True)
+    _add_body_args(p_approve_blocked, required=False)
+    p_approve_blocked.set_defaults(func=_do_approve_blocked)
 
-    p_reject = subparsers.add_parser(
-        "reject",
-        help="Human rejects a catalogued HCP packet; agent iterates.",
+    p_reject_blocked = subparsers.add_parser(
+        "reject-blocked",
+        help="Human rejects a blocked human-gate packet; agent iterates.",
     )
-    p_reject.add_argument("--gate", required=True)
-    p_reject.add_argument("--issue", required=True)
-    _add_body_args(p_reject, required=True)
-    p_reject.set_defaults(func=_do_reject)
+    p_reject_blocked.add_argument("--gate", required=True)
+    p_reject_blocked.add_argument("--issue", required=True)
+    _add_body_args(p_reject_blocked, required=True)
+    p_reject_blocked.set_defaults(func=_do_reject_blocked)
 
     # --- Catalogued — audit-level ---
 
-    p_audit = subparsers.add_parser(
-        "audit",
-        help="Human claims post-action audit.",
+    p_review_audit = subparsers.add_parser(
+        "review-audit",
+        help="Human claims post-action review of an audit-level gate.",
     )
-    p_audit.add_argument("--issue", required=True)
-    p_audit.set_defaults(func=_do_audit)
+    p_review_audit.add_argument("--issue", required=True)
+    p_review_audit.set_defaults(func=_do_review_audit)
 
-    p_confirm = subparsers.add_parser(
-        "confirm",
-        help="Human confirms an audit-level action post-hoc.",
+    p_approve_audit = subparsers.add_parser(
+        "approve-audit",
+        help="Human approves (confirms) an audit-level action post-hoc.",
     )
-    p_confirm.add_argument("--gate", required=True)
-    p_confirm.add_argument("--issue", required=True)
-    p_confirm.set_defaults(func=_do_confirm)
+    p_approve_audit.add_argument("--gate", required=True)
+    p_approve_audit.add_argument("--issue", required=True)
+    p_approve_audit.set_defaults(func=_do_approve_audit)
 
-    p_revoke = subparsers.add_parser(
-        "revoke",
-        help="Human revokes an audit-level action; triggers on_revoke remediation.",
+    p_reject_audit = subparsers.add_parser(
+        "reject-audit",
+        help="Human rejects (revokes) an audit-level action; triggers on_revoke remediation.",
     )
-    p_revoke.add_argument("--gate", required=True)
-    p_revoke.add_argument("--issue", required=True)
-    _add_body_args(p_revoke, required=True)
-    p_revoke.set_defaults(func=_do_revoke)
+    p_reject_audit.add_argument("--gate", required=True)
+    p_reject_audit.add_argument("--issue", required=True)
+    _add_body_args(p_reject_audit, required=True)
+    p_reject_audit.set_defaults(func=_do_reject_audit)
 
     # --- Recognized ---
 
@@ -466,9 +474,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Agent escalates to a human operator on a catalogued topic.",
         description=(
             "Pause the working state and ask the human operator for input. "
-            "The agent's current state must declare `input_topics`; pass "
+            "The agent's current state must declare `human_inputs`; pass "
             "--topic <id> with one of the declared ids. The shared "
-            "`input-topics.json` defines each topic. Adds `hitl:awaiting-"
+            "`human-inputs.json` defines each topic. Adds `hitl:awaiting-"
             "input` + `hitl:topic-<id>` so the operator can filter the queue."
         ),
     )
@@ -476,30 +484,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_request_input.add_argument(
         "--topic",
         required=True,
-        help="Catalogued input topic id (must be declared on the current state).",
+        help="Catalogued human-input id (must be declared on the current state).",
     )
     _add_body_args(p_request_input, required=True)
     p_request_input.set_defaults(func=_do_request_input)
 
-    p_advise = subparsers.add_parser(
-        "advise",
-        help="Human claims the recognition response role.",
+    p_review_request = subparsers.add_parser(
+        "review-request",
+        help="Human claims the recognition response role for a pending input request.",
     )
-    p_advise.add_argument("--issue", required=True)
-    p_advise.set_defaults(func=_do_advise)
+    p_review_request.add_argument("--issue", required=True)
+    p_review_request.set_defaults(func=_do_review_request)
 
-    p_respond = subparsers.add_parser(
-        "respond",
+    p_respond_request = subparsers.add_parser(
+        "respond-request",
         help="Human provides input for a recognized HITL moment.",
     )
-    p_respond.add_argument("--issue", required=True)
-    _add_body_args(p_respond, required=True)
-    p_respond.set_defaults(func=_do_respond)
+    p_respond_request.add_argument("--issue", required=True)
+    _add_body_args(p_respond_request, required=True)
+    p_respond_request.set_defaults(func=_do_respond_request)
 
     # --- Read / discovery commands ---
 
-    p_create = subparsers.add_parser(
-        "create",
+    p_create_issue = subparsers.add_parser(
+        "create-issue",
         help="Create a new issue in the given initial state.",
         description=(
             "Create a new issue. Requires a title and an initial state "
@@ -510,27 +518,27 @@ def build_parser() -> argparse.ArgumentParser:
             "the same step with --claim, which adds `wip:<agent-role>`."
         ),
     )
-    p_create.add_argument(
+    p_create_issue.add_argument(
         "--to",
         dest="initial_state",
         required=True,
         help="Initial state for the new issue (e.g., raw). Determines "
         "which workflow the item belongs to.",
     )
-    p_create.add_argument(
+    p_create_issue.add_argument(
         "--title",
         required=True,
         help="Title for the new issue.",
     )
-    p_create.add_argument(
+    p_create_issue.add_argument(
         "--type",
         dest="issue_type",
         default=None,
         help="Issue type id (e.g., bug, feature). Required when the process "
         "supports multiple types; optional (auto-defaulted) when there's only one.",
     )
-    _add_body_args(p_create, required=False)
-    p_create.add_argument(
+    _add_body_args(p_create_issue, required=False)
+    p_create_issue.add_argument(
         "--claim",
         action="store_true",
         default=False,
@@ -540,18 +548,18 @@ def build_parser() -> argparse.ArgumentParser:
     # PR-specific flags — applicable only when the resolved issue type maps to
     # the pull-request entity (e.g., type=pr). Validated at runtime, not via
     # argparse `required`, since they don't apply to issue-entity types.
-    p_create.add_argument(
+    p_create_issue.add_argument(
         "--head",
         default=None,
         help="(PR types only) Source branch for the pull request.",
     )
-    p_create.add_argument(
+    p_create_issue.add_argument(
         "--base",
         default=None,
         help="(PR types only) Target branch for the pull request. "
         "Defaults to the repo's default branch when omitted.",
     )
-    p_create.add_argument(
+    p_create_issue.add_argument(
         "--refs",
         dest="refs",
         action="append",
@@ -560,10 +568,10 @@ def build_parser() -> argparse.ArgumentParser:
         "multiple parents (e.g., --refs 123 --refs 456). Rendered as "
         "'Refs #N' in the standard message footer.",
     )
-    p_create.set_defaults(func=_do_create)
+    p_create_issue.set_defaults(func=_do_create_issue)
 
-    p_inbox = subparsers.add_parser(
-        "inbox",
+    p_view_inbox = subparsers.add_parser(
+        "view-inbox",
         help="Show the agent's own claimable items and actionable wip.",
         description=(
             "Show this agent's plate, computed from the workflow registry: "
@@ -577,41 +585,41 @@ def build_parser() -> argparse.ArgumentParser:
             "--agent-role to view a different role's inbox."
         ),
     )
-    p_inbox.add_argument(
+    p_view_inbox.add_argument(
         "--limit", type=int, default=50, help="Max items per backend query (default: 50)."
     )
-    p_inbox.set_defaults(func=_do_inbox)
+    p_view_inbox.set_defaults(func=_do_view_inbox)
 
-    p_search = subparsers.add_parser(
-        "search",
+    p_search_issues = subparsers.add_parser(
+        "search-issues",
         help="Search issues by framework filters (state, claim, HITL markers).",
         description=(
             "Search issues matching the given filters. Filters compose "
             "with AND. Use `--awaiting-gate '*'` or `--audit-pending '*'` "
             "to find every issue with any awaiting or audit-pending "
-            "marker. For the agent's own work, use `inbox` instead."
+            "marker. For the agent's own work, use `view-inbox` instead."
         ),
     )
-    p_search.add_argument("--state", default=None, help="Filter by state (e.g., ready_for_dev).")
-    p_search.add_argument(
+    p_search_issues.add_argument("--state", default=None, help="Filter by state (e.g., ready_for_dev).")
+    p_search_issues.add_argument(
         "--claim",
         dest="claim_role",
         default=None,
         help="Filter by agent claim (role id, e.g., pm).",
     )
-    p_search.add_argument(
+    p_search_issues.add_argument(
         "--awaiting-gate",
         dest="awaiting_gate",
         default=None,
         help="Filter by awaiting-gate name; pass '*' for any awaiting gate.",
     )
-    p_search.add_argument(
+    p_search_issues.add_argument(
         "--audit-pending",
         dest="audit_pending",
         default=None,
         help="Filter by audit-pending gate name; pass '*' for any audit-pending.",
     )
-    p_search.add_argument(
+    p_search_issues.add_argument(
         "--awaiting-input",
         dest="awaiting_input",
         action=argparse.BooleanOptionalAction,
@@ -619,17 +627,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Filter for items awaiting recognized input "
         "(or with --no-awaiting-input, exclude them).",
     )
-    p_search.add_argument(
+    p_search_issues.add_argument(
         "--limit", type=int, default=50, help="Max items to return (default: 50)."
     )
-    p_search.set_defaults(func=_do_search)
+    p_search_issues.set_defaults(func=_do_search_issues)
 
-    p_view = subparsers.add_parser(
-        "view",
+    p_view_issue = subparsers.add_parser(
+        "view-issue",
         help="View a single issue's framework-relevant state and recent comments.",
     )
-    p_view.add_argument("--issue", required=True)
-    p_view.add_argument(
+    p_view_issue.add_argument("--issue", required=True)
+    p_view_issue.add_argument(
         "--comments",
         type=int,
         default=None,
@@ -637,10 +645,10 @@ def build_parser() -> argparse.ArgumentParser:
         "comment is returned (most recent first). Pass a positive N to "
         "cap the list, or 0 to omit comments entirely.",
     )
-    p_view.set_defaults(func=_do_view)
+    p_view_issue.set_defaults(func=_do_view_issue)
 
-    p_comment = subparsers.add_parser(
-        "comment",
+    p_post_comment = subparsers.add_parser(
+        "post-comment",
         help="Post a comment on an issue without advancing state (utility, not a framework operation).",
         description=(
             "Post a free-form comment on an issue. This is NOT a framework "
@@ -650,35 +658,35 @@ def build_parser() -> argparse.ArgumentParser:
             "the eleven framework operations or the workflow commands."
         ),
     )
-    p_comment.add_argument("--issue", required=True)
-    _add_body_args(p_comment, required=True)
-    p_comment.set_defaults(func=_do_comment)
+    p_post_comment.add_argument("--issue", required=True)
+    _add_body_args(p_post_comment, required=True)
+    p_post_comment.set_defaults(func=_do_post_comment)
 
-    p_edit = subparsers.add_parser(
-        "edit",
+    p_edit_issue = subparsers.add_parser(
+        "edit-issue",
         help="Edit an issue's title or body (no state change).",
         description=(
             "Edit the tracker's title or body for an issue. Does not change "
             "workflow state, labels, or markers — those are managed by "
-            "advance/claim/release. Use this for typo fixes, scope "
+            "advance-issue / claim-issue / release-issue. Use this for typo fixes, scope "
             "adjustments, or rewriting the description as understanding "
             "evolves. At least one of --title, --body, --body-from is required."
         ),
     )
-    p_edit.add_argument("--issue", required=True)
-    p_edit.add_argument(
+    p_edit_issue.add_argument("--issue", required=True)
+    p_edit_issue.add_argument(
         "--title", default=None, help="New title for the issue."
     )
-    _add_body_args(p_edit, required=False)
-    p_edit.set_defaults(func=_do_edit)
+    _add_body_args(p_edit_issue, required=False)
+    p_edit_issue.set_defaults(func=_do_edit_issue)
 
     # --- Utility commands ---
 
-    p_validate = subparsers.add_parser(
-        "validate",
+    p_validate_workflow = subparsers.add_parser(
+        "validate-workflow",
         help="Validate workflow artifacts against the framework principles.",
     )
-    p_validate.set_defaults(func=_do_validate)
+    p_validate_workflow.set_defaults(func=_do_validate_workflow)
 
     p_gendocs = subparsers.add_parser(
         "generate-docs",
@@ -687,21 +695,21 @@ def build_parser() -> argparse.ArgumentParser:
             "Regenerate the agent/human-readable documentation alongside "
             "the canonical JSON sources. Emits `<process>-states.mermaid` "
             "(state diagrams), `<process>.md` (per-process reference docs "
-            "with states, transitions, HCPs, cross-process handoffs, and "
+            "with states, transitions, human gates, cross-process handoffs, and "
             "active trust grants), `roles.md`, `issue-types.md`, and "
             "`README.md`. Authors edit JSON; regenerate."
         ),
     )
     p_gendocs.set_defaults(func=_do_generate_docs)
 
-    p_doctor = subparsers.add_parser(
-        "doctor",
+    p_doctor_workflow = subparsers.add_parser(
+        "doctor-workflow",
         help="Diagnose the workflow configuration (artifacts, trust grants, backend auth).",
     )
-    p_doctor.set_defaults(func=_do_doctor)
+    p_doctor_workflow.set_defaults(func=_do_doctor_workflow)
 
-    p_init = subparsers.add_parser(
-        "init",
+    p_init_agent = subparsers.add_parser(
+        "init-agent",
         help="Scaffold an agent home with .workflow/ config, workflows, and trust-grants.",
         description=(
             "Create a new agent home. Writes `.workflow/config.json` with "
@@ -718,13 +726,13 @@ def build_parser() -> argparse.ArgumentParser:
             "config.json unless --force is passed."
         ),
     )
-    p_init.add_argument(
+    p_init_agent.add_argument(
         "--force",
         action="store_true",
         default=False,
         help="Overwrite an existing config.json if present.",
     )
-    p_init.add_argument(
+    p_init_agent.add_argument(
         "--workflow-dir",
         dest="init_workflow_dir",
         default=None,
@@ -733,7 +741,7 @@ def build_parser() -> argparse.ArgumentParser:
         "as-is and resolved from the agent home at lookup time "
         "(e.g., `--workflow-dir ../../workflows`).",
     )
-    p_init.set_defaults(func=_do_init)
+    p_init_agent.set_defaults(func=_do_init_agent)
 
     p_setup = subparsers.add_parser(
         "setup-github",
@@ -963,7 +971,7 @@ def _build_context_for_issue(
     5. Load that workflow's context.
 
     If the issue has no current state (rare — typically a brand-new item),
-    `fallback_state` is consulted (e.g., for `advance`, the destination
+    `fallback_state` is consulted (e.g., for `advance-issue`, the destination
     state can resolve the workflow).
 
     Raises `ConfigError` if the workflow source tree can't be discovered or
@@ -1003,7 +1011,7 @@ def _build_context_for_issue(
         raise ConfigError(
             f"Cannot resolve workflow for issue {issue_id!r}. The issue "
             "must have a state that belongs to a discovered workflow "
-            "(or, for `advance`, a destination state that does)."
+            "(or, for `advance-issue`, a destination state that does)."
         )
 
     # Build a context for the resolved workflow.
@@ -1059,12 +1067,12 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _input_topics_for(state_machine: Any, state_name: str | None) -> tuple[str, ...]:
-    """Derive the current state's input_topics — empty when state is unknown."""
+def _human_inputs_for(state_machine: Any, state_name: str | None) -> tuple[str, ...]:
+    """Derive the current state's human_inputs — empty when state is unknown."""
     if state_name is None:
         return ()
     s = state_machine.states.get(state_name) if state_machine else None
-    return s.input_topics if s else ()
+    return s.human_inputs if s else ()
 
 
 def _print_next_actions(
@@ -1072,16 +1080,16 @@ def _print_next_actions(
     *,
     current_state: str | None,
     last_state: str | None,
-    input_topics: tuple[str, ...] = (),
+    human_inputs: tuple[str, ...] = (),
 ) -> None:
     """Human/agent-readable next-actions block.
 
-    Each entry leads with the literal `workflow advance` / `claim` / `release`
+    Each entry leads with the literal `workflow advance-issue` / `claim-issue` / `release-issue`
     invocation the agent would run, followed by gate / role / template
-    details when relevant. When the current state declares `input_topics`,
+    details when relevant. When the current state declares `human_inputs`,
     a `request-input` suggestion lists the catalogued topic ids.
     """
-    from workflow.core.model.hcp import HCPLevel
+    from workflow.core.model.human_gate import HumanGateLevel
     from workflow.core.model.state_machine import TransitionType
 
     if not actions:
@@ -1102,9 +1110,9 @@ def _print_next_actions(
 
         if len(claim_actions) == 1:
             a = claim_actions[0]
-            print(f"  claim  # → {a.destination}{_roles_suffix(a)} ({a.label!r})")
+            print(f"  claim-issue  # → {a.destination}{_roles_suffix(a)} ({a.label!r})")
         else:
-            print("  claim --to <state>  # ambiguous; choose one:")
+            print("  claim-issue --to <state>  # ambiguous; choose one:")
             for a in claim_actions:
                 print(f"    --to {a.destination}  # {a.label!r}{_roles_suffix(a)}")
         return
@@ -1119,7 +1127,7 @@ def _print_next_actions(
         else:
             tag = "[ungated]"
 
-        print(f"  advance --to {a.destination}  {tag}")
+        print(f"  advance-issue --to {a.destination}  {tag}")
         print(f"    label: {a.label!r}")
         if a.is_gated:
             if a.gate_name:
@@ -1127,7 +1135,7 @@ def _print_next_actions(
             if a.triggering_roles:
                 print(f"    triggering role(s): {', '.join(a.triggering_roles)}")
             if a.agent_prepares_path:
-                kind = "required" if a.effective_level is HCPLevel.BLOCK else "optional"
+                kind = "required" if a.effective_level is HumanGateLevel.BLOCK else "optional"
                 print(
                     f"    --body-from <{a.agent_prepares_path}>  ({kind})"
                 )
@@ -1142,13 +1150,13 @@ def _print_next_actions(
         if dst_bits:
             print(f"    destination: {', '.join(dst_bits)}")
 
-    if input_topics:
+    if human_inputs:
         print(
             f"  request-input --topic <id> --body \"...\"  # ask the human operator; "
-            f"topics: {', '.join(input_topics)}"
+            f"topics: {', '.join(human_inputs)}"
         )
     if last_state is not None:
-        print(f"  release  # returns to {last_state!r}")
+        print(f"  release-issue  # returns to {last_state!r}")
 
 
 def _print_result(
@@ -1225,7 +1233,7 @@ def _print_result(
                 print("")
                 _print_next_actions(
                     actions, current_state=state.state, last_state=state.last_state,
-                    input_topics=_input_topics_for(context.state_machine, state.state),
+                    human_inputs=_human_inputs_for(context.state_machine, state.state),
                 )
 
 
@@ -1271,13 +1279,13 @@ def _handle_workflow_error(exc: WorkflowError) -> None:
 # Subcommand handlers
 
 
-def _do_advance(args: argparse.Namespace) -> int:
+def _do_advance_issue(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         # advance can fall back to args.destination if the issue has no state.
         context = _build_context_for_issue(ctx, args.issue, fallback_state=args.destination)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = advance_op.run(
+        result = advance_issue_op.run(
             controller,
             issue_id=args.issue,
             destination=args.destination,
@@ -1378,10 +1386,10 @@ def _propagate_to_parent_on_terminal(
             )
             return
 
-        # Fire the parent advance. Use the advance_op with actor=None — the
+        # Fire the parent advance. Use the advance_issue_op with actor=None — the
         # advance is system-driven, triggered by child close.
         parent_controller = _build_controller(parent_ctx, dry_run=False)
-        advance_op.run(
+        advance_issue_op.run(
             parent_controller,
             issue_id=parent_id,
             destination=parent_next,
@@ -1396,7 +1404,7 @@ def _propagate_to_parent_on_terminal(
         logger.warning("Auto-advance to parent failed (non-fatal): %s", exc)
 
 
-def _do_event(args: argparse.Namespace) -> int:
+def _do_event_fired(args: argparse.Namespace) -> int:
     """Fire an event-type transition (no agent role required).
 
     Verifies the resolved transition is of type EVENT — refuses otherwise so
@@ -1428,7 +1436,7 @@ def _do_event(args: argparse.Namespace) -> int:
             raise ConfigError(
                 f"Transition {source!r} → {args.destination!r} is type "
                 f"{matches[0].transition_type.value!r}, not `event`. Use "
-                f"`workflow advance` for agent-driven transitions."
+                f"`workflow advance-issue` for agent-driven transitions."
             )
 
         # Compose the body with the triggered-by prefix.
@@ -1441,7 +1449,7 @@ def _do_event(args: argparse.Namespace) -> int:
             body_text = user_body
 
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = advance_op.run(
+        result = advance_issue_op.run(
             controller,
             issue_id=args.issue,
             destination=args.destination,
@@ -1455,7 +1463,7 @@ def _do_event(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_claim(args: argparse.Namespace) -> int:
+def _do_claim_issue(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
@@ -1465,7 +1473,7 @@ def _do_claim(args: argparse.Namespace) -> int:
                 "claim requires --agent-role, AGENT_ROLE env, or `agent-role` "
                 "in <agent-home>/.workflow/config.json."
             )
-        result = claim_op.run(
+        result = claim_issue_op.run(
             controller,
             issue_id=args.issue,
             role=context.agent_role,
@@ -1478,7 +1486,7 @@ def _do_claim(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_spawn(args: argparse.Namespace) -> int:
+def _do_spawn_issue(args: argparse.Namespace) -> int:
     """Spawn a subprocess / follow-up issue per parent state's `spawns` config."""
     from workflow.config import build_registry
 
@@ -1610,12 +1618,12 @@ def _do_spawn(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_release(args: argparse.Namespace) -> int:
+def _do_release_issue(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = release_op.run(controller, issue_id=args.issue)
+        result = release_issue_op.run(controller, issue_id=args.issue)
         _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
@@ -1623,12 +1631,12 @@ def _do_release(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_review(args: argparse.Namespace) -> int:
+def _do_review_blocked(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = review_op.run(controller, issue_id=args.issue)
+        result = review_blocked_op.run(controller, issue_id=args.issue)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1636,12 +1644,12 @@ def _do_review(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_approve(args: argparse.Namespace) -> int:
+def _do_approve_blocked(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = approve_op.run(
+        result = approve_blocked_op.run(
             controller,
             issue_id=args.issue,
             gate=args.gate,
@@ -1655,12 +1663,12 @@ def _do_approve(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_reject(args: argparse.Namespace) -> int:
+def _do_reject_blocked(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = reject_op.run(
+        result = reject_blocked_op.run(
             controller,
             issue_id=args.issue,
             gate=args.gate,
@@ -1673,12 +1681,12 @@ def _do_reject(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_audit(args: argparse.Namespace) -> int:
+def _do_review_audit(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = audit_op.run(controller, issue_id=args.issue)
+        result = review_audit_op.run(controller, issue_id=args.issue)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1686,12 +1694,12 @@ def _do_audit(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_confirm(args: argparse.Namespace) -> int:
+def _do_approve_audit(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = confirm_op.run(controller, issue_id=args.issue, gate=args.gate)
+        result = approve_audit_op.run(controller, issue_id=args.issue, gate=args.gate)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1699,12 +1707,12 @@ def _do_confirm(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_revoke(args: argparse.Namespace) -> int:
+def _do_reject_audit(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = revoke_op.run(
+        result = reject_audit_op.run(
             controller,
             issue_id=args.issue,
             gate=args.gate,
@@ -1735,12 +1743,12 @@ def _do_request_input(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_advise(args: argparse.Namespace) -> int:
+def _do_review_request(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = advise_op.run(controller, issue_id=args.issue)
+        result = review_request_op.run(controller, issue_id=args.issue)
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
@@ -1748,12 +1756,12 @@ def _do_advise(args: argparse.Namespace) -> int:
         return 2
 
 
-def _do_respond(args: argparse.Namespace) -> int:
+def _do_respond_request(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        result = respond_op.run(
+        result = respond_request_op.run(
             controller,
             issue_id=args.issue,
             body=_resolve_body(args),
@@ -1869,7 +1877,7 @@ def _states_claimed_by_role(state_machine: Any, role: str) -> set[str]:
     return matches
 
 
-def _do_create(args: argparse.Namespace) -> int:
+def _do_create_issue(args: argparse.Namespace) -> int:
     """Create a new issue in the given initial state.
 
     The workflow is resolved from `--to` via the registry (state names are
@@ -2123,14 +2131,14 @@ def _do_create(args: argparse.Namespace) -> int:
         try:
             claim_context = _build_context_for_issue(ctx, new_id)
             controller = _build_controller(claim_context, dry_run=False)
-            claim_result = claim_op.run(
+            claim_result = claim_issue_op.run(
                 controller,
                 issue_id=new_id,
                 role=claim_role,
             )
         except WorkflowError as exc:
             # Issue created but claim failed — surface the error; the user
-            # can run `workflow claim` manually.
+            # can run `workflow claim-issue` manually.
             print(
                 f"Created issue #{new_id} but claim failed: {exc}",
                 file=sys.stderr,
@@ -2178,7 +2186,7 @@ def _do_create(args: argparse.Namespace) -> int:
                 print("")
                 _print_next_actions(
                     actions, current_state=post.state, last_state=post.last_state,
-                    input_topics=_input_topics_for(claim_context.state_machine, post.state),
+                    human_inputs=_human_inputs_for(claim_context.state_machine, post.state),
                 )
     else:
         # No claim: show actions from the resting initial state.
@@ -2199,7 +2207,7 @@ def _do_create(args: argparse.Namespace) -> int:
     return 0
 
 
-def _do_inbox(args: argparse.Namespace) -> int:
+def _do_view_inbox(args: argparse.Namespace) -> int:
     """Show the agent's own inbox + actionable wip.
 
     Role resolution: --agent-role flag > AGENT_ROLE env > agent config
@@ -2218,7 +2226,7 @@ def _do_inbox(args: argparse.Namespace) -> int:
         _handle_workflow_error(
             ConfigError(
                 "inbox needs an agent role. Pass --agent-role, set "
-                "AGENT_ROLE, or run `workflow init --agent-role <role>` to "
+                "AGENT_ROLE, or run `workflow init-agent --agent-role <role>` to "
                 "persist one in the agent config."
             )
         )
@@ -2235,7 +2243,7 @@ def _do_inbox(args: argparse.Namespace) -> int:
     )
 
 
-def _do_search(args: argparse.Namespace) -> int:
+def _do_search_issues(args: argparse.Namespace) -> int:
     """Search issues by framework filters."""
     from workflow.backends.base import IssueFilters
 
@@ -2327,7 +2335,7 @@ def _emit_issues(items: list[Any], ctx: dict, *, empty_message: str = "(no issue
     return 0
 
 
-def _do_comment(args: argparse.Namespace) -> int:
+def _do_post_comment(args: argparse.Namespace) -> int:
     """Post a free-form comment on an issue. Backend-only; no workflow context."""
     ctx = _ctx_obj_from_args(args)
     try:
@@ -2388,14 +2396,14 @@ def _do_comment(args: argparse.Namespace) -> int:
                 print("")
                 _print_next_actions(
                     actions, current_state=state.state, last_state=state.last_state,
-                    input_topics=_input_topics_for(context.state_machine, state.state),
+                    human_inputs=_human_inputs_for(context.state_machine, state.state),
                 )
     except (BackendError, WorkflowError) as exc:
         logger.debug("comment: could not resolve next actions: %s", exc)
     return 0
 
 
-def _do_edit(args: argparse.Namespace) -> int:
+def _do_edit_issue(args: argparse.Namespace) -> int:
     """Edit an issue's title and/or body on the tracker. No workflow state
     change. Independent of `comment` (which posts a new comment instead of
     rewriting the issue's description)."""
@@ -2468,14 +2476,14 @@ def _do_edit(args: argparse.Namespace) -> int:
                 print("")
                 _print_next_actions(
                     actions, current_state=state.state, last_state=state.last_state,
-                    input_topics=_input_topics_for(context.state_machine, state.state),
+                    human_inputs=_human_inputs_for(context.state_machine, state.state),
                 )
     except (BackendError, WorkflowError) as exc:
         logger.debug("edit: could not resolve next actions: %s", exc)
     return 0
 
 
-def _do_view(args: argparse.Namespace) -> int:
+def _do_view_issue(args: argparse.Namespace) -> int:
     """View one issue's framework-relevant state and recent comments."""
     from workflow.core.inspector import available_transitions
 
@@ -2566,7 +2574,7 @@ def _do_view(args: argparse.Namespace) -> int:
 
     if actions or state.last_state is not None:
         print("")
-        _print_next_actions(actions, current_state=state.state, last_state=state.last_state, input_topics=_input_topics_for(context.state_machine, state.state))
+        _print_next_actions(actions, current_state=state.state, last_state=state.last_state, human_inputs=_human_inputs_for(context.state_machine, state.state))
 
     if comments:
         print("")
@@ -2597,7 +2605,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     from workflow.core.emitter import (
         ProcessDocInput,
         emit_index_doc,
-        emit_input_topics_doc,
+        emit_human_inputs_doc,
         emit_issue_types_doc,
         emit_mermaid,
         emit_process_doc,
@@ -2627,7 +2635,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     workflow_dir = None
     role_directory = None
     issue_type_directory = None
-    input_topic_directory = None
+    human_input_directory = None
     processes_loaded: list[Any] = []
     for wf_name in process_names:
         try:
@@ -2644,8 +2652,8 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
             role_directory = process.role_directory
         if issue_type_directory is None and process.issue_type_directory is not None:
             issue_type_directory = process.issue_type_directory
-        if input_topic_directory is None and process.input_topic_directory is not None:
-            input_topic_directory = process.input_topic_directory
+        if human_input_directory is None and process.human_input_directory is not None:
+            human_input_directory = process.human_input_directory
 
         if workflow_dir is None:
             # No on-disk target; print to stdout and continue.
@@ -2694,19 +2702,19 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
             types_path = workflow_dir / "issue-types.md"
             types_path.write_text(emit_issue_types_doc(issue_type_directory), encoding="utf-8")
             written.append(str(types_path))
-        if input_topic_directory is not None:
-            topics_path = workflow_dir / "input-topics.md"
-            topics_path.write_text(
-                emit_input_topics_doc(input_topic_directory, sms), encoding="utf-8"
+        if human_input_directory is not None:
+            human_inputs_path = workflow_dir / "human-inputs.md"
+            human_inputs_path.write_text(
+                emit_human_inputs_doc(human_input_directory, sms), encoding="utf-8"
             )
-            written.append(str(topics_path))
+            written.append(str(human_inputs_path))
         readme_path = workflow_dir / "README.md"
         readme_path.write_text(
             emit_index_doc(
                 process_names,
                 has_roles=role_directory is not None,
                 has_issue_types=issue_type_directory is not None,
-                has_input_topics=input_topic_directory is not None,
+                has_human_inputs=human_input_directory is not None,
                 has_process_map=has_process_map,
             ),
             encoding="utf-8",
@@ -2721,7 +2729,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     return 0
 
 
-def _do_validate(args: argparse.Namespace) -> int:
+def _do_validate_workflow(args: argparse.Namespace) -> int:
     """Validate workflow artifacts against the framework principles.
 
     Iterates every workflow in the registry (`--workflow-dir` / `WORKFLOW_DIR`
@@ -2777,7 +2785,7 @@ def _do_validate(args: argparse.Namespace) -> int:
             wf_context.catalog,
             wf_context.grants,
             issue_type_directory=wf_context.issue_type_directory,
-            input_topic_directory=wf_context.input_topic_directory,
+            human_input_directory=wf_context.human_input_directory,
             handoff_index=handoff_index,
             sibling_machines=sibling_machines,
         )
@@ -2800,7 +2808,7 @@ def _emit_validate_result(
                         {
                             "name": name,
                             "workflow": workflow.source_path,
-                            "hcp_catalog": catalog.source_path if catalog else None,
+                            "human_gate_catalog": catalog.source_path if catalog else None,
                             "findings": [
                                 {
                                     "severity": f.severity.value,
@@ -2844,7 +2852,7 @@ def _emit_validate_result(
     return 1 if has_errors else 0
 
 
-def _do_doctor(args: argparse.Namespace) -> int:
+def _do_doctor_workflow(args: argparse.Namespace) -> int:
     """Diagnose the workflow configuration.
 
     Enumerates every workflow in the registry (no single-workflow concept).
@@ -2930,7 +2938,7 @@ def _do_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
-def _do_init(args: argparse.Namespace) -> int:
+def _do_init_agent(args: argparse.Namespace) -> int:
     """Scaffold an agent home: write .workflow/config.json + trust-grants/.
 
     The target directory is the global `--agent-home` value (or AGENT_HOME
@@ -3064,7 +3072,7 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
     - `last-state:<state>` for every resting state (origin marker).
     - The five HITL singleton labels (`hitl:reviewing`, `hitl:auditing`,
       `hitl:advising`, `hitl:awaiting-input`, `hitl:resolved`).
-    - `hitl:awaiting-<gate>` / `hitl:audit-<gate>` per catalogued HCP.
+    - `hitl:awaiting-<gate>` / `hitl:audit-<gate>` per catalogued HumanGate.
     - `type:<type_id>` per declared issue type WHEN encoding is `"label"`.
 
     Signal markers (`hitl:approved-*`, `hitl:rejected-*`, etc.) are
@@ -3072,7 +3080,7 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
     pre-provisioned here.
     """
     from workflow.config import build_registry
-    from workflow.core.model.hcp import HCPLevel
+    from workflow.core.model.human_gate import HumanGateLevel
 
     labels: set[str] = {
         "hitl:reviewing",
@@ -3107,11 +3115,11 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
                 labels.add(f"last-state:{state_name}")
 
         if wf_context.catalog:
-            for hcp in wf_context.catalog.entries.values():
-                if HCPLevel.BLOCK in hcp.allowed_levels:
-                    labels.add(f"hitl:awaiting-{hcp.gate_name}")
-                if HCPLevel.AUDIT in hcp.allowed_levels:
-                    labels.add(f"hitl:audit-{hcp.gate_name}")
+            for gate in wf_context.catalog.entries.values():
+                if HumanGateLevel.BLOCK in gate.allowed_levels:
+                    labels.add(f"hitl:awaiting-{gate.gate_name}")
+                if HumanGateLevel.AUDIT in gate.allowed_levels:
+                    labels.add(f"hitl:audit-{gate.gate_name}")
 
         if wf_context.role_directory:
             for role_id in wf_context.role_directory.roles:

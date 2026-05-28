@@ -1,7 +1,7 @@
-"""resolve — human provides input for a recognized HITL moment.
+"""review — human claims pre-action review of an awaiting gate.
 
-Per `hitl-principles.md` principles 5 and 11. Clears the awaiting-input
-marker; the agent reads the response and decides the next action.
+Singleton claim operation (per `hitl-principles.md` principle 6). Mutually
+exclusive with `audit` and `advise` across the issue.
 """
 
 from __future__ import annotations
@@ -15,13 +15,11 @@ def run(
     controller: Controller,
     *,
     issue_id: str,
-    body: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.RESPOND,
+        operation=Operation.REVIEW_BLOCKED,
         issue_id=issue_id,
-        body_text=body,
         actor=actor,
     )
     return dispatch(controller, request)

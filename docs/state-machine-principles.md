@@ -173,6 +173,6 @@ Two static checks the workflow file must pass:
 1. **Every transition to an `irreversible` destination carries `[hitl]`.** No silent paths into irreversible states.
 2. **The legend matches the markers.** Every legend entry has a corresponding `[hitl]` in the diagram, and every marker has a legend entry. Drift between the two is the most common authoring failure.
 
-Recognized HCPs (state-orthogonal moments the agent recognizes at runtime per `hitl-principles.md` principle 10) have no representation on the diagram. By definition the moment is not transition-bound and is not pre-declared. The diagram describes transitions; recognized HCPs are about agent behavior between transitions.
+Recognized HITL moments (state-orthogonal moments the agent recognizes at runtime per `hitl-principles.md` principle 10) have no representation on the diagram. By definition the moment is not transition-bound and is not pre-declared. The diagram describes transitions; recognized HITL is about agent behavior between transitions.
 
 Full discipline — operation vocabulary, level taxonomy, reversibility constraints, recognition criteria, comment templates, trust-grant schema — lives in `hitl-principles.md`. Backend-specific encodings of those operations (labels for GitHub, etc.) live in `backends/*-encoding.md`. This principle establishes only the diagram-level annotation convention; the diagram is backend-neutral.

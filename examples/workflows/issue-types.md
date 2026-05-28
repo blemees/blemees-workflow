@@ -40,7 +40,7 @@ Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Re
 
 ## `pr` — Pull Request
 
-A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create`; the framework recognises it for cross-process modelling and documentation.
+A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
 
 **GitHub entity**: pull request (no native Issue Type)
 

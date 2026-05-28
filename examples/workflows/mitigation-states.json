@@ -1,6 +1,5 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "name": "mitigation",
   "states": {
     "ready_for_rollback": {
       "class": "resting",

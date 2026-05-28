@@ -1,6 +1,5 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "name": "progressive-rollout",
   "states": {
     "soaking": {
       "class": "resting",

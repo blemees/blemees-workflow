@@ -1,6 +1,6 @@
 {
-  "$schema": "../../docs/schemas/input-topics.schema.json",
-  "topics": {
+  "$schema": "../../docs/schemas/human-inputs.schema.json",
+  "human_inputs": {
     "general": {
       "name": "General",
       "description": "Catch-all for off-catalog questions. Use when none of the specialised topics fits — but prefer a specialised topic when one applies, so the human operator can read the queue at a glance."

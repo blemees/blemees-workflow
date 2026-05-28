@@ -97,7 +97,7 @@ def _emit_cross_process_legend(state_machine: StateMachine) -> list[str]:
 def _emit_hitl_legend(state_machine: StateMachine) -> list[str]:
     if not state_machine.gates_in_legend:
         return []
-    pointer = f"{state_machine.name}-hcps.json"
+    pointer = f"{state_machine.name}-human-gates.json"
     lines = [f"    %% HITL gates (canonical: {pointer}):"]
     width = max(len(g) for g in state_machine.gates_in_legend) + 1
     for gate in state_machine.gates_in_legend:

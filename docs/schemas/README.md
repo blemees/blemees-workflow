@@ -1,13 +1,13 @@
 # JSON Schemas
 
-Structural schemas for the five authored file types in `blemees-workflow`. **Editor-side feedback only** — the canonical validation is the Python parsers in `workflow/core/parser/` and the cross-reference checks in `workflow/core/validator.py`, surfaced via `workflow validate`. The schemas mostly cover type / enum constraints; cross-field rules (terminal-needs-taxonomy, gate-only-when-hitl, current_level-in-allowed_levels, etc.) stay in Python.
+Structural schemas for the five authored file types in `blemees-workflow`. **Editor-side feedback only** — the canonical validation is the Python parsers in `workflow/core/parser/` and the cross-reference checks in `workflow/core/validator.py`, surfaced via `workflow validate-workflow`. The schemas mostly cover type / enum constraints; cross-field rules (terminal-needs-taxonomy, gate-only-when-hitl, current_level-in-allowed_levels, etc.) stay in Python.
 
 ## Files
 
 | Schema | Validates |
 |---|---|
 | [`states.schema.json`](states.schema.json) | `<process>-states.json` — the state machine for one process. |
-| [`hcps.schema.json`](hcps.schema.json) | `<process>-hcps.json` — the HCP catalog for one process. |
+| [`human-gates.schema.json`](human-gates.schema.json) | `<process>-human-gates.json` — the human-gate catalog for one process. |
 | [`roles.schema.json`](roles.schema.json) | `roles.json` — the shared role directory. |
 | [`issue-types.schema.json`](issue-types.schema.json) | `issue-types.json` — the shared issue-type directory. |
 | [`trust-grant.schema.json`](trust-grant.schema.json) | `trust-grants/<process>/<gate>.json` — one trust grant per file. |
@@ -21,7 +21,6 @@ Reference the schema from any file you author:
 ```json
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "name": "refinement",
   "states": { … }
 }
 ```
@@ -40,8 +39,8 @@ To avoid adding `$schema` to every file, configure VS Code globally:
       "url": "./docs/schemas/states.schema.json"
     },
     {
-      "fileMatch": ["**/*-hcps.json"],
-      "url": "./docs/schemas/hcps.schema.json"
+      "fileMatch": ["**/*-human-gates.json"],
+      "url": "./docs/schemas/human-gates.schema.json"
     },
     {
       "fileMatch": ["**/roles.json"],

@@ -1,6 +1,5 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "name": "incident-response",
   "states": {
     "declared": {
       "class": "resting",
@@ -19,7 +18,7 @@
       "class": "working",
       "roles": ["incident-responder"],
       "issue_types": ["incident"],
-      "input_topics": ["blocked-on-data", "general"]
+      "human_inputs": ["blocked-on-data", "general"]
     },
     "cause_identified": {
       "class": "resting",
@@ -29,7 +28,7 @@
       "class": "working",
       "roles": ["incident-commander"],
       "issue_types": ["incident"],
-      "input_topics": ["needs-security-review", "blocked-on-data", "general"]
+      "human_inputs": ["needs-security-review", "blocked-on-data", "general"]
     },
     "needs_verification": {
       "class": "resting",

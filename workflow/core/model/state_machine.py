@@ -120,7 +120,7 @@ class State:
     `roles` lists every agent role that may occupy this working state.
     Only valid on working states — resting states are open queues, and the
     role-restriction lives on the working state they CLAIM into. Discovery
-    queries (`workflow inbox`, `workflow list --role X`) traverse outgoing
+    queries (`workflow view-inbox`, `workflow search-issues --claim X`) traverse outgoing
     CLAIM transitions to find resting states whose downstream working
     state(s) include role X in `roles`.
 
@@ -151,11 +151,11 @@ class State:
     # No-op when the issue isn't a pull request. Only valid on resting or
     # working states — terminals have already reached final form.
     mark_pr_ready: bool = False
-    # Input topics agents may invoke `request-input` on at this state.
-    # Topic ids resolve against the shared `input-topics.json`. Only valid
-    # on working states. Empty / absent means `request-input` is forbidden
+    # Human inputs agents may invoke `request-input` on at this state.
+    # Ids resolve against the shared `human-inputs.json`. Only valid on
+    # working states. Empty / absent means `request-input` is forbidden
     # at this state — agents must release the issue if they're stuck.
-    input_topics: tuple[str, ...] = ()
+    human_inputs: tuple[str, ...] = ()
     # Backend-specific close reason for terminal states. REQUIRED on
     # terminals — every terminal closes the tracker's issue with this
     # reason (GitHub: "completed" or "not planned"). FORBIDDEN on resting
@@ -177,10 +177,10 @@ class State:
 class Transition:
     """A directed edge from one state to another with a label.
 
-    `gate_name` names the HCP catalog gate this transition fires (when set).
-    Presence of `gate_name` IS the HITL marker — the standalone `hitl` flag
-    was removed. The validator cross-references the gate name against the
-    HCP catalog.
+    `gate_name` names the human-gate catalog entry this transition fires
+    (when set). Presence of `gate_name` IS the HITL marker — the standalone
+    `hitl` flag was removed. The validator cross-references the gate name
+    against the human-gate catalog.
 
     Gate-sharing rules:
 
@@ -203,7 +203,7 @@ class Transition:
     destination: str  # State name
     label: str  # The transition label
     transition_type: TransitionType = TransitionType.ADVANCE
-    gate_name: str | None = None  # HCP catalog gate_name; presence = HITL-gated
+    gate_name: str | None = None  # Human-gate catalog gate_name; presence = HITL-gated
 
     @property
     def is_gated(self) -> bool:
@@ -219,8 +219,8 @@ class StateMachine:
     cross-checks against `transitions` (every `[hitl]` marker should have a
     legend entry; every legend entry should have a matching marker).
 
-    The HCP catalog path is derived by convention from `name`:
-    `<name>-hcps.json`. There's no explicit field for it.
+    The human-gate catalog path is derived by convention from `name`:
+    `<name>-human-gates.json`. There's no explicit field for it.
 
     Issue types live on working states (`State.issue_types`); the process's
     overall accepted set is derived as the union — see `accepted_issue_types`.
@@ -252,7 +252,7 @@ class StateMachine:
         return [t for t in self.transitions if t.is_gated]
 
     def transitions_for_gate(self, gate_name: str) -> list[Transition]:
-        """Every transition declaring this `gate_name` (1 for binary HCP,
+        """Every transition declaring this `gate_name` (1 for binary gate,
         2+ for verdict-style)."""
         return [t for t in self.transitions if t.gate_name == gate_name]
 

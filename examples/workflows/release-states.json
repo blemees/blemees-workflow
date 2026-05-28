@@ -1,6 +1,5 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "name": "release",
   "states": {
     "accumulating": {
       "class": "resting",

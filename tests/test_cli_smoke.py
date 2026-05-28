@@ -20,8 +20,8 @@ def test_help(capsys: pytest.CaptureFixture) -> None:
         cli(["--help"])
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "advance" in output
-    assert "claim" in output
+    assert "advance-issue" in output
+    assert "claim-issue" in output
     assert "request-input" in output
 
 
@@ -31,7 +31,7 @@ def test_validate_against_shipped_workflows(
 ) -> None:
     """Validate iterates every workflow in the directory. The shipped tree
     predates HITL, so we expect either no findings or warnings — no errors."""
-    rc = cli(["--workflow-dir", str(workflow_dir), "validate"])
+    rc = cli(["--workflow-dir", str(workflow_dir), "validate-workflow"])
     assert rc in (0, 1)
     output = capsys.readouterr().out
     assert output  # non-empty
@@ -43,7 +43,7 @@ def test_validate_json_output(
     workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    rc = cli(["--json", "--workflow-dir", str(workflow_dir), "validate"])
+    rc = cli(["--json", "--workflow-dir", str(workflow_dir), "validate-workflow"])
     assert rc in (0, 1)
     output = capsys.readouterr().out
     payload = json.loads(output)
@@ -79,7 +79,7 @@ def test_advance_dry_run_does_not_call_backend(
                 "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
-                "advance",
+                "advance-issue",
                 "--to",
                 "refining",
                 "--issue",
@@ -109,7 +109,7 @@ def test_advance_unknown_destination_errors_clean(
                 "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
-                "advance",
+                "advance-issue",
                 "--to",
                 "definitely_not_a_real_state",
                 "--issue",
@@ -133,7 +133,7 @@ def test_comment_inline_body_posts(
             [
                 "--repo",
                 "owner/test",
-                "comment",
+                "post-comment",
                 "--issue",
                 "123",
                 "--body",
@@ -156,7 +156,7 @@ def test_comment_empty_body_rejected(
         [
             "--repo",
             "owner/test",
-            "comment",
+            "post-comment",
             "--issue",
             "123",
             "--body",
@@ -179,7 +179,7 @@ def test_comment_dry_run_does_not_call_backend(
                 "--dry-run",
                 "--repo",
                 "owner/test",
-                "comment",
+                "post-comment",
                 "--issue",
                 "123",
                 "--body",
@@ -200,7 +200,7 @@ def test_doctor_runs(
         [
             "--workflow-dir",
             str(workflow_dir),
-            "doctor",
+            "doctor-workflow",
         ]
     )
     output = capsys.readouterr().out
@@ -315,7 +315,7 @@ def test_init_creates_config_and_trust_grants_dir(
             str(tmp_path),
             "--agent-role",
             "product-manager",
-            "init",
+            "init-agent",
         ]
     )
     output = capsys.readouterr().out
@@ -350,7 +350,7 @@ def test_init_records_workflow_dir_when_provided(
             str(tmp_path),
             "--agent-role",
             "product-manager",
-            "init",
+            "init-agent",
             "--workflow-dir",
             "../../workflows",
         ]
@@ -379,7 +379,7 @@ def test_init_minimal_config_contains_only_role(
             str(tmp_path),
             "--agent-role",
             "developer",
-            "init",
+            "init-agent",
         ]
     )
     assert rc == 0
@@ -398,7 +398,7 @@ def test_init_strips_placeholder_braces_from_role(
             str(tmp_path),
             "--agent-role",
             "{product-manager}",
-            "init",
+            "init-agent",
         ]
     )
     assert rc == 0
@@ -422,7 +422,7 @@ def test_init_refuses_to_overwrite_existing_config(
             str(tmp_path),
             "--agent-role",
             "different",
-            "init",
+            "init-agent",
         ]
     )
     captured = capsys.readouterr()
@@ -445,7 +445,7 @@ def test_init_force_overwrites(
             str(tmp_path),
             "--agent-role",
             "new",
-            "init",
+            "init-agent",
             "--force",
         ]
     )
@@ -464,7 +464,7 @@ def test_init_dry_run_does_not_write_files(
             str(tmp_path),
             "--agent-role",
             "product-manager",
-            "init",
+            "init-agent",
         ]
     )
     output = capsys.readouterr().out
@@ -484,7 +484,7 @@ def test_init_json_output(
             str(tmp_path),
             "--agent-role",
             "product-manager",
-            "init",
+            "init-agent",
         ]
     )
     output = capsys.readouterr().out
@@ -513,7 +513,7 @@ def test_create_dry_run_does_not_call_backend(
                 "--dry-run",
                 "--workflow-dir",
                 str(workflow_dir),
-                "create",
+                "create-issue",
                 "--to",
                 "raw",
                 "--type",
@@ -541,7 +541,7 @@ def test_create_pr_dry_run_shows_pr_specific_plan(
             "--dry-run",
             "--workflow-dir",
             str(workflow_dir),
-            "create",
+            "create-issue",
             "--to",
             "draft",
             "--title",
@@ -577,7 +577,7 @@ def test_create_pr_requires_head(
             "--dry-run",
             "--workflow-dir",
             str(workflow_dir),
-            "create",
+            "create-issue",
             "--to",
             "draft",
             "--title",
@@ -603,7 +603,7 @@ def test_create_pr_requires_refs(
             "--dry-run",
             "--workflow-dir",
             str(workflow_dir),
-            "create",
+            "create-issue",
             "--to",
             "draft",
             "--title",
@@ -629,7 +629,7 @@ def test_create_pr_requires_body(
             "--dry-run",
             "--workflow-dir",
             str(workflow_dir),
-            "create",
+            "create-issue",
             "--to",
             "draft",
             "--title",
@@ -656,7 +656,7 @@ def test_create_issue_rejects_pr_flags(
             "--dry-run",
             "--workflow-dir",
             str(workflow_dir),
-            "create",
+            "create-issue",
             "--to",
             "raw",
             "--type",
@@ -693,7 +693,7 @@ def test_create_pr_invokes_backend_pull_request_path(
                 "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
-                "create",
+                "create-issue",
                 "--to",
                 "draft",
                 "--title",
@@ -729,7 +729,7 @@ def test_create_unknown_state_errors_clean(
             "--dry-run",
             "--workflow-dir",
             str(workflow_dir),
-            "create",
+            "create-issue",
             "--to",
             "definitely_not_a_real_state",
             "--title",
@@ -764,7 +764,7 @@ def test_create_invokes_backend_with_resolved_state(
                 "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
-                "create",
+                "create-issue",
                 "--to",
                 "raw",
                 "--type",
@@ -833,7 +833,7 @@ def test_create_with_claim_creates_then_claims(
                 str(workflow_dir),
                 "--agent-role",
                 "product-manager",
-                "create",
+                "create-issue",
                 "--to",
                 "raw",
                 "--type",
@@ -869,7 +869,7 @@ def test_create_with_claim_but_no_agent_role_errors(
             "owner/test",
             "--workflow-dir",
             str(workflow_dir),
-            "create",
+            "create-issue",
             "--to",
             "raw",
             "--type",
@@ -1035,7 +1035,7 @@ def test_edit_invokes_backend_with_title_and_body(
                 "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
-                "edit",
+                "edit-issue",
                 "--issue",
                 "42",
                 "--title",
@@ -1062,7 +1062,7 @@ def test_edit_without_title_or_body_errors(
             "owner/test",
             "--workflow-dir",
             str(workflow_dir),
-            "edit",
+            "edit-issue",
             "--issue",
             "42",
         ]

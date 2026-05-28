@@ -1,8 +1,7 @@
-"""reject — human refuses a catalogued HCP packet; agent iterates.
+"""check — human confirms an audit-level action post-hoc.
 
-Per `hitl-principles.md` principles 5, 7, and 11. The state never changes;
-the agent's claim is retained. The agent reads the feedback comment and
-re-prepares.
+Per `hitl-principles.md` principle 11. Clears the audit queue for the work
+item; no remediation triggered.
 """
 
 from __future__ import annotations
@@ -17,14 +16,12 @@ def run(
     *,
     issue_id: str,
     gate: str,
-    body: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.REJECT,
+        operation=Operation.APPROVE_AUDIT,
         issue_id=issue_id,
         gate=gate,
-        body_text=body,
         actor=actor,
     )
     return dispatch(controller, request)

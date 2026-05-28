@@ -714,7 +714,7 @@ def test_ensure_label_creates_missing() -> None:
     # Color came from the state namespace default (blue).
     color_idx = cmd.index("--color") + 1
     assert cmd[color_idx] == "1f6feb"
-    # No --force: setup-labels preserves user customizations on existing labels.
+    # No --force: setup-github preserves user customizations on existing labels.
     assert "--force" not in cmd
 
 

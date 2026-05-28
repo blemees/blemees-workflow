@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from workflow.backends.base import IssueState
-from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
+from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
 from workflow.core.model.state_machine import (
     ReversibilityClass,
     State,
@@ -40,7 +40,7 @@ def _build_workflow() -> StateMachine:
             name="refining",
             state_class=StateClass.WORKING,
             roles=("product-manager",),
-            input_topics=("general", "clarify-scope"),
+            human_inputs=("general", "clarify-scope"),
         ),
         "ready_for_dev": State(
             name="ready_for_dev",
@@ -91,20 +91,20 @@ def _build_workflow() -> StateMachine:
     return workflow
 
 
-def _build_catalog() -> HCPCatalog:
-    catalog = HCPCatalog(process_name="t")
-    catalog.entries["ready_for_dev"] = HCP(
+def _build_catalog() -> HumanGateCatalog:
+    catalog = HumanGateCatalog(process_name="t")
+    catalog.entries["ready_for_dev"] = HumanGate(
         gate_name="ready_for_dev",
-        hcp_type=HCPType.AUTHORITY,
-        allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
-        default_level=HCPLevel.BLOCK,
+        gate_type=HumanGateType.AUTHORITY,
+        allowed_levels=[HumanGateLevel.BLOCK, HumanGateLevel.AUDIT],
+        default_level=HumanGateLevel.BLOCK,
         agent_prepares_path="dor.md",
     )
-    catalog.entries["experiment-verdict"] = HCP(
+    catalog.entries["experiment-verdict"] = HumanGate(
         gate_name="experiment-verdict",
-        hcp_type=HCPType.AUTHORITY,
-        allowed_levels=[HCPLevel.BLOCK],
-        default_level=HCPLevel.BLOCK,
+        gate_type=HumanGateType.AUTHORITY,
+        allowed_levels=[HumanGateLevel.BLOCK],
+        default_level=HumanGateLevel.BLOCK,
         agent_prepares_path="verdict-packet.md",
     )
     return catalog
@@ -119,7 +119,7 @@ def test_plan_advance() -> None:
     state = IssueState(issue_id="1", state="raw", agent_claim="product-manager")
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE,
+            operation=Operation.ADVANCE_ISSUE,
             issue_id="1",
             destination="refining",
         ),
@@ -136,7 +136,7 @@ def test_plan_advance_unknown_destination_errors() -> None:
     with pytest.raises(OperationError, match="No transition"):
         plan_operation(
             OperationRequest(
-                operation=Operation.ADVANCE,
+                operation=Operation.ADVANCE_ISSUE,
                 issue_id="1",
                 destination="not_a_real_state",
             ),
@@ -150,7 +150,7 @@ def test_plan_claim() -> None:
     state = IssueState(issue_id="1", state="raw", agent_claim=None)
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.CLAIM,
+            operation=Operation.CLAIM_ISSUE,
             issue_id="1",
             role="product-manager",
         ),
@@ -170,7 +170,7 @@ def test_plan_claim_already_claimed_errors() -> None:
     with pytest.raises(OperationError):
         plan_operation(
             OperationRequest(
-                operation=Operation.CLAIM,
+                operation=Operation.CLAIM_ISSUE,
                 issue_id="1",
                 role="product-manager",
             ),
@@ -183,7 +183,7 @@ def test_plan_release() -> None:
     workflow = _build_workflow()
     state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", last_state="raw")
     plan = plan_operation(
-        OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+        OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"),
         state,
         workflow,
     )
@@ -198,7 +198,7 @@ def test_plan_release_without_last_state_errors() -> None:
     state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", last_state=None)
     with pytest.raises(OperationError, match="last-state"):
         plan_operation(
-            OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+            OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"),
             state,
             workflow,
         )
@@ -227,7 +227,7 @@ def test_terminal_advance_closes_issue_as_completed() -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE, issue_id="1", destination="merged"
+            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="merged"
         ),
         state,
         workflow,
@@ -260,7 +260,7 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE, issue_id="1", destination="bounced"
+            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="bounced"
         ),
         state,
         workflow,
@@ -290,7 +290,7 @@ def test_abandoned_terminal_closes_as_not_planned() -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE, issue_id="1", destination="wont"
+            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="wont"
         ),
         state,
         workflow,
@@ -307,7 +307,7 @@ def test_plan_release_with_drifted_last_state_errors() -> None:
     )
     with pytest.raises(OperationError, match="drifted"):
         plan_operation(
-            OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+            OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"),
             state,
             workflow,
         )
@@ -318,7 +318,7 @@ def test_plan_release_without_claim_errors() -> None:
     state = IssueState(issue_id="1", state="refining", agent_claim=None)
     with pytest.raises(OperationError):
         plan_operation(
-            OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+            OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"),
             state,
             workflow,
         )
@@ -368,7 +368,7 @@ def test_plan_review() -> None:
         awaiting_gate="ready_for_dev",
     )
     plan = plan_operation(
-        OperationRequest(operation=Operation.REVIEW, issue_id="1"),
+        OperationRequest(operation=Operation.REVIEW_BLOCKED, issue_id="1"),
         state,
         workflow,
         catalog,
@@ -382,7 +382,7 @@ def test_plan_review_without_awaiting_errors() -> None:
     state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
     with pytest.raises(OperationError):
         plan_operation(
-            OperationRequest(operation=Operation.REVIEW, issue_id="1"),
+            OperationRequest(operation=Operation.REVIEW_BLOCKED, issue_id="1"),
             state,
             workflow,
             catalog,
@@ -401,7 +401,7 @@ def test_plan_approve_binary() -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.APPROVE,
+            operation=Operation.APPROVE_BLOCKED,
             issue_id="1",
             gate="ready_for_dev",
         ),
@@ -428,7 +428,7 @@ def test_plan_approve_verdict_requires_destination() -> None:
     with pytest.raises(OperationError, match="requires --destination"):
         plan_operation(
             OperationRequest(
-                operation=Operation.APPROVE,
+                operation=Operation.APPROVE_BLOCKED,
                 issue_id="1",
                 gate="experiment-verdict",
             ),
@@ -449,7 +449,7 @@ def test_plan_approve_verdict_with_destination() -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.APPROVE,
+            operation=Operation.APPROVE_BLOCKED,
             issue_id="1",
             gate="experiment-verdict",
             destination="promoted",
@@ -477,7 +477,7 @@ def test_plan_reject(tmp_path: Path) -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.REJECT,
+            operation=Operation.REJECT_BLOCKED,
             issue_id="1",
             gate="ready_for_dev",
             body_text=feedback.read_text(encoding="utf-8"),
@@ -544,7 +544,7 @@ def test_plan_audit() -> None:
         audit_pending="ready_for_dev",
     )
     plan = plan_operation(
-        OperationRequest(operation=Operation.AUDIT, issue_id="1"),
+        OperationRequest(operation=Operation.REVIEW_AUDIT, issue_id="1"),
         state,
         workflow,
         catalog,
@@ -564,7 +564,7 @@ def test_plan_check() -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.CONFIRM,
+            operation=Operation.APPROVE_AUDIT,
             issue_id="1",
             gate="ready_for_dev",
         ),
@@ -590,7 +590,7 @@ def test_plan_revoke(tmp_path: Path) -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.REVOKE,
+            operation=Operation.REJECT_AUDIT,
             issue_id="1",
             gate="ready_for_dev",
             body_text=concern.read_text(encoding="utf-8"),
@@ -624,12 +624,12 @@ def test_plan_request_input(tmp_path: Path) -> None:
         workflow,
     )
     assert plan.change.set_awaiting_input is True
-    assert plan.change.set_input_topic == "general"
+    assert plan.change.set_human_input == "general"
     assert plan.packet_body is not None
 
 
 def test_plan_request_input_requires_declared_topic(tmp_path: Path) -> None:
-    """The state's input_topics list is closed — passing a topic that's
+    """The state's human_inputs list is closed — passing a topic that's
     not declared is rejected."""
     workflow = _build_workflow()
     q = tmp_path / "q.md"
@@ -645,7 +645,7 @@ def test_plan_request_input_requires_declared_topic(tmp_path: Path) -> None:
                 operation=Operation.REQUEST_INPUT,
                 issue_id="1",
                 body_text=q.read_text(encoding="utf-8"),
-                topic="needs-ux-input",  # not in refining's input_topics
+                topic="needs-ux-input",  # not in refining's human_inputs
             ),
             state,
             workflow,
@@ -653,7 +653,7 @@ def test_plan_request_input_requires_declared_topic(tmp_path: Path) -> None:
 
 
 def test_plan_request_input_forbidden_when_state_has_no_topics(tmp_path: Path) -> None:
-    """A state without `input_topics` declared can't host request-input
+    """A state without `human_inputs` declared can't host request-input
     at all — agents must release the issue or stay put."""
     workflow = _build_workflow()
     # Strip topics from `refining` for this test.
@@ -662,7 +662,7 @@ def test_plan_request_input_forbidden_when_state_has_no_topics(tmp_path: Path) -
         name=refining.name,
         state_class=refining.state_class,
         roles=refining.roles,
-        # input_topics deliberately omitted
+        # human_inputs deliberately omitted
     )
     q = tmp_path / "q.md"
     q.write_text("question", encoding="utf-8")
@@ -671,7 +671,7 @@ def test_plan_request_input_forbidden_when_state_has_no_topics(tmp_path: Path) -
         state="refining",
         agent_claim="product-manager",
     )
-    with pytest.raises(OperationError, match="does not declare `input_topics`"):
+    with pytest.raises(OperationError, match="does not declare `human_inputs`"):
         plan_operation(
             OperationRequest(
                 operation=Operation.REQUEST_INPUT,
@@ -716,7 +716,7 @@ def test_plan_advise() -> None:
         awaiting_input=True,
     )
     plan = plan_operation(
-        OperationRequest(operation=Operation.ADVISE, issue_id="1"),
+        OperationRequest(operation=Operation.REVIEW_REQUEST, issue_id="1"),
         state,
         workflow,
     )
@@ -736,7 +736,7 @@ def test_plan_resolve(tmp_path: Path) -> None:
     )
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.RESPOND,
+            operation=Operation.RESPOND_REQUEST,
             issue_id="1",
             body_text=response.read_text(encoding="utf-8"),
         ),
@@ -756,10 +756,10 @@ def test_plan_resolve(tmp_path: Path) -> None:
     "operation,builder",
     [
         (
-            Operation.ADVANCE,
+            Operation.ADVANCE_ISSUE,
             lambda lc, cat, paths: (
                 OperationRequest(
-                    operation=Operation.ADVANCE,
+                    operation=Operation.ADVANCE_ISSUE,
                     issue_id="1",
                     destination="refining",
                 ),
@@ -767,16 +767,16 @@ def test_plan_resolve(tmp_path: Path) -> None:
             ),
         ),
         (
-            Operation.CLAIM,
+            Operation.CLAIM_ISSUE,
             lambda lc, cat, paths: (
-                OperationRequest(operation=Operation.CLAIM, issue_id="1", role="product-manager"),
+                OperationRequest(operation=Operation.CLAIM_ISSUE, issue_id="1", role="product-manager"),
                 IssueState(issue_id="1", state="raw", agent_claim=None),
             ),
         ),
         (
-            Operation.RELEASE,
+            Operation.RELEASE_ISSUE,
             lambda lc, cat, paths: (
-                OperationRequest(operation=Operation.RELEASE, issue_id="1"),
+                OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"),
                 IssueState(
                     issue_id="1",
                     state="refining",
@@ -812,7 +812,7 @@ def test_advance_on_block_gated_transition_dispatches_to_await_signal(
 
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE,
+            operation=Operation.ADVANCE_ISSUE,
             issue_id="1",
             destination="ready_for_dev",
             body_text=packet.read_text(encoding="utf-8"),
@@ -839,7 +839,7 @@ def test_advance_on_block_gated_transition_without_packet_errors() -> None:
     with pytest.raises(OperationError, match="block level"):
         plan_operation(
             OperationRequest(
-                operation=Operation.ADVANCE,
+                operation=Operation.ADVANCE_ISSUE,
                 issue_id="1",
                 destination="ready_for_dev",
             ),
@@ -856,7 +856,7 @@ def test_advance_on_ungated_transition_changes_state() -> None:
 
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE,
+            operation=Operation.ADVANCE_ISSUE,
             issue_id="1",
             destination="refining",
         ),
@@ -865,8 +865,8 @@ def test_advance_on_ungated_transition_changes_state() -> None:
         catalog,
     )
 
-    # No HCP — the planner returns a straightforward advance.
-    assert plan.operation is Operation.ADVANCE
+    # No HumanGate — the planner returns a straightforward advance.
+    assert plan.operation is Operation.ADVANCE_ISSUE
     assert plan.change.set_state == "refining"
     assert plan.change.set_awaiting_gate is None
 
@@ -874,8 +874,8 @@ def test_advance_on_ungated_transition_changes_state() -> None:
 def test_advance_on_audit_gated_transition_dispatches_to_record_action(
     tmp_path: Path,
 ) -> None:
-    """Audit-gated dispatch — synthesize a reversible-destination HCP at default audit."""
-    from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
+    """Audit-gated dispatch — synthesize a reversible-destination HumanGate at default audit."""
+    from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
     from workflow.core.model.state_machine import (
         ReversibilityClass,
         State,
@@ -900,19 +900,19 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
             gate_name="logged",
         ),
     ]
-    catalog = HCPCatalog(process_name="t")
-    catalog.entries["logged"] = HCP(
+    catalog = HumanGateCatalog(process_name="t")
+    catalog.entries["logged"] = HumanGate(
         gate_name="logged",
-        hcp_type=HCPType.KNOWLEDGE,
-        allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
-        default_level=HCPLevel.AUDIT,
+        gate_type=HumanGateType.KNOWLEDGE,
+        allowed_levels=[HumanGateLevel.BLOCK, HumanGateLevel.AUDIT],
+        default_level=HumanGateLevel.AUDIT,
         agent_prepares_path="log-template.md",
     )
 
     state = IssueState(issue_id="1", state="working", agent_claim="developer")
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE,
+            operation=Operation.ADVANCE_ISSUE,
             issue_id="1",
             destination="logged",
         ),
@@ -929,7 +929,7 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
 
 # --------------------------------------------------------------------------- #
 # Role validation: claim transitions must match the destination working
-# state's `roles` list, and gated transitions must match the HCP's
+# state's `roles` list, and gated transitions must match the HumanGate's
 # triggering_role.
 
 
@@ -966,7 +966,7 @@ def test_claim_role_must_match_destination_working_state_roles() -> None:
     with pytest.raises(OperationError, match="Role mismatch"):
         plan_operation(
             OperationRequest(
-                operation=Operation.CLAIM,
+                operation=Operation.CLAIM_ISSUE,
                 issue_id="1",
                 role="developer",  # not in refining's roles
             ),
@@ -1011,7 +1011,7 @@ def test_claim_rejects_wrong_issue_type_for_destination_state() -> None:
 
     with pytest.raises(OperationError, match="not accepted by working state"):
         plan_operation(
-            OperationRequest(operation=Operation.CLAIM, issue_id="1", role="developer"),
+            OperationRequest(operation=Operation.CLAIM_ISSUE, issue_id="1", role="developer"),
             state,
             workflow,
         )
@@ -1051,7 +1051,7 @@ def test_claim_allows_matching_issue_type() -> None:
     )
 
     plan = plan_operation(
-        OperationRequest(operation=Operation.CLAIM, issue_id="1", role="developer"),
+        OperationRequest(operation=Operation.CLAIM_ISSUE, issue_id="1", role="developer"),
         state,
         workflow,
     )
@@ -1077,7 +1077,7 @@ def test_advance_into_mark_pr_ready_sets_marker() -> None:
     state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE, issue_id="1", destination="ready_for_dev"
+            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="ready_for_dev"
         ),
         state,
         workflow,
@@ -1091,7 +1091,7 @@ def test_advance_into_normal_state_does_not_set_pr_ready() -> None:
     state = IssueState(issue_id="1", state="refining", agent_claim="product-manager")
     plan = plan_operation(
         OperationRequest(
-            operation=Operation.ADVANCE, issue_id="1", destination="ready_for_dev"
+            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="ready_for_dev"
         ),
         state,
         workflow,
@@ -1130,7 +1130,7 @@ def test_claim_role_match_succeeds() -> None:
     state = IssueState(issue_id="1", state="raw", agent_claim=None)
 
     plan = plan_operation(
-        OperationRequest(operation=Operation.CLAIM, issue_id="1", role="product-manager"),
+        OperationRequest(operation=Operation.CLAIM_ISSUE, issue_id="1", role="product-manager"),
         state,
         workflow,
     )
@@ -1138,7 +1138,7 @@ def test_claim_role_match_succeeds() -> None:
 
 
 def test_advance_to_gated_destination_requires_role_match() -> None:
-    """Firing a catalogued HCP requires the actor's role to match
+    """Firing a catalogued HumanGate requires the actor's role to match
     the catalog row's triggering_role."""
     workflow = _build_workflow()
     catalog = _build_catalog()
@@ -1147,7 +1147,7 @@ def test_advance_to_gated_destination_requires_role_match() -> None:
     with pytest.raises(OperationError, match="Role mismatch"):
         plan_operation(
             OperationRequest(
-                operation=Operation.ADVANCE,
+                operation=Operation.ADVANCE_ISSUE,
                 issue_id="1",
                 destination="ready_for_dev",
                 actor="developer",  # wrong role; gate's triggering_role is {pm}

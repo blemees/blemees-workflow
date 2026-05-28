@@ -8,7 +8,7 @@ under `parser.mermaid` for migration tooling and historical tests, but the
 runtime always reads JSON.
 
 - `state_machine` — workflow `.json` files into `StateMachine`.
-- `hcp_catalog` — `<workflow>-hcps.json` into `HCPCatalog`.
+- `human_gate_catalog` — `<workflow>-human-gates.json` into `HumanGateCatalog`.
 - `trust_grant` — trust-grant `.json` files into `TrustGrant`.
 - `role_directory` — `roles.json` into `RoleDirectory`.
 - `issue_type_directory` — `issue-types.json` into `IssueTypeDirectory`.
@@ -19,7 +19,7 @@ distinguished from missing fields — absence of an optional artifact is fine
 (empty result), but a present-but-malformed artifact is a hard error.
 """
 
-from workflow.core.parser.hcp_catalog import parse_hcp_catalog
+from workflow.core.parser.human_gate_catalog import parse_human_gate_catalog
 from workflow.core.parser.issue_type_directory import parse_issue_type_directory
 from workflow.core.parser.role_directory import parse_role_directory
 from workflow.core.parser.state_machine import parse_state_machine
@@ -30,7 +30,7 @@ from workflow.core.parser.trust_grant import (
 
 __all__ = [
     "parse_state_machine",
-    "parse_hcp_catalog",
+    "parse_human_gate_catalog",
     "parse_trust_grant",
     "load_team_grants",
     "parse_role_directory",

@@ -2,7 +2,7 @@
 
 The canonical operation mechanism for agent-driven state-machine workflows.
 
-This tool implements the framework defined in [`agent-workflow-skill-creator`](../../skills/operator/agent-workflow-skill-creator/). It reads the framework's authoritative artifacts — workflow `.mermaid` files, process docs with HCP catalog rows, trust grants, role mappings — and exposes them as a set of operations agents and humans invoke against work items on the backing issue tracker.
+This tool implements the framework defined in [`agent-workflow-skill-creator`](../../skills/operator/agent-workflow-skill-creator/). It reads the framework's authoritative artifacts — state machines, human-gate catalogs, trust grants, role mappings — and exposes them as a set of operations agents and humans invoke against work items on the backing issue tracker.
 
 The tool is backend-neutral by design. Today it ships with a GitHub backend; future backends (GitLab, Jira, Linear) implement the same operation surface against their respective trackers.
 
@@ -28,7 +28,7 @@ After either install, the tool is directly invocable — no `python -m`:
 
 ```bash
 workflow --version
-workflow advance --to ready_for_dev --issue 123
+workflow advance-issue --to ready_for_dev --issue 123
 ```
 
 For development, prefix commands with `uv run`:
@@ -50,14 +50,14 @@ workflow --agent-role product-manager init                     # scaffold .workf
 workflow setup-github                                          # ensure org Issue Types (best-effort) + repo labels
 workflow setup-github --setup-org                              # admin path — create org Issue Types and refresh cache
 workflow capabilities                                          # show the per-(host, owner) encoding cache
-workflow create --to raw --title "Fix login bug"               # open a new work item in an initial state
-workflow inbox                                                 # claimable items + actionable wip for the configured role
-workflow search --state ready_for_dev --awaiting-gate '*'      # arbitrary filter combinations
-workflow advance --to ready_for_dev --issue 123 --body-from packet.md
-workflow approve --gate ready_for_dev --issue 123
-workflow reject --gate ready_for_dev --issue 123 --body-from feedback.md
+workflow create-issue --to raw --title "Fix login bug"               # open a new work item in an initial state
+workflow view-inbox                                            # claimable items + actionable wip for the configured role
+workflow search-issues --state ready_for_dev --awaiting-gate '*'  # arbitrary filter combinations
+workflow advance-issue --to ready_for_dev --issue 123 --body-from packet.md
+workflow approve-blocked --gate ready_for_dev --issue 123
+workflow reject-blocked --gate ready_for_dev --issue 123 --body-from feedback.md
 workflow request-input --issue 123 --body-from question.md
-workflow respond --issue 123 --body-from response.md
+workflow respond-request --issue 123 --body-from response.md
 ```
 
 The tool resolves the workflow's canonical artifacts at startup from a single `--workflow-dir` (or discovery), validates the contract, and dispatches the operation against the configured backend.
@@ -68,29 +68,29 @@ Three groups. See `hitl-principles.md` § 5 for full semantics.
 
 **Lifecycle:**
 
-- `advance` — move an issue to a new state.
-- `claim` — agent takes responsibility for a resting state.
-- `release` — agent gives up the claim.
+- `advance-issue` — move an issue to a new state.
+- `claim-issue` — agent takes responsibility for a resting state.
+- `release-issue` — agent gives up the claim.
 
-**Catalogued HITL — block-level:**
+**Catalogued HITL — block-level gate:**
 
-- `await-signal` — fire a catalogued gate; pause for human signal.
-- `review` — human claims pre-action review.
-- `approve` — human authorizes the transition.
-- `reject` — human rejects the packet; agent iterates.
+- `await-signal` — fire a catalogued gate; pause for human signal (internal).
+- `review-blocked` — human claims pre-action review.
+- `approve-blocked` — human authorizes the transition.
+- `reject-blocked` — human rejects the packet; agent iterates.
 
-**Catalogued HITL — audit-level:**
+**Catalogued HITL — audit-level gate:**
 
-- `record-action` — agent acts atomically; queue for retroactive review.
-- `audit` — human claims post-action audit.
-- `confirm` — human confirms post-hoc.
-- `revoke` — human triggers remediation.
+- `record-action` — agent acts atomically; queue for retroactive review (internal).
+- `review-audit` — human claims post-action review.
+- `approve-audit` — human confirms post-hoc.
+- `reject-audit` — human triggers remediation.
 
-**Recognized HITL:**
+**Recognized HITL — input request:**
 
 - `request-input` — agent invokes for an unanticipated moment.
-- `advise` — human claims response.
-- `respond` — human provides input.
+- `review-request` — human claims response.
+- `respond-request` — human provides input.
 
 ## Configuration
 
@@ -125,7 +125,7 @@ See [`examples/`](examples/) for a fully populated multi-role tree with eleven a
 invocations. The recognized keys are:
 
 - `agent-role` (required for most operations) — the agent's role id, used
-  as the default actor for `claim`, `list`, etc.
+  as the default actor for `claim-issue`, `list`, etc.
 - `workflow-dir` (optional) — override for where workflow files live;
   relative paths anchored to the agent home. Defaults to
   `<agent-home>/.workflow/workflows/`.
@@ -218,8 +218,8 @@ directly in the `--workflow-dir`:
   [`docs/workflow-authoring.md`](docs/workflow-authoring.md) for the schema
   and authoring rules, and [`docs/state-machine-principles.md`](docs/state-machine-principles.md)
   for the design principles.
-- `<workflow>-hcps.json` — the HCP catalog (one per workflow; optional —
-  absence means no catalogued HCPs).
+- `<workflow>-human-gates.json` — the human-gate catalog (one per
+  workflow; optional — absence means no catalogued gates).
 - `roles.json` — the role directory (shared across workflows).
 - `<gate>.json` files under `trust-grants/<workflow>/` — per-team
   relaxations. The trust-grants directory is resolved separately (per
@@ -270,7 +270,7 @@ the agent home.
 workflow/
   cli.py                       # argparse / click entry — one sub-command per operation
   core/
-    model/                     # dataclasses: StateMachine, State, Transition, HCP, TrustGrant, Role
+    model/                     # dataclasses: StateMachine, State, Transition, HumanGate, TrustGrant, Role
     parser/                    # mermaid, process doc, trust grant, roles parsers
     validator.py               # cross-reference checks + static rules
     planner.py                 # operation → marker change set

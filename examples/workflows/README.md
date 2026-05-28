@@ -7,19 +7,19 @@ Authored sources are the `*.json` files; regenerate with `workflow generate-docs
 
 ## Processes
 
-- [`backport`](./backport.md) — state machine, HCPs, handoffs
-- [`experimentation`](./experimentation.md) — state machine, HCPs, handoffs
-- [`incident-response`](./incident-response.md) — state machine, HCPs, handoffs
-- [`inner-loop`](./inner-loop.md) — state machine, HCPs, handoffs
-- [`mitigation`](./mitigation.md) — state machine, HCPs, handoffs
-- [`postmortem`](./postmortem.md) — state machine, HCPs, handoffs
-- [`pr`](./pr.md) — state machine, HCPs, handoffs
-- [`progressive-rollout`](./progressive-rollout.md) — state machine, HCPs, handoffs
-- [`refinement`](./refinement.md) — state machine, HCPs, handoffs
-- [`release`](./release.md) — state machine, HCPs, handoffs
+- [`backport`](./backport.md) — state machine, human gates, handoffs
+- [`experimentation`](./experimentation.md) — state machine, human gates, handoffs
+- [`incident-response`](./incident-response.md) — state machine, human gates, handoffs
+- [`inner-loop`](./inner-loop.md) — state machine, human gates, handoffs
+- [`mitigation`](./mitigation.md) — state machine, human gates, handoffs
+- [`postmortem`](./postmortem.md) — state machine, human gates, handoffs
+- [`pr`](./pr.md) — state machine, human gates, handoffs
+- [`progressive-rollout`](./progressive-rollout.md) — state machine, human gates, handoffs
+- [`refinement`](./refinement.md) — state machine, human gates, handoffs
+- [`release`](./release.md) — state machine, human gates, handoffs
 
 ## Shared resources
 
 - [Roles](./roles.md)
 - [Issue types](./issue-types.md)
-- [Input topics](./input-topics.md)
+- [Human inputs](./human-inputs.md)

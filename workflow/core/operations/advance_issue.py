@@ -1,6 +1,6 @@
 """advance — move an issue to a new state via a known transition.
 
-The user-facing entry point for state changes. The planner consults the HCP
+The user-facing entry point for state changes. The planner consults the HumanGate
 catalog and team trust grants and dispatches internally:
 
 - Ungated transition → straightforward state change.
@@ -29,7 +29,7 @@ def run(
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.ADVANCE,
+        operation=Operation.ADVANCE_ISSUE,
         issue_id=issue_id,
         destination=destination,
         body_text=body_text,

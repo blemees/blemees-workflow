@@ -1,7 +1,7 @@
 """Validator — static cross-artifact checks against the framework principles.
 
 Produces a list of `ValidationFinding` objects rather than throwing. Callers
-(the `validate` CLI command, the controller's pre-flight check) decide how
+(the `validate-workflow` CLI command, the controller's pre-flight check) decide how
 to surface them.
 
 Each finding cites the source principle so that drift reports stay legible.
@@ -16,8 +16,8 @@ from datetime import date
 from enum import Enum
 
 from workflow.backends.base import IssueState
-from workflow.core.model.hcp import HCPCatalog, HCPLevel
-from workflow.core.model.input_topic import InputTopicDirectory
+from workflow.core.model.human_gate import HumanGateCatalog, HumanGateLevel
+from workflow.core.model.human_input import HumanInputDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.state_machine import (
     ReversibilityClass,
@@ -50,10 +50,10 @@ class ValidationFinding:
 
 def validate_state_machine(
     state_machine: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
     grants: dict[str, TrustGrant] | None = None,
     issue_type_directory: IssueTypeDirectory | None = None,
-    input_topic_directory: InputTopicDirectory | None = None,
+    human_input_directory: HumanInputDirectory | None = None,
     handoff_index: dict[str, set[str]] | None = None,
     sibling_machines: dict[str, StateMachine] | None = None,
 ) -> list[ValidationFinding]:
@@ -75,7 +75,7 @@ def validate_state_machine(
     findings.extend(_check_working_states_are_claim_destinations(state_machine))
     findings.extend(_check_level_keywords_not_on_diagram(state_machine))
     findings.extend(_check_issue_types_resolved(state_machine, issue_type_directory))
-    findings.extend(_check_input_topics_resolved(state_machine, input_topic_directory))
+    findings.extend(_check_human_inputs_resolved(state_machine, human_input_directory))
     findings.extend(_check_gates_have_unique_source(state_machine))
     if handoff_index is not None:
         findings.extend(_check_handoffs_have_partners(state_machine, handoff_index))
@@ -203,7 +203,7 @@ def _check_reversibility_declared_on_legend_states(
 
 
 def _check_legend_catalog_sync(
-    state_machine: StateMachine, catalog: HCPCatalog
+    state_machine: StateMachine, catalog: HumanGateCatalog
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     legend_gates = set(state_machine.gates_in_legend.keys())
@@ -235,35 +235,35 @@ def _check_legend_catalog_sync(
 
 
 def _check_audit_irreversible(
-    state_machine: StateMachine, catalog: HCPCatalog
+    state_machine: StateMachine, catalog: HumanGateCatalog
 ) -> list[ValidationFinding]:
     """Audit-level on an irreversible destination is forbidden (principle 4).
     Reversibility is derived from the gate's destination state(s)."""
     findings: list[ValidationFinding] = []
-    for hcp in catalog.entries.values():
-        rev = state_machine.gate_reversibility(hcp.gate_name)
+    for gate in catalog.entries.values():
+        rev = state_machine.gate_reversibility(gate.gate_name)
         if rev is not ReversibilityClass.IRREVERSIBLE:
             continue
-        if hcp.default_level is HCPLevel.AUDIT:
+        if gate.default_level is HumanGateLevel.AUDIT:
             findings.append(
                 ValidationFinding(
                     severity=Severity.ERROR,
                     principle_cite="hitl-principles.md#4",
                     message=(
-                        f"HCP {hcp.gate_name!r} declares default_level=audit "
+                        f"HumanGate {gate.gate_name!r} declares default_level=audit "
                         "but its destination is irreversible (derived). "
                         "Irreversible destinations require block."
                     ),
                     location=catalog.source_path,
                 )
             )
-        if HCPLevel.AUDIT in hcp.allowed_levels:
+        if HumanGateLevel.AUDIT in gate.allowed_levels:
             findings.append(
                 ValidationFinding(
                     severity=Severity.ERROR,
                     principle_cite="hitl-principles.md#4",
                     message=(
-                        f"HCP {hcp.gate_name!r} lists audit as an allowed "
+                        f"HumanGate {gate.gate_name!r} lists audit as an allowed "
                         "level but the destination is irreversible (derived)."
                     ),
                     location=catalog.source_path,
@@ -273,14 +273,14 @@ def _check_audit_irreversible(
 
 
 def _check_block_on_timeout(
-    catalog: HCPCatalog, grants: dict[str, TrustGrant]
+    catalog: HumanGateCatalog, grants: dict[str, TrustGrant]
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     # We can only check the trust-grant side — block defaults at the catalog
     # level have no timeout (timeout: none); the principle bites only when a
     # team has relaxed the timeout.
     for gate, grant in grants.items():
-        if grant.current_level is HCPLevel.BLOCK:
+        if grant.current_level is HumanGateLevel.BLOCK:
             on_timeout = grant.parameters.on_timeout
             if on_timeout is None:
                 continue
@@ -299,16 +299,16 @@ def _check_block_on_timeout(
     return findings
 
 
-def _check_agent_prepares_present(catalog: HCPCatalog) -> list[ValidationFinding]:
+def _check_agent_prepares_present(catalog: HumanGateCatalog) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
-    for hcp in catalog.entries.values():
-        if not hcp.agent_prepares_path:
+    for gate in catalog.entries.values():
+        if not gate.agent_prepares_path:
             findings.append(
                 ValidationFinding(
                     severity=Severity.WARNING,
                     principle_cite="hitl-principles.md#8",
                     message=(
-                        f"HCP {hcp.gate_name!r} has no 'Agent prepares' pointer. "
+                        f"HumanGate {gate.gate_name!r} has no 'Agent prepares' pointer. "
                         "Add a reference to the artifact-template file."
                     ),
                     location=catalog.source_path,
@@ -319,7 +319,7 @@ def _check_agent_prepares_present(catalog: HCPCatalog) -> list[ValidationFinding
 
 def _check_trust_grants(
     state_machine: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
     grants: dict[str, TrustGrant],
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
@@ -338,22 +338,22 @@ def _check_trust_grants(
                 )
             )
         if catalog is not None and gate in catalog.entries:
-            hcp = catalog.entries[gate]
-            if grant.current_level not in hcp.allowed_levels:
+            gate = catalog.entries[gate]
+            if grant.current_level not in gate.allowed_levels:
                 findings.append(
                     ValidationFinding(
                         severity=Severity.ERROR,
                         principle_cite="trust-grant-schema.md#7",
                         message=(
                             f"Trust grant for {gate!r} requests level "
-                            f"{grant.current_level.value!r} but HCP allows "
-                            f"{[lvl.value for lvl in hcp.allowed_levels]}."
+                            f"{grant.current_level.value!r} but HumanGate allows "
+                            f"{[lvl.value for lvl in gate.allowed_levels]}."
                         ),
                         location=grant.source_path,
                     )
                 )
             if (
-                grant.current_level is HCPLevel.AUDIT
+                grant.current_level is HumanGateLevel.AUDIT
                 and state_machine.gate_reversibility(gate)
                 is ReversibilityClass.IRREVERSIBLE
             ):
@@ -835,17 +835,17 @@ def _check_gates_have_unique_source(
     return findings
 
 
-def _check_input_topics_resolved(
+def _check_human_inputs_resolved(
     state_machine: StateMachine,
-    directory: InputTopicDirectory | None,
+    directory: HumanInputDirectory | None,
 ) -> list[ValidationFinding]:
     """Every topic id referenced by a working state must resolve in the
-    shared `input-topics.json`. Missing directory + referenced topics is
+    shared `human-inputs.json`. Missing directory + referenced topics is
     a WARNING; declared id absent from directory is an ERROR."""
     findings: list[ValidationFinding] = []
     referenced: set[str] = set()
     for st in state_machine.states.values():
-        referenced.update(st.input_topics)
+        referenced.update(st.human_inputs)
     if not referenced:
         return findings
 
@@ -855,8 +855,8 @@ def _check_input_topics_resolved(
                 severity=Severity.WARNING,
                 principle_cite="hitl-principles.md#7",
                 message=(
-                    f"Process working states reference input_topics "
-                    f"{sorted(referenced)} but no input-topics.json was "
+                    f"Process working states reference human_inputs "
+                    f"{sorted(referenced)} but no human-inputs.json was "
                     f"found. Topics cannot be resolved."
                 ),
                 location=state_machine.source_path,
@@ -864,16 +864,16 @@ def _check_input_topics_resolved(
         )
         return findings
 
-    for topic_id in sorted(referenced):
-        if not directory.has(topic_id):
+    for human_input_id in sorted(referenced):
+        if not directory.has(human_input_id):
             findings.append(
                 ValidationFinding(
                     severity=Severity.ERROR,
                     principle_cite="hitl-principles.md#7",
                     message=(
-                        f"References input topic {topic_id!r} but it is not "
+                        f"References human input {human_input_id!r} but it is not "
                         f"defined in "
-                        f"{directory.source_path or 'input-topics.json'}."
+                        f"{directory.source_path or 'human-inputs.json'}."
                     ),
                     location=state_machine.source_path,
                 )

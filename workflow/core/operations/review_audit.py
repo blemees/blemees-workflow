@@ -1,7 +1,7 @@
-"""check — human confirms an audit-level action post-hoc.
+"""audit — human claims post-action audit.
 
-Per `hitl-principles.md` principle 11. Clears the audit queue for the work
-item; no remediation triggered.
+Singleton claim operation per `hitl-principles.md` principle 6. Mutually
+exclusive with `review` and `advise`.
 """
 
 from __future__ import annotations
@@ -15,13 +15,11 @@ def run(
     controller: Controller,
     *,
     issue_id: str,
-    gate: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.CONFIRM,
+        operation=Operation.REVIEW_AUDIT,
         issue_id=issue_id,
-        gate=gate,
         actor=actor,
     )
     return dispatch(controller, request)

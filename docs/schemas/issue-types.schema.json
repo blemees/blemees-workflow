@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://blemees.io/schemas/blemees-workflow/issue-types.schema.json",
   "title": "blemees-workflow issue-type directory",
-  "description": "Schema for the shared `issue-types.json` file. Provides editor / IDE feedback; cross-reference checks (each process's `issue_types` entries resolve here) run in `workflow validate`.",
+  "description": "Schema for the shared `issue-types.json` file. Provides editor / IDE feedback; cross-reference checks (each process's `issue_types` entries resolve here) run in `workflow validate-workflow`.",
   "type": "object",
   "additionalProperties": true,
   "required": ["types"],

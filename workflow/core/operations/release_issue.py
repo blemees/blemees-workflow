@@ -1,8 +1,7 @@
-"""revoke — human declares an audit-level action wrong; remediation fires.
+"""release — agent gives up the claim on an issue.
 
-Per `hitl-principles.md` principle 11. The `on_revoke` procedure named in
-the catalog row determines the remediation; this operation surfaces the
-declaration and clears the audit-pending marker.
+Symmetric to `claim`. Used when the agent voluntarily steps off the item;
+the resting state is preserved (release is not an advance).
 """
 
 from __future__ import annotations
@@ -16,15 +15,11 @@ def run(
     controller: Controller,
     *,
     issue_id: str,
-    gate: str,
-    body: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.REVOKE,
+        operation=Operation.RELEASE_ISSUE,
         issue_id=issue_id,
-        gate=gate,
-        body_text=body,
         actor=actor,
     )
     return dispatch(controller, request)

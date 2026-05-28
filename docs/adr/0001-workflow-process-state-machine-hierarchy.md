@@ -21,7 +21,7 @@ Adopt a three-level domain hierarchy with one word per level:
 | Level | Term | Means | Python |
 |---|---|---|---|
 | top | **Workflow** | the collection of related processes that share roles and trust grants; lives in one `--workflow-dir` | `Workflow` (the registry of processes) |
-| middle | **Process** | one named business activity — refinement, inner-loop, release — with its own state machine + HCP catalog + trust grants | `Process` (the runtime bundle for one process) |
+| middle | **Process** | one named business activity — refinement, inner-loop, release — with its own state machine + human-gate catalog + trust grants | `Process` (the runtime bundle for one process) |
 | bottom | **State machine** | the state graph for one process — states, transitions, HITL markers | `StateMachine` (parsed from `<name>-states.json`) |
 
 Plus matching renames for tool-side names where the old terminology overlapped:
@@ -29,7 +29,7 @@ Plus matching renames for tool-side names where the old terminology overlapped:
 - `WorkflowBackend` → `TrackerBackend` (it's a protocol for issue-tracker backends)
 - `WorkItemState`, `WorkItemFilters`, `work_item_id`, `create_work_item` → `IssueState`, `IssueFilters`, `issue_id`, `create_issue` (every named backend — GitHub, GitLab, Linear, Jira — calls it an "issue")
 
-The serialized state machine on disk is named `<name>-states.json`, not `<name>-process.json` or `<name>-workflow.json`. The other process artifacts already follow the same `<content>.json` pattern (`<name>-hcps.json`, `roles.json`). A process is the union of those files, not any one of them.
+The serialized state machine on disk is named `<name>-states.json`, not `<name>-process.json` or `<name>-workflow.json`. The other process artifacts already follow the same `<content>.json` pattern (`<name>-human-gates.json`, `roles.json`). A process is the union of those files, not any one of them.
 
 The package name (`workflow`), CLI command name (`workflow`), and agent-home directory (`.workflow/`) stay as `workflow` — they describe the tool, not the domain. `WorkflowError` (exception base) and the `--workflow-dir` flag (singular: the directory contains one workflow) also stay.
 

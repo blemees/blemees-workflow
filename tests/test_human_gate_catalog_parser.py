@@ -1,4 +1,4 @@
-"""HCP catalog parser tests — schema is policy-only; structural info
+"""HumanGate catalog parser tests — schema is policy-only; structural info
 (source state / destinations / triggering roles / reversibility) is
 derived from the paired state machine via `StateMachine.gate_*`."""
 
@@ -9,26 +9,26 @@ from pathlib import Path
 
 import pytest
 
-from workflow.core.model.hcp import HCPLevel, HCPType
-from workflow.core.parser.hcp_catalog import parse_hcp_catalog
+from workflow.core.model.human_gate import HumanGateLevel, HumanGateType
+from workflow.core.parser.human_gate_catalog import parse_human_gate_catalog
 from workflow.errors import ParseError
 
 
 def test_missing_file_yields_empty_catalog(
     refinement_hcp_catalog_path: Path,
 ) -> None:
-    """Pre-HITL workflows have no hcps.json; parser must return empty rather than raise."""
+    """Pre-HITL workflows have no gates.json; parser must return empty rather than raise."""
     if refinement_hcp_catalog_path.exists():
         pytest.skip(
             "Catalog has been created post-migration; this test verifies pre-migration behavior."
         )
-    catalog = parse_hcp_catalog(refinement_hcp_catalog_path)
+    catalog = parse_human_gate_catalog(refinement_hcp_catalog_path)
     assert catalog.entries == {}
     assert catalog.source_path == str(refinement_hcp_catalog_path)
 
 
 BINARY_HCP_CATALOG = {
-    "hcps": [
+    "human_gates": [
         {
             "gate_name": "ready_for_dev",
             "type": "authority",
@@ -42,21 +42,21 @@ BINARY_HCP_CATALOG = {
 
 
 def test_parse_binary_hcp_catalog() -> None:
-    catalog = parse_hcp_catalog(json.dumps(BINARY_HCP_CATALOG))
+    catalog = parse_human_gate_catalog(json.dumps(BINARY_HCP_CATALOG))
     assert "ready_for_dev" in catalog.entries
 
-    hcp = catalog.entries["ready_for_dev"]
-    assert hcp.gate_name == "ready_for_dev"
-    assert hcp.hcp_type is HCPType.AUTHORITY
-    assert HCPLevel.BLOCK in hcp.allowed_levels
-    assert HCPLevel.AUDIT in hcp.allowed_levels
-    assert hcp.default_level is HCPLevel.BLOCK
-    assert hcp.agent_prepares_path == "dor.md"
-    assert hcp.rationale == "The DoR is the safety contract with inner-loop."
+    gate = catalog.entries["ready_for_dev"]
+    assert gate.gate_name == "ready_for_dev"
+    assert gate.gate_type is HumanGateType.AUTHORITY
+    assert HumanGateLevel.BLOCK in gate.allowed_levels
+    assert HumanGateLevel.AUDIT in gate.allowed_levels
+    assert gate.default_level is HumanGateLevel.BLOCK
+    assert gate.agent_prepares_path == "dor.md"
+    assert gate.rationale == "The DoR is the safety contract with inner-loop."
 
 
 VERDICT_HCP_CATALOG = {
-    "hcps": [
+    "human_gates": [
         {
             "gate_name": "experiment-verdict",
             "type": "authority",
@@ -70,22 +70,22 @@ VERDICT_HCP_CATALOG = {
 
 
 def test_parse_verdict_hcp_catalog() -> None:
-    catalog = parse_hcp_catalog(json.dumps(VERDICT_HCP_CATALOG))
+    catalog = parse_human_gate_catalog(json.dumps(VERDICT_HCP_CATALOG))
     assert "experiment-verdict" in catalog.entries
-    hcp = catalog.entries["experiment-verdict"]
-    assert hcp.allowed_levels == [HCPLevel.BLOCK]
+    gate = catalog.entries["experiment-verdict"]
+    assert gate.allowed_levels == [HumanGateLevel.BLOCK]
 
 
 def test_truncated_json_fails_loudly() -> None:
     """The whole motivation for JSON: truncated files don't parse."""
     truncated = json.dumps(BINARY_HCP_CATALOG)[:-10]  # chop off the closing braces
     with pytest.raises(ParseError):
-        parse_hcp_catalog(truncated)
+        parse_human_gate_catalog(truncated)
 
 
 def test_default_level_must_be_in_allowed_levels() -> None:
     bad = {
-        "hcps": [
+        "human_gates": [
             {
                 "gate_name": "x",
                 "type": "authority",
@@ -95,12 +95,12 @@ def test_default_level_must_be_in_allowed_levels() -> None:
         ],
     }
     with pytest.raises(ParseError, match="default_level"):
-        parse_hcp_catalog(json.dumps(bad))
+        parse_human_gate_catalog(json.dumps(bad))
 
 
 def test_unknown_type_rejected() -> None:
     bad = {
-        "hcps": [
+        "human_gates": [
             {
                 "gate_name": "x",
                 "type": "uncertainty",  # not in the four-type taxonomy
@@ -110,12 +110,12 @@ def test_unknown_type_rejected() -> None:
         ],
     }
     with pytest.raises(ParseError, match="type"):
-        parse_hcp_catalog(json.dumps(bad))
+        parse_human_gate_catalog(json.dumps(bad))
 
 
 def test_missing_required_field_rejected() -> None:
     bad = {
-        "hcps": [
+        "human_gates": [
             {
                 "gate_name": "x",
                 # missing type
@@ -125,12 +125,12 @@ def test_missing_required_field_rejected() -> None:
         ],
     }
     with pytest.raises(ParseError):
-        parse_hcp_catalog(json.dumps(bad))
+        parse_human_gate_catalog(json.dumps(bad))
 
 
 def test_duplicate_gate_names_rejected() -> None:
     bad = {
-        "hcps": [
+        "human_gates": [
             {
                 "gate_name": "x",
                 "type": "authority",
@@ -146,13 +146,13 @@ def test_duplicate_gate_names_rejected() -> None:
         ],
     }
     with pytest.raises(ParseError, match="duplicate"):
-        parse_hcp_catalog(json.dumps(bad))
+        parse_human_gate_catalog(json.dumps(bad))
 
 
 def test_empty_catalog_returns_empty() -> None:
     # The top-level `process` field was removed — process name now derives
     # from the filename stem when loading from disk. From a raw string,
     # the default is "unnamed".
-    catalog = parse_hcp_catalog(json.dumps({"hcps": []}))
+    catalog = parse_human_gate_catalog(json.dumps({"human_gates": []}))
     assert catalog.entries == {}
     assert catalog.process_name == "unnamed"

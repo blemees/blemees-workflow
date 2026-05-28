@@ -1,7 +1,8 @@
-"""audit — human claims post-action audit.
+"""approve — human authorizes a catalogued human gate; transition fires atomically.
 
-Singleton claim operation per `hitl-principles.md` principle 6. Mutually
-exclusive with `review` and `advise`.
+Per `hitl-principles.md` principle 5. For binary gates, the destination is
+implicit (the gate's single destination). For verdict-style gates, the human
+names the destination.
 """
 
 from __future__ import annotations
@@ -15,11 +16,17 @@ def run(
     controller: Controller,
     *,
     issue_id: str,
+    gate: str,
+    destination: str | None = None,
+    body: str | None = None,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.AUDIT,
+        operation=Operation.APPROVE_BLOCKED,
         issue_id=issue_id,
+        gate=gate,
+        destination=destination,
+        body_text=body,
         actor=actor,
     )
     return dispatch(controller, request)

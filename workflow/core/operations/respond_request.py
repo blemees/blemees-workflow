@@ -1,8 +1,7 @@
-"""approve — human authorizes a catalogued HCP; transition fires atomically.
+"""resolve — human provides input for a recognized HITL moment.
 
-Per `hitl-principles.md` principle 5. For binary HCPs, the destination is
-implicit (the gate's single destination). For verdict-style HCPs, the human
-names the destination.
+Per `hitl-principles.md` principles 5 and 11. Clears the awaiting-input
+marker; the agent reads the response and decides the next action.
 """
 
 from __future__ import annotations
@@ -16,16 +15,12 @@ def run(
     controller: Controller,
     *,
     issue_id: str,
-    gate: str,
-    destination: str | None = None,
-    body: str | None = None,
+    body: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.APPROVE,
+        operation=Operation.RESPOND_REQUEST,
         issue_id=issue_id,
-        gate=gate,
-        destination=destination,
         body_text=body,
         actor=actor,
     )

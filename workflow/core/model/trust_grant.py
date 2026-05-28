@@ -1,4 +1,4 @@
-"""Trust grant model — per-team relaxations of catalogued HCPs.
+"""Trust grant model — per-team relaxations of catalogued human gates.
 
 Mirrors `trust-grant-schema.md`. Trust grants live outside the workflow repo
 (in a team's own configuration). The YAML loader produces these dataclasses;
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from workflow.core.model.hcp import HCPLevel
+from workflow.core.model.human_gate import HumanGateLevel
 
 
 @dataclass
@@ -50,7 +50,7 @@ class TrustGrantParameters:
 
 @dataclass
 class TrustGrant:
-    """A per-team override of a catalogued HCP's default level / parameters.
+    """A per-team override of a catalogued human gate's default level / parameters.
 
     Mandatory fields per trust-grant-schema.md § 3. The validator enforces:
 
@@ -61,10 +61,10 @@ class TrustGrant:
     - `granted_by` is a human identity.
     """
 
-    control_point: str  # Gate name (matches HCP.gate_name)
+    control_point: str  # Gate name (matches HumanGate.gate_name)
     workflow: str
     team: str
-    current_level: HCPLevel
+    current_level: HumanGateLevel
     parameters: TrustGrantParameters
     evidence: list[Evidence]
     granted_by: str  # Human identity (not an agent)

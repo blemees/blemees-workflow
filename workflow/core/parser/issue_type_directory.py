@@ -24,7 +24,7 @@ via `gh issue create --type`. Other backends may add similar optional
 fields without disturbing the shape.
 
 Missing file → empty directory + debug log (matches the pattern for
-roles.json and HCP catalogs).
+roles.json and HumanGate catalogs).
 """
 
 from __future__ import annotations

@@ -41,8 +41,8 @@ class IssueState:
     audit_pending: str | None = None  # gate_name pending retroactive review
     auditing: bool = False  # singleton: a human has claimed post-action audit
     # Recognized markers
-    awaiting_input: bool = False  # generic queue marker for recognized HCPs
-    input_topic: str | None = None  # topic the agent is awaiting input on
+    awaiting_input: bool = False  # generic queue marker for recognized input requests
+    human_input: str | None = None  # topic the agent is awaiting input on
     advising: bool = False  # singleton: a human is advising
     # Misc
     extras: dict[str, str] = field(default_factory=dict)  # backend-specific extras
@@ -71,16 +71,16 @@ class MarkerChange:
     set_awaiting_input: bool | None = None
     # Companion to set_awaiting_input — records the topic the agent is
     # awaiting input on (`hitl:topic-<topic>` on GitHub). Cleared via
-    # `clear_input_topic` when respond fires.
-    set_input_topic: str | None = None
-    clear_input_topic: bool = False
+    # `clear_human_input` when respond fires.
+    set_human_input: str | None = None
+    clear_human_input: bool = False
     set_advising: bool | None = None
     # Outcome markers (audit-trace labels in GitHub encoding; signal events elsewhere)
     record_approval: str | None = None  # gate approved (destination is captured via set_state)
     record_rejection: str | None = None  # gate rejected
     record_confirm: str | None = None  # destination checked post-hoc
     record_revoke: str | None = None  # destination revoked
-    record_response: bool = False  # recognized HCP resolved
+    record_response: bool = False  # recognized HumanGate resolved
     # Issue lifecycle on the tracker. Set when advancing into a terminal
     # state whose taxonomy means "done" (not `iterated`, which is a
     # cross-process handoff). The tracker closes the issue with the
@@ -254,7 +254,7 @@ class TrackerBackend(Protocol):
     def list_labels(self) -> list[str]:
         """Return the names of every label currently defined on the backend repo.
 
-        Used by `setup-labels` to skip labels that already exist, and by any
+        Used by `setup-github` to skip labels that already exist, and by any
         future audit that wants to compare the framework's required set
         against the repo's actual set.
         """
@@ -296,7 +296,7 @@ class TrackerBackend(Protocol):
 
         Returns True if a new label was created, False if it already existed.
         Never overwrites an existing label's color or description — used by
-        `setup-labels` for one-shot provisioning, where the user's
+        `setup-github` for one-shot provisioning, where the user's
         customizations on existing labels must be preserved.
 
         If `color` is None, the backend selects a default color appropriate

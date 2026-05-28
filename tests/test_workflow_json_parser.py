@@ -19,7 +19,6 @@ from workflow.errors import ParseError
 
 def _minimal() -> dict:
     return {
-        "name": "t",
         "states": {
             "a": {"class": "resting", "reversibility": "reversible-fast"},
             "b": {
@@ -43,7 +42,7 @@ def _minimal() -> dict:
 
 
 def test_parses_minimal_workflow() -> None:
-    workflow = parse_state_machine(json.dumps(_minimal()))
+    workflow = parse_state_machine(json.dumps(_minimal()), name="t")
     assert workflow.name == "t"
     assert workflow.states["a"].state_class is StateClass.RESTING
     assert workflow.states["a"].roles == ()
@@ -122,11 +121,11 @@ def test_hitl_field_rejected() -> None:
         parse_state_machine(json.dumps(bad))
 
 
-def test_gate_alone_makes_transition_gated() -> None:
-    """Adding `gate` to a transition marks it as HITL-gated; no `hitl`
+def test_human_gate_alone_makes_transition_gated() -> None:
+    """Adding `human_gate` to a transition marks it as HITL-gated; no `hitl`
     field needed."""
     spec = _minimal()
-    spec["transitions"][2]["gate"] = "ship"
+    spec["transitions"][2]["human_gate"] = "ship"
     workflow = parse_state_machine(json.dumps(spec))
     advance = workflow.transitions[2]
     assert advance.gate_name == "ship"
@@ -157,10 +156,10 @@ def test_kind_field_on_transition_rejected() -> None:
 
 def test_gates_in_legend_built_from_gated_transitions() -> None:
     spec = _minimal()
-    # Make b → c a HITL transition by setting `gate` (and update
+    # Make b → c a HITL transition by setting `human_gate` (and update
     # reversibility on c).
     spec["states"]["c"]["reversibility"] = "reversible-slow"
-    spec["transitions"][2]["gate"] = "ship"
+    spec["transitions"][2]["human_gate"] = "ship"
     workflow = parse_state_machine(json.dumps(spec))
     assert workflow.gates_in_legend == {"ship": ReversibilityClass.REVERSIBLE_SLOW}
 
@@ -257,23 +256,23 @@ def test_mark_pr_ready_parses_on_resting() -> None:
     assert workflow.states["a"].mark_pr_ready is True
 
 
-def test_input_topics_only_on_working_states() -> None:
+def test_human_inputs_only_on_working_states() -> None:
     spec = _minimal()
-    spec["states"]["a"]["input_topics"] = ["general"]  # `a` is resting
-    with pytest.raises(ParseError, match="input_topics.*only valid on working"):
+    spec["states"]["a"]["human_inputs"] = ["general"]  # `a` is resting
+    with pytest.raises(ParseError, match="human_inputs.*only valid on working"):
         parse_state_machine(json.dumps(spec))
 
 
-def test_input_topics_parses_on_working_state() -> None:
+def test_human_inputs_parses_on_working_state() -> None:
     spec = _minimal()
-    spec["states"]["b"]["input_topics"] = ["general", "clarify-scope"]
+    spec["states"]["b"]["human_inputs"] = ["general", "clarify-scope"]
     workflow = parse_state_machine(json.dumps(spec))
-    assert workflow.states["b"].input_topics == ("general", "clarify-scope")
+    assert workflow.states["b"].human_inputs == ("general", "clarify-scope")
 
 
-def test_input_topics_duplicate_rejected() -> None:
+def test_human_inputs_duplicate_rejected() -> None:
     spec = _minimal()
-    spec["states"]["b"]["input_topics"] = ["general", "general"]
+    spec["states"]["b"]["human_inputs"] = ["general", "general"]
     with pytest.raises(ParseError, match="duplicate topic"):
         parse_state_machine(json.dumps(spec))
 

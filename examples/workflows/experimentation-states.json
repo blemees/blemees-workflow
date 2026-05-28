@@ -1,6 +1,5 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "name": "experimentation",
   "states": {
     "measuring": {
       "class": "resting",

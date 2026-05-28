@@ -1,10 +1,10 @@
-"""Input-topic directory parser — reads `input-topics.json`.
+"""Human-input directory parser — reads `human-inputs.json`.
 
 Shape:
 
 ```json
 {
-  "topics": {
+  "human_inputs": {
     "general": {
       "name": "General",
       "description": "Catch-all for off-catalog questions."
@@ -30,14 +30,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from workflow.core.model.input_topic import InputTopic, InputTopicDirectory
+from workflow.core.model.human_input import HumanInput, HumanInputDirectory
 from workflow.errors import ParseError
 
 logger = logging.getLogger(__name__)
 
 
-def parse_input_topic_directory(source: str | Path) -> InputTopicDirectory:
-    """Parse an input-topics file (or JSON string) into an `InputTopicDirectory`.
+def parse_human_input_directory(source: str | Path) -> HumanInputDirectory:
+    """Parse a human-inputs file (or JSON string) into a `HumanInputDirectory`.
 
     Returns an empty directory if `source` is a path that does not exist.
     Raises `ParseError` on malformed JSON or schema violations.
@@ -50,12 +50,12 @@ def parse_input_topic_directory(source: str | Path) -> InputTopicDirectory:
     ):
         path = Path(source)
         if not path.exists():
-            logger.debug("Input topics directory not found at %s; returning empty.", path)
-            return InputTopicDirectory(source_path=str(path))
+            logger.debug("Human-input directory not found at %s; returning empty.", path)
+            return HumanInputDirectory(source_path=str(path))
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise ParseError(f"Cannot read input topics directory {path}: {exc}") from exc
+            raise ParseError(f"Cannot read human-input directory {path}: {exc}") from exc
         source_path = str(path)
     else:
         text = str(source)
@@ -64,50 +64,50 @@ def parse_input_topic_directory(source: str | Path) -> InputTopicDirectory:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ParseError(
-            f"Input topics directory{f' at {source_path}' if source_path else ''} "
+            f"Human-input directory{f' at {source_path}' if source_path else ''} "
             f"is not valid JSON: {exc}"
         ) from exc
 
     if not isinstance(data, dict):
         raise ParseError(
-            f"Input topics directory must be a JSON object at the top level "
+            f"Human-input directory must be a JSON object at the top level "
             f"(got {type(data).__name__})."
         )
 
-    topics_raw = data.get("topics", {})
-    if not isinstance(topics_raw, dict):
+    entries_raw = data.get("human_inputs", {})
+    if not isinstance(entries_raw, dict):
         raise ParseError(
-            f"Input topics directory `topics` must be an object "
-            f"(got {type(topics_raw).__name__})."
+            f"Human-input directory `human_inputs` must be an object "
+            f"(got {type(entries_raw).__name__})."
         )
 
-    directory = InputTopicDirectory(source_path=source_path)
-    for topic_id, entry in topics_raw.items():
-        if not isinstance(topic_id, str) or not topic_id:
+    directory = HumanInputDirectory(source_path=source_path)
+    for human_input_id, entry in entries_raw.items():
+        if not isinstance(human_input_id, str) or not human_input_id:
             raise ParseError(
-                f"Input topic id must be a non-empty string (got {topic_id!r})."
+                f"Human-input id must be a non-empty string (got {human_input_id!r})."
             )
         if not isinstance(entry, dict):
             raise ParseError(
-                f"Input topic {topic_id!r}: entry must be an object "
+                f"Human input {human_input_id!r}: entry must be an object "
                 f"(got {type(entry).__name__})."
             )
-        directory.topics[topic_id] = _parse_topic(topic_id, entry)
+        directory.entries[human_input_id] = _parse_entry(human_input_id, entry)
 
     return directory
 
 
-def _parse_topic(topic_id: str, entry: dict[str, Any]) -> InputTopic:
+def _parse_entry(human_input_id: str, entry: dict[str, Any]) -> HumanInput:
     name = entry.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ParseError(
-            f"Input topic {topic_id!r}: `name` is required and must be non-empty."
+            f"Human input {human_input_id!r}: `name` is required and must be non-empty."
         )
 
     description = entry.get("description")
     if not isinstance(description, str) or not description.strip():
         raise ParseError(
-            f"Input topic {topic_id!r}: `description` is required and must be non-empty."
+            f"Human input {human_input_id!r}: `description` is required and must be non-empty."
         )
 
     agent_prepares = entry.get("agent_prepares")
@@ -115,7 +115,7 @@ def _parse_topic(topic_id: str, entry: dict[str, Any]) -> InputTopic:
         not isinstance(agent_prepares, str) or not agent_prepares.strip()
     ):
         raise ParseError(
-            f"Input topic {topic_id!r}: `agent_prepares` must be a non-empty string if present."
+            f"Human input {human_input_id!r}: `agent_prepares` must be a non-empty string if present."
         )
     if isinstance(agent_prepares, str):
         agent_prepares = agent_prepares.strip()
@@ -125,13 +125,13 @@ def _parse_topic(topic_id: str, entry: dict[str, Any]) -> InputTopic:
         not isinstance(rationale, str) or not rationale.strip()
     ):
         raise ParseError(
-            f"Input topic {topic_id!r}: `rationale` must be a non-empty string if present."
+            f"Human input {human_input_id!r}: `rationale` must be a non-empty string if present."
         )
     if isinstance(rationale, str):
         rationale = rationale.strip()
 
-    return InputTopic(
-        topic_id=topic_id,
+    return HumanInput(
+        human_input_id=human_input_id,
         name=name.strip(),
         description=description.strip(),
         agent_prepares=agent_prepares,

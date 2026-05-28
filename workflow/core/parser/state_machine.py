@@ -12,7 +12,6 @@ are gone — the schema demands intent.
 
 ```json
 {
-  "name": "refinement",
   "states": {
     "raw": {
       "class": "resting",
@@ -50,11 +49,12 @@ are gone — the schema demands intent.
 ## Field reference
 
 ### Top-level
-- `name` (string, optional): workflow name. Defaults to the file's stem with
-  `-states` stripped. The HCP catalog path is derived from this by convention
-  (`<name>-hcps.json`).
 - `states` (object, required): map of state-id → state spec.
 - `transitions` (list, required): ordered list of transition specs.
+
+The process name is derived from the filename stem (`<process>-states.json`)
+and is not authored in the JSON. The human-gate catalog path follows the
+same convention: `<process>-human-gates.json`.
 
 ### States
 - `class` (string, required): `"resting"` | `"working"` | `"terminal"`.
@@ -82,13 +82,14 @@ are gone — the schema demands intent.
 - `destination` (string, required): state id or `"[*]"`.
 - `type` (string, required): `"claim"` | `"advance"` | `"event"`.
 - `label` (string, required): the human-readable transition label.
-- `hitl` (bool, optional, default false): marks the transition as a HITL gate.
-  Per `hitl-principles.md`, only claim and role-action transitions are
-  typically gated; the validator enforces consistency with the HCP catalog.
+- `human_gate` (string, optional): the human-gate catalog's `gate_name` for
+  this gate. Presence marks the transition as HITL-gated; absence means
+  ungated. Per `hitl-principles.md`, only claim and role-action transitions
+  are typically gated; the validator enforces consistency with the catalog.
 The legend that mermaid uses (HITL gates block, cross-process interfaces
 block) is **not** authored in JSON. Both legends are derived: HITL gates
-from the union of `hitl=true` transitions and the destination state's
-reversibility; cross-process from each state's `handoff` flag and
+from the union of transitions carrying `human_gate` and the destination
+state's reversibility; cross-process from each state's `handoff` flag and
 `spawns` field. The emitter regenerates them for visualization.
 """
 
@@ -157,7 +158,14 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
         source_path = str(path)
         if name is None:
             stem = path.stem
-            name = stem[: -len("-workflow")] if stem.endswith("-workflow") else stem
+            # Canonical filename convention is `<process>-states.json`;
+            # legacy `<process>-workflow.json` is supported for older trees.
+            if stem.endswith("-states"):
+                name = stem[: -len("-states")]
+            elif stem.endswith("-workflow"):
+                name = stem[: -len("-workflow")]
+            else:
+                name = stem
     else:
         text = str(source)
 
@@ -174,12 +182,10 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
             f"(got {type(data).__name__})."
         )
 
-    declared_name = data.get("name")
-    if declared_name is not None and not isinstance(declared_name, str):
-        raise ParseError(
-            f"`name` must be a string (got {type(declared_name).__name__})."
-        )
-    name = declared_name or name or "unnamed"
+    # Process name is always derived — from the `name` arg (filename stem
+    # for file-loaded workflows) or "unnamed" for inline JSON without a
+    # caller-supplied name. The JSON itself doesn't carry it.
+    name = name or "unnamed"
 
     # Process-level `issue_types` was removed — types now live exclusively
     # on working states (the umbrella is derivable as the union).
@@ -415,28 +421,28 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"states (terminals have already reached their final form)."
         )
 
-    input_topics_raw = spec.get("input_topics", [])
-    if not isinstance(input_topics_raw, list):
+    human_inputs_raw = spec.get("human_inputs", [])
+    if not isinstance(human_inputs_raw, list):
         raise ParseError(
-            f"State {state_id!r}: `input_topics` must be a list of topic ids "
-            f"(got {type(input_topics_raw).__name__})."
+            f"State {state_id!r}: `human_inputs` must be a list of topic ids "
+            f"(got {type(human_inputs_raw).__name__})."
         )
-    input_topics_parsed: list[str] = []
-    for i, t in enumerate(input_topics_raw):
+    human_inputs_parsed: list[str] = []
+    for i, t in enumerate(human_inputs_raw):
         if not isinstance(t, str) or not t.strip():
             raise ParseError(
-                f"State {state_id!r}: `input_topics[{i}]` must be a non-empty "
+                f"State {state_id!r}: `human_inputs[{i}]` must be a non-empty "
                 f"string (got {t!r})."
             )
         cleaned = t.strip()
-        if cleaned in input_topics_parsed:
+        if cleaned in human_inputs_parsed:
             raise ParseError(
-                f"State {state_id!r}: duplicate topic {cleaned!r} in `input_topics`."
+                f"State {state_id!r}: duplicate topic {cleaned!r} in `human_inputs`."
             )
-        input_topics_parsed.append(cleaned)
-    if input_topics_parsed and state_class is not StateClass.WORKING:
+        human_inputs_parsed.append(cleaned)
+    if human_inputs_parsed and state_class is not StateClass.WORKING:
         raise ParseError(
-            f"State {state_id!r}: `input_topics` is only valid on working "
+            f"State {state_id!r}: `human_inputs` is only valid on working "
             f"states (state class is {state_class.value!r})."
         )
 
@@ -467,7 +473,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         handoff=handoff_raw,
         spawns=spawns,
         mark_pr_ready=mark_pr_ready_raw,
-        input_topics=tuple(input_topics_parsed),
+        human_inputs=tuple(human_inputs_parsed),
         notes=notes,
     )
 
@@ -602,22 +608,22 @@ def _parse_transition(
         raise ParseError(f"transitions[{idx}]: `label` must be a string if present.")
     label = label_raw.strip() if isinstance(label_raw, str) else ""
 
-    # The standalone `hitl` flag was merged into `gate`: presence of `gate`
-    # IS the HITL marker. Reject `hitl` outright so authors don't carry
-    # the redundant field forward.
+    # The standalone `hitl` flag was merged into `human_gate`: presence of
+    # `human_gate` IS the HITL marker. Reject `hitl` outright so authors
+    # don't carry the redundant field forward.
     if "hitl" in spec:
         raise ParseError(
             f"transitions[{idx}]: `hitl` was removed. The presence of "
-            f"`gate` now marks a transition as HITL-gated — set `gate` "
-            f"to the HCP catalog `gate_name`, omit it for ungated."
+            f"`human_gate` now marks a transition as HITL-gated — set "
+            f"`human_gate` to the human-gate catalog `gate_name`, omit it for ungated."
         )
 
     gate_name: str | None = None
-    gate_raw = spec.get("gate")
+    gate_raw = spec.get("human_gate")
     if gate_raw is not None:
         if not isinstance(gate_raw, str) or not gate_raw.strip():
             raise ParseError(
-                f"transitions[{idx}]: `gate` must be a non-empty string if present."
+                f"transitions[{idx}]: `human_gate` must be a non-empty string if present."
             )
         gate_name = gate_raw.strip()
 

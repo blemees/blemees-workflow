@@ -4,7 +4,7 @@ The language this codebase uses. Update inline when terms get resolved or refine
 
 ## Workflow
 
-The whole collection: one or more processes plus the shared roles, HCP catalogs, and trust grants that they reference together. Lives in one directory on disk (the `--workflow-dir`).
+The whole collection: one or more processes plus the shared roles, human-gate catalogs, and trust grants that they reference together. Lives in one directory on disk (the `--workflow-dir`).
 
 The `Workflow` Python class is the registry of processes — it discovers and loads each process on demand.
 
@@ -13,7 +13,7 @@ The `Workflow` Python class is the registry of processes — it discovers and lo
 A single named business activity that moves work through a state machine. Examples: refinement, inner-loop, release, incident-response. Each process is defined by:
 
 - A state machine (states + transitions + HITL gate markers)
-- An HCP catalog (the gates' levels, reversibility, triggering roles)
+- A human-gate catalog (the gates' levels, reversibility, triggering roles)
 - Trust grants relaxing those gates per team (optional)
 - Roles referenced from the shared role directory
 
@@ -48,25 +48,27 @@ A directed edge from one state to another, with a typed label. Four types:
 
 Per `docs/state-machine-principles.md` §2.
 
-## HCP (Human Control Point)
+## Human gate
 
-A gated transition that requires a human signal before firing. Authored as `hitl: true` on a transition, with a `gate` field naming the HCP catalog row. Each catalog row declares:
+A gated transition that requires a human signal before firing. Authored by setting a `human_gate` field on a transition — its value names a row in the per-process human-gate catalog (`<process>-human-gates.json`). Presence of `human_gate` IS the HITL marker; there is no separate `hitl` boolean. Each catalog row declares:
 
 - Default level (`block` for pre-action gating, `audit` for post-action review)
-- Reversibility class (inherited from destination state)
-- Triggering role (who fires the gate)
 - Allowed levels (subset of `block`, `audit`)
+- Gate type (`authority` / `knowledge` / `judgment` / `reality`)
 - Path to the agent-prepares template
+- Optional rationale
+
+Structural attributes — source state, destinations, triggering roles, reversibility class — are not authored on the catalog row; they are derived from the paired state machine via `StateMachine.gate_*` helpers.
 
 Per `docs/state-machine-principles.md` §11 and the upstream hitl-principles.md.
 
 ## Gate
 
-Synonym for HCP. The `gate_name` is the key used to look up an HCP in the catalog, in transition declarations, and in trust grants.
+Shorthand for "human gate". The `gate_name` is the key used to look up a gate in the catalog, in transition declarations (`human_gate: <name>`), and in trust grants (`control_point: <name>`).
 
 ## Role
 
-A framework-defined actor identity (e.g., `product-manager`, `developer`, `peer-reviewer`). Roles are declared once in the shared `roles.json` and referenced from working states' `roles` lists and HCP `triggering_role` fields. Roles map to backend handles (GitHub usernames, etc.) per team config — that mapping is outside the workflow tool's scope.
+A framework-defined actor identity (e.g., `product-manager`, `developer`, `peer-reviewer`). Roles are declared once in the shared `roles.json` and referenced from working states' `roles` lists. Roles map to backend handles (GitHub usernames, etc.) per team config — that mapping is outside the workflow tool's scope. A gate's triggering role is derived from the `roles` of its source state, not authored on the catalog row.
 
 ## Agent
 
@@ -86,15 +88,15 @@ The system that stores issue state and provides query/mutation primitives — Gi
 
 ## Trust grant
 
-A per-team relaxation of an HCP's default level. The catalog defines a gate's default; a team that has earned discretion can author a trust grant flipping the level (e.g., block → audit) with mandatory evidence, expiry, and revocation procedure.
+A per-team relaxation of a human gate's default level. The catalog defines a gate's default; a team that has earned discretion can author a trust grant flipping the level (e.g., block → audit) with mandatory evidence, expiry, and revocation procedure.
 
 Lives in `trust-grants/<process>/<gate>.json`. Per the upstream trust-grant-schema.md.
 
 ## Next actions
 
-Every single-item command (`view`, `create`, `claim`, `release`, `advance`, `request-input`, `comment`) ends its human-readable output with a `Next actions:` block describing what the agent could do next from the current state. The data behind it lives in `workflow.core.inspector.available_transitions` — a read-only function that walks the state machine's outgoing transitions and enriches each with the relevant HCP row and any active trust grant. The block is informational on read-only commands and best-effort (silent on failure) so commands that don't strictly need workflow context still work outside a known workflow.
+Every single-item command (`view-issue`, `create-issue`, `claim-issue`, `release-issue`, `advance-issue`, `request-input`, `post-comment`) ends its human-readable output with a `Next actions:` block describing what the agent could do next from the current state. The data behind it lives in `workflow.core.inspector.available_transitions` — a read-only function that walks the state machine's outgoing transitions and enriches each with the relevant human-gate row and any active trust grant. The block is informational on read-only commands and best-effort (silent on failure) so commands that don't strictly need workflow context still work outside a known workflow.
 
-For each gated transition the block surfaces: gate name, default vs effective level (so trust-grant relaxations are visible), triggering role, destination class + reversibility + terminal taxonomy, and the path to the `agent_prepares` template the agent should attach via `--packet-from`. For resting states, the block emits a `claim` suggestion (auto-resolved when unambiguous). For working states with a `wip_from` marker, it also surfaces `release` and where it returns to.
+For each gated transition the block surfaces: gate name, default vs effective level (so trust-grant relaxations are visible), triggering role, destination class + reversibility + terminal taxonomy, and the path to the `agent_prepares` template the agent should attach via `--packet-from`. For resting states, the block emits a `claim-issue` suggestion (auto-resolved when unambiguous). For working states with a `wip_from` marker, it also surfaces `release-issue` and where it returns to.
 
 This means the agent does not have to consult the process documentation to figure out the next command — every operation that surfaces an issue's state surfaces its options too.
 
@@ -102,7 +104,7 @@ This means the agent does not have to consult the process documentation to figur
 
 `workflow generate-docs` regenerates the agent/human-readable layer of the workflow directory: state-machine diagrams in mermaid, per-process reference docs in markdown, plus shared `roles.md`, `issue-types.md`, and a top-level `README.md` index. All emitted artifacts live alongside the canonical JSON sources.
 
-Per-process markdown (`<name>.md`) contains everything an agent needs to operate on that process without chasing links: issue types accepted, embedded state diagram, states table, transitions table (with HITL level after trust-grant resolution), HCP details, cross-process handoff list, and any active trust grants. The emitter is read-only and deterministic — two runs produce byte-identical output, so pre-commit hooks can verify the checked-in docs are in sync with the JSON.
+Per-process markdown (`<name>.md`) contains everything an agent needs to operate on that process without chasing links: issue types accepted, embedded state diagram, states table, transitions table (with HITL level after trust-grant resolution), human-gate details, cross-process handoff list, and any active trust grants. The emitter is read-only and deterministic — two runs produce byte-identical output, so pre-commit hooks can verify the checked-in docs are in sync with the JSON.
 
 ## Issue type
 
@@ -110,7 +112,7 @@ Issue types are declared at the **working-state** level. Every working state lis
 
 The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).
 
-`workflow create` requires `--type` when the process accepts multiple types; auto-defaults when only one. Issue type is set at creation and **immutable** — if a type needs to change, that's a new issue, not a retype. The validator checks every type id referenced by a working state exists in `issue-types.json`; missing ids are an ERROR, missing directory is a WARNING. The planner checks at claim time that the issue's type is in the destination working state's set — a typed ticket can't be claimed into a working state that doesn't accept its type.
+`workflow create-issue` requires `--type` when the process accepts multiple types; auto-defaults when only one. Issue type is set at creation and **immutable** — if a type needs to change, that's a new issue, not a retype. The validator checks every type id referenced by a working state exists in `issue-types.json`; missing ids are an ERROR, missing directory is a WARNING. The planner checks at claim time that the issue's type is in the destination working state's set — a typed ticket can't be claimed into a working state that doesn't accept its type.
 
 This is how inner-loop's `implementing` (accepts bug/feature/chore), `implementing_experiment` (accepts experiment), `implementing_spike` (accepts spike), and `implementing_hotfix` (accepts hotfix) fan a single ticket into the right working flow.
 
@@ -118,7 +120,7 @@ This is how inner-loop's `implementing` (accepts bug/feature/chore), `implementi
 
 `pr` is a built-in type that maps to GitHub pull-request entities rather than issues. The `IssueType` entry carries `"github_entity": "pull_request"` (default for every other type is `"issue"`); `github_issue_type` is forbidden on a `pull_request` entry because PRs are not a native GitHub Issue Type — the type is implicit in the entity kind.
 
-The PR process declares `"issue_types": ["pr"]`. PRs are created via the same `workflow create` command as issues, with **extra required flags** that drive a framework-applied message format:
+The PR process declares `"issue_types": ["pr"]`. PRs are created via the same `workflow create-issue` command as issues, with **extra required flags** that drive a framework-applied message format:
 
 - `--head BRANCH` (required) — source branch.
 - `--base BRANCH` (optional) — target branch; backend defaults to the repo's default branch when omitted.
@@ -127,7 +129,7 @@ The PR process declares `"issue_types": ["pr"]`. PRs are created via the same `w
 
 The backend dispatches to `create_pull_request` (which shells out to `gh pr create`) rather than `create_issue`. When the initial state is `draft`, the PR is opened in GitHub's draft mode. The `state:<name>` label is attached atomically. The framework does **not** apply a `type:` label or native Issue Type to PRs — the entity kind itself conveys the type.
 
-One ticket can spawn zero (spike findings doc only), one (typical), or many PRs (incident mitigation chain, hotfix + backports, multi-component feature) — the cardinality between an issue and its PRs is **1:N**, and the framework does not gate the parent ticket's advancement on the PR set. Each PR is an independent work item; the agent decides when the parent advances. The spawn from `inner-loop.implementing → pr.draft` is modelled on `pr-states.json` for documentation; agents may also create PRs directly with `workflow create --to draft --head ... --refs ...` (e.g., for backports that don't pass through inner-loop).
+One ticket can spawn zero (spike findings doc only), one (typical), or many PRs (incident mitigation chain, hotfix + backports, multi-component feature) — the cardinality between an issue and its PRs is **1:N**, and the framework does not gate the parent ticket's advancement on the PR set. Each PR is an independent work item; the agent decides when the parent advances. The spawn from `inner-loop.implementing → pr.draft` is modelled on `pr-states.json` for documentation; agents may also create PRs directly with `workflow create-issue --to draft --head ... --refs ...` (e.g., for backports that don't pass through inner-loop).
 
 #### PR draft / ready lifecycle
 
@@ -190,18 +192,18 @@ Our example's `bounced_back` in inner-loop is currently labeled `terminal_taxono
 
 ## Origin marker (`wip-from`)
 
-When `claim` fires, the backend records `wip-from:<source-state>` alongside `wip:<role>`. On `release`, the planner reads this marker and returns the issue to that resting state — the user never specifies a destination, eliminating the footgun of allowing arbitrary state jumps without a valid CLAIM transition.
+When `claim-issue` fires, the backend records `wip-from:<source-state>` alongside `wip:<role>`. On `release-issue`, the planner reads this marker and returns the issue to that resting state — the user never specifies a destination, eliminating the footgun of allowing arbitrary state jumps without a valid CLAIM transition.
 
 A working state can have multiple incoming CLAIM transitions (e.g., `implementing` is claimed from both `ready_for_dev` initially and `staged` for revisions). The marker disambiguates without requiring user input.
 
 Whenever an issue leaves a working state (advance, approve, record-action, release), both `wip:<role>` and `wip-from:<source>` are cleared atomically. Per principle 1, working = exactly one role owns the item; once the issue is resting or terminal, no role owns it.
 
-If the marker drifts (no CLAIM transition from `wip_from` → current state), `release` errors rather than corrupting state.
+If the marker drifts (no CLAIM transition from `wip_from` → current state), `release-issue` errors rather than corrupting state.
 
 ## CLI flag conventions
 
-- **`--to <state>`** is the canonical way to specify a destination state. Used by both `advance` and `claim`. For `claim` it's optional when the current state has a single CLAIM transition out (auto-picked); required when ambiguous.
-- **`--body <inline>` / `--body-from <path>`** is the standard body-input pair used by every command that posts markdown to the issue: `advance`, `approve`, `reject`, `revoke`, `request-input`, `respond`, `comment`, `create`. The two are mutually exclusive; `--body` accepts inline content for short bodies; `--body-from` reads a file for longer or templated bodies. Per-command-named flags (`--packet-from`, `--feedback-from`, etc.) were removed — one consistent flag pair across the surface.
+- **`--to <state>`** is the canonical way to specify a destination state. Used by both `advance-issue` and `claim-issue`. For `claim-issue` it's optional when the current state has a single CLAIM transition out (auto-picked); required when ambiguous.
+- **`--body <inline>` / `--body-from <path>`** is the standard body-input pair used by every command that posts markdown to the issue: `advance-issue`, `approve-blocked`, `reject-blocked`, `reject-audit`, `request-input`, `respond-request`, `post-comment`, `create-issue`. The two are mutually exclusive; `--body` accepts inline content for short bodies; `--body-from` reads a file for longer or templated bodies. Per-command-named flags (`--packet-from`, `--feedback-from`, etc.) were removed — one consistent flag pair across the surface.
 - **No per-command `--role`.** Agent role comes from `--agent-role`, `AGENT_ROLE`, or the agent home's `config.json`. An agent has exactly one role at a time; per-command overrides would be a footgun.
 
 ## Operation verbs
@@ -210,23 +212,23 @@ The catalogued-HITL operations come in pre/post-action pairs:
 
 | Pre-action (block) | Post-action (audit) | Meaning |
 |---|---|---|
-| `review` | `audit` | human takes the human-claim singleton |
-| `approve` | `confirm` | human ratifies the transition / past action |
-| `reject` | `revoke` | human declines / undoes |
+| `review-blocked` | `review-audit` | human takes the human-claim singleton |
+| `approve-blocked` | `approve-audit` | human ratifies the transition / past action |
+| `reject-blocked` | `reject-audit` | human declines / undoes |
 
-The recognized-HITL pair is `request-input` (agent asks) → `respond` (human answers). Don't say `resolve` — it collides with tracker "issue resolved" status semantics. The post-action confirmation verb is `confirm`, not `check`, since `check` is bland and could read as "check the status of…".
+The recognized-HITL pair is `request-input` (agent asks) → `respond-request` (human answers). The intermediate `review-request` mirrors the gate-review verbs: a human claims the response role before answering. The verbs match the pre/post-action gate verbs so the surface stays uniform: every human-side operation is one of `review-* / approve-* / reject-* / respond-*`.
 
-## Input topics
+## Human inputs
 
-`request-input` is now **catalogued at the state level**. A working state declares `input_topics: [...]` — a list of topic ids from the shared `input-topics.json` directory (parallel to `roles.json` and `issue-types.json`). The agent's invocation requires `--topic <id>`; the topic must be one of the declared ids on the current state.
+`request-input` is now **catalogued at the state level**. A working state declares `human_inputs: [...]` — a list of ids from the shared `human-inputs.json` directory (parallel to `roles.json` and `issue-types.json`). The agent's invocation requires `--topic <id>`; the id must be one of those declared on the current state.
 
 Semantics:
-- States without `input_topics` declared CANNOT host `request-input` — the agent must release the issue or stay put. No free-form fallback.
-- Add a `general` topic to a state's list to keep an explicit escape valve.
-- Topics route to **the human operator** (not a specific framework role) — these are escalations out of the agent loop.
-- Markers: `hitl:awaiting-input` (existing queue marker) + `hitl:topic-<id>` (companion, set on request and cleared on respond). Operators can filter by topic.
+- States without `human_inputs` declared CANNOT host `request-input` — the agent must release the issue or stay put. No free-form fallback.
+- Add a `general` entry to a state's list to keep an explicit escape valve.
+- Inputs route to **the human operator** (not a specific framework role) — these are escalations out of the agent loop.
+- Markers: `hitl:awaiting-input` (existing queue marker) + `hitl:topic-<id>` (companion, set on request and cleared on respond). Operators can filter by id.
 
-Validator: every topic id referenced on a working state must resolve in `input-topics.json` (missing directory → WARNING; declared id absent from directory → ERROR).
+Validator: every id referenced on a working state must resolve in `human-inputs.json` (missing directory → WARNING; declared id absent from directory → ERROR).
 
 ## Cross-process handoff
 
@@ -239,7 +241,7 @@ Convention: the receiver declares the shared state's `reversibility`; the role-r
 
 ## Workflow directory (`--workflow-dir`)
 
-The on-disk directory containing one workflow: every `<name>-states.json`, `<name>-hcps.json`, the shared `roles.json`, the `trust-grants/` subdirectory, and any `agent_prepares` template files referenced from catalogs.
+The on-disk directory containing one workflow: every `<name>-states.json`, `<name>-human-gates.json`, the shared `roles.json`, the `trust-grants/` subdirectory, and any `agent_prepares` template files referenced from catalogs.
 
 Discovered via the `--workflow-dir` CLI flag, the `WORKFLOW_DIR` env var, or the agent home's `.workflow/workflows/` default.
 

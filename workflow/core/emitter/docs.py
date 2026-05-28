@@ -4,7 +4,7 @@
 `issue-types.md`, and `README.md` alongside the canonical JSON. The output
 is a flat, link-light reference: everything an agent needs to operate on a
 process lives in that process's single markdown file (states, transitions,
-HCPs, cross-process handoffs, active trust grants), so an LLM can ingest it
+human gates, cross-process handoffs, active trust grants), so an LLM can ingest it
 without chasing links.
 
 The emitters are pure — they take in-memory model objects and return strings.
@@ -17,8 +17,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from workflow.core.emitter.mermaid import emit_mermaid
-from workflow.core.model.hcp import HCPCatalog, HCPLevel
-from workflow.core.model.input_topic import InputTopicDirectory
+from workflow.core.model.human_gate import HumanGateCatalog, HumanGateLevel
+from workflow.core.model.human_input import HumanInputDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.role import RoleDirectory
 from workflow.core.model.state_machine import (
@@ -39,7 +39,7 @@ class ProcessDocInput:
     """
 
     state_machine: StateMachine
-    catalog: HCPCatalog | None = None
+    catalog: HumanGateCatalog | None = None
     issue_type_directory: IssueTypeDirectory | None = None
     grants: dict[str, TrustGrant] | None = None
 
@@ -52,7 +52,7 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
     out.append("")
     out.append(f"> Defined in: `{sm.name}-states.json`")
     if inputs.catalog is not None and inputs.catalog.entries:
-        out.append(f"> HCP catalog: `{sm.name}-hcps.json`")
+        out.append(f"> HumanGate catalog: `{sm.name}-human-gates.json`")
     out.append("")
 
     accepted = sm.accepted_issue_types
@@ -63,7 +63,7 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
     out.extend(_section_states(sm))
     out.extend(_section_transitions(sm, inputs.catalog, inputs.grants))
     if inputs.catalog is not None and inputs.catalog.entries:
-        out.extend(_section_hcps(sm, inputs.catalog, inputs.grants))
+        out.extend(_section_human_gates(sm, inputs.catalog, inputs.grants))
     out.extend(_section_cross_process(sm))
 
     active_grants = _grants_for_process(sm, inputs.grants)
@@ -143,34 +143,34 @@ def emit_issue_types_doc(directory: IssueTypeDirectory) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def emit_input_topics_doc(
-    directory: InputTopicDirectory,
+def emit_human_inputs_doc(
+    directory: HumanInputDirectory,
     state_machines: list[StateMachine] | None = None,
 ) -> str:
-    """Render the input-topic directory as markdown.
+    """Render the human-input directory as markdown.
 
-    When `state_machines` is supplied, each topic gains a derived
+    When `state_machines` is supplied, each entry gains a derived
     "Declared on" line listing every `process.state` where it appears.
     """
-    out: list[str] = ["# Input topics", ""]
-    if not directory.topics:
-        out.append("_(no input topics defined)_")
+    out: list[str] = ["# Human inputs", ""]
+    if not directory.entries:
+        out.append("_(no human inputs defined)_")
         return "\n".join(out) + "\n"
 
     declared_on: dict[str, list[str]] = {}
     for sm in state_machines or []:
         for st in sm.states.values():
-            for topic in st.input_topics:
-                declared_on.setdefault(topic, []).append(f"{sm.name}.{st.name}")
+            for entry_id in st.human_inputs:
+                declared_on.setdefault(entry_id, []).append(f"{sm.name}.{st.name}")
 
     out.append(
-        "Topics agents may invoke `request-input` on. Working states "
-        "opt-in by listing topic ids on their `input_topics` field; "
+        "Entries agents may invoke `request-input` on. Working states "
+        "opt-in by listing ids on their `human_inputs` field; "
         "states with no list cannot escalate via `request-input`."
     )
     out.append("")
-    for topic_id, t in directory.topics.items():
-        out.append(f"## `{topic_id}` — {t.name}")
+    for human_input_id, t in directory.entries.items():
+        out.append(f"## `{human_input_id}` — {t.name}")
         out.append("")
         out.append(t.description)
         out.append("")
@@ -178,7 +178,7 @@ def emit_input_topics_doc(
             out.append(f"- **Agent prepares**: `{t.agent_prepares}`")
         if t.rationale:
             out.append(f"- **Rationale**: {t.rationale}")
-        places = sorted(declared_on.get(topic_id, []))
+        places = sorted(declared_on.get(human_input_id, []))
         if places:
             out.append(
                 f"- **Declared on**: {', '.join(f'`{p}`' for p in places)} "
@@ -289,7 +289,7 @@ def emit_index_doc(
     *,
     has_roles: bool,
     has_issue_types: bool,
-    has_input_topics: bool = False,
+    has_human_inputs: bool = False,
     has_process_map: bool = False,
 ) -> str:
     """Top-level README linking to every generated doc."""
@@ -308,8 +308,8 @@ def emit_index_doc(
         "",
     ])
     for name in sorted(process_names):
-        out.append(f"- [`{name}`](./{name}.md) — state machine, HCPs, handoffs")
-    if has_roles or has_issue_types or has_input_topics:
+        out.append(f"- [`{name}`](./{name}.md) — state machine, human gates, handoffs")
+    if has_roles or has_issue_types or has_human_inputs:
         out.append("")
         out.append("## Shared resources")
         out.append("")
@@ -317,8 +317,8 @@ def emit_index_doc(
             out.append("- [Roles](./roles.md)")
         if has_issue_types:
             out.append("- [Issue types](./issue-types.md)")
-        if has_input_topics:
-            out.append("- [Input topics](./input-topics.md)")
+        if has_human_inputs:
+            out.append("- [Human inputs](./human-inputs.md)")
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -363,7 +363,7 @@ def _section_states(sm: StateMachine) -> list[str]:
     out = ["## States", ""]
     out.append(
         "| Name | Class | Reversibility | Roles | Issue types | "
-        "Input topics | Terminal taxonomy | Close reason |"
+        "Human inputs | Terminal taxonomy | Close reason |"
     )
     out.append("|---|---|---|---|---|---|---|---|")
     for name, st in sm.states.items():
@@ -371,11 +371,11 @@ def _section_states(sm: StateMachine) -> list[str]:
         rev = st.reversibility.value if st.reversibility else "—"
         roles = ", ".join(st.roles) if st.roles else "—"
         types = ", ".join(st.issue_types) if st.issue_types else "—"
-        topics = ", ".join(st.input_topics) if st.input_topics else "—"
+        human_inputs = ", ".join(st.human_inputs) if st.human_inputs else "—"
         tax = st.terminal_taxonomy.value if st.terminal_taxonomy else "—"
         close = st.close_reason or "—"
         out.append(
-            f"| `{name}` | {cls} | {rev} | {roles} | {types} | {topics} | {tax} | {close} |"
+            f"| `{name}` | {cls} | {rev} | {roles} | {types} | {human_inputs} | {tax} | {close} |"
         )
     out.append("")
     return out
@@ -383,7 +383,7 @@ def _section_states(sm: StateMachine) -> list[str]:
 
 def _section_transitions(
     sm: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
     grants: dict[str, TrustGrant] | None,
 ) -> list[str]:
     out = ["## Transitions", ""]
@@ -393,15 +393,15 @@ def _section_transitions(
         gate = t.gate_name or "—"
         level = "—"
         if t.is_gated and catalog is not None and t.gate_name and catalog.has(t.gate_name):
-            hcp = catalog.get(t.gate_name)
-            effective = hcp.default_level
+            gate = catalog.get(t.gate_name)
+            effective = gate.default_level
             if grants is not None:
-                grant = grants.get(hcp.gate_name)
+                grant = grants.get(gate.gate_name)
                 if grant is not None and grant.effective_today:
                     effective = grant.current_level
             level = effective.value
-            if effective is not hcp.default_level:
-                level += f" (default {hcp.default_level.value})"
+            if effective is not gate.default_level:
+                level += f" (default {gate.default_level.value})"
         out.append(
             f"| `{t.source}` | `{t.destination}` | {t.transition_type.value} | "
             f"{t.label!r} | {gate} | {level} |"
@@ -410,24 +410,24 @@ def _section_transitions(
     return out
 
 
-def _section_hcps(
+def _section_human_gates(
     sm: StateMachine,
-    catalog: HCPCatalog,
+    catalog: HumanGateCatalog,
     grants: dict[str, TrustGrant] | None,
 ) -> list[str]:
-    """Render the HCP catalog. Structural fields (source, destinations,
+    """Render the human-gate catalog. Structural fields (source, destinations,
     triggering roles, reversibility) are derived from the state machine."""
-    out = ["## HCPs (Human Control Points)", ""]
-    for gate_name, hcp in catalog.entries.items():
-        effective = hcp.default_level
+    out = ["## Human gates", ""]
+    for gate_name, gate in catalog.entries.items():
+        effective = gate.default_level
         grant_note = ""
         if grants is not None:
-            grant = grants.get(hcp.gate_name)
+            grant = grants.get(gate.gate_name)
             if grant is not None and grant.effective_today:
                 effective = grant.current_level
-                if effective is not hcp.default_level:
+                if effective is not gate.default_level:
                     grant_note = (
-                        f" _(relaxed from {hcp.default_level.value} via active trust grant)_"
+                        f" _(relaxed from {gate.default_level.value} via active trust grant)_"
                     )
         out.append(f"### `{gate_name}` — {effective.value}{grant_note}")
         out.append("")
@@ -446,18 +446,18 @@ def _section_hcps(
                 f"- **Triggering role(s)**: "
                 f"{', '.join(f'`{r}`' for r in triggering)} _(derived)_"
             )
-        out.append(f"- **HCP type**: {hcp.hcp_type.value}")
+        out.append(f"- **HumanGate type**: {gate.gate_type.value}")
         if rev is not None:
             out.append(f"- **Destination reversibility**: {rev.value} _(derived, worst-case)_")
         out.append(
-            f"- **Allowed levels**: {', '.join(lvl.value for lvl in hcp.allowed_levels)}"
+            f"- **Allowed levels**: {', '.join(lvl.value for lvl in gate.allowed_levels)}"
         )
-        out.append(f"- **Default level**: {hcp.default_level.value}")
-        if hcp.agent_prepares_path:
-            out.append(f"- **Agent prepares**: `{hcp.agent_prepares_path}`")
-        if hcp.rationale:
+        out.append(f"- **Default level**: {gate.default_level.value}")
+        if gate.agent_prepares_path:
+            out.append(f"- **Agent prepares**: `{gate.agent_prepares_path}`")
+        if gate.rationale:
             out.append("")
-            out.append(f"> {hcp.rationale}")
+            out.append(f"> {gate.rationale}")
         out.append("")
     return out
 
@@ -497,7 +497,7 @@ def _section_cross_process(sm: StateMachine) -> list[str]:
 def _section_trust_grants(grants: list[TrustGrant]) -> list[str]:
     out = ["## Active trust grants", ""]
     out.append(
-        "Per-team relaxations of catalogued HCP levels. Grants expire and "
+        "Per-team relaxations of catalogued HumanGate levels. Grants expire and "
         "must be re-justified with evidence."
     )
     out.append("")
@@ -537,5 +537,5 @@ def _grants_for_process(
     return [g for g in grants.values() if g.control_point in gate_names]
 
 
-# Defensive: avoid the unused-import lint if HCPLevel becomes unreferenced.
-_ = (HCPLevel, StateClass)
+# Defensive: avoid the unused-import lint if HumanGateLevel becomes unreferenced.
+_ = (HumanGateLevel, StateClass)

@@ -5,7 +5,7 @@ regenerated. `workflow generate-docs` invokes these emitters to materialise:
 
 - `<process>-states.mermaid` — state diagrams (`mermaid.emit_mermaid`).
 - `<process>.md` — per-process reference docs (`docs.emit_process_doc`).
-- `roles.md`, `issue-types.md`, `input-topics.md`, `README.md` — shared / index docs.
+- `roles.md`, `issue-types.md`, `human-inputs.md`, `README.md` — shared / index docs.
 
 Pre-commit hooks or CI checks should verify these files are up-to-date.
 """
@@ -13,7 +13,7 @@ Pre-commit hooks or CI checks should verify these files are up-to-date.
 from workflow.core.emitter.docs import (
     ProcessDocInput,
     emit_index_doc,
-    emit_input_topics_doc,
+    emit_human_inputs_doc,
     emit_issue_types_doc,
     emit_process_doc,
     emit_process_map,
@@ -27,7 +27,7 @@ __all__ = [
     "emit_process_doc",
     "emit_roles_doc",
     "emit_issue_types_doc",
-    "emit_input_topics_doc",
+    "emit_human_inputs_doc",
     "emit_process_map",
     "emit_process_map_doc",
     "emit_index_doc",

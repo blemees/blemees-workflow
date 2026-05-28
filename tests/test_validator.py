@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from workflow.backends.base import IssueState
-from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
+from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
 from workflow.core.model.state_machine import (
     ReversibilityClass,
     State,
@@ -180,12 +180,12 @@ def test_audit_with_irreversible_destination_errors() -> None:
             gate_name="gate",
         )
     )
-    catalog = HCPCatalog(process_name="t")
-    catalog.entries["gate"] = HCP(
+    catalog = HumanGateCatalog(process_name="t")
+    catalog.entries["gate"] = HumanGate(
         gate_name="gate",
-        hcp_type=HCPType.AUTHORITY,
-        allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
-        default_level=HCPLevel.AUDIT,
+        gate_type=HumanGateType.AUTHORITY,
+        allowed_levels=[HumanGateLevel.BLOCK, HumanGateLevel.AUDIT],
+        default_level=HumanGateLevel.AUDIT,
     )
     findings = validate_state_machine(workflow, catalog, {})
     errors = [f for f in findings if f.severity is Severity.ERROR]
@@ -195,12 +195,12 @@ def test_audit_with_irreversible_destination_errors() -> None:
 
 def test_agent_prepares_missing_warns() -> None:
     workflow = StateMachine(name="t")
-    catalog = HCPCatalog(process_name="t")
-    catalog.entries["gate"] = HCP(
+    catalog = HumanGateCatalog(process_name="t")
+    catalog.entries["gate"] = HumanGate(
         gate_name="gate",
-        hcp_type=HCPType.AUTHORITY,
-        allowed_levels=[HCPLevel.BLOCK],
-        default_level=HCPLevel.BLOCK,
+        gate_type=HumanGateType.AUTHORITY,
+        allowed_levels=[HumanGateLevel.BLOCK],
+        default_level=HumanGateLevel.BLOCK,
         agent_prepares_path=None,
     )
     findings = validate_state_machine(workflow, catalog, {})
@@ -213,12 +213,12 @@ def test_agent_prepares_missing_warns() -> None:
 def test_legend_catalog_drift_warns() -> None:
     workflow = StateMachine(name="t")
     workflow.gates_in_legend["gate_a"] = ReversibilityClass.REVERSIBLE_SLOW
-    catalog = HCPCatalog(process_name="t")
-    catalog.entries["gate_b"] = HCP(
+    catalog = HumanGateCatalog(process_name="t")
+    catalog.entries["gate_b"] = HumanGate(
         gate_name="gate_b",
-        hcp_type=HCPType.AUTHORITY,
-        allowed_levels=[HCPLevel.BLOCK],
-        default_level=HCPLevel.BLOCK,
+        gate_type=HumanGateType.AUTHORITY,
+        allowed_levels=[HumanGateLevel.BLOCK],
+        default_level=HumanGateLevel.BLOCK,
         agent_prepares_path="x.md",
     )
     findings = validate_state_machine(workflow, catalog, {})
@@ -236,7 +236,7 @@ def test_expired_trust_grant_warns() -> None:
             control_point="gate",
             workflow="t",
             team="acme",
-            current_level=HCPLevel.AUDIT,
+            current_level=HumanGateLevel.AUDIT,
             parameters=TrustGrantParameters(cadence="daily"),
             evidence=[Evidence(source="manual", metric="x", window="x", detail="x")],
             granted_by="x@example.com",

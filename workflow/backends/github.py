@@ -646,7 +646,7 @@ class GitHubBackend:
         awaiting_gate: str | None = None
         audit_pending: str | None = None
         issue_type: str | None = None
-        input_topic: str | None = None
+        human_input: str | None = None
         reviewing = False
         auditing = False
         advising = False
@@ -681,7 +681,7 @@ class GitHubBackend:
             elif suffix == "resolved":
                 pass  # signal marker only
             elif suffix.startswith("topic-"):
-                input_topic = suffix[len("topic-") :]
+                human_input = suffix[len("topic-") :]
             elif suffix.startswith("awaiting-"):
                 awaiting_gate = suffix[len("awaiting-") :]
             elif suffix.startswith("audit-"):
@@ -700,7 +700,7 @@ class GitHubBackend:
             audit_pending=audit_pending,
             auditing=auditing,
             awaiting_input=awaiting_input,
-            input_topic=input_topic,
+            human_input=human_input,
             advising=advising,
         )
 
@@ -771,10 +771,10 @@ class GitHubBackend:
             remove.add("hitl:awaiting-input")
         # Companion topic label — `hitl:topic-<name>`, set alongside
         # `hitl:awaiting-input` so humans can filter the queue by topic.
-        if change.set_input_topic:
-            add.add(f"hitl:topic-{change.set_input_topic}")
-        if change.clear_input_topic and current.input_topic:
-            remove.add(f"hitl:topic-{current.input_topic}")
+        if change.set_human_input:
+            add.add(f"hitl:topic-{change.set_human_input}")
+        if change.clear_human_input and current.human_input:
+            remove.add(f"hitl:topic-{current.human_input}")
 
         # Outcome / signal markers (transient audit-trace labels).
         if change.record_approval:

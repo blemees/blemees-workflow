@@ -32,7 +32,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `soaking` | resting | reversible-slow | — | — | — | — | — |
 | `ready_for_stage_analysis` | resting | reversible-fast | — | — | — | — | — |

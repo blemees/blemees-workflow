@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from workflow.core.inspector import available_transitions
-from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
+from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
 from workflow.core.model.state_machine import (
     ReversibilityClass,
     State,
@@ -18,7 +18,7 @@ from workflow.core.model.state_machine import (
 from workflow.core.model.trust_grant import Evidence, TrustGrant, TrustGrantParameters
 
 
-def _build() -> tuple[StateMachine, HCPCatalog]:
+def _build() -> tuple[StateMachine, HumanGateCatalog]:
     sm = StateMachine(name="t")
     sm.states = {
         "raw": State(name="raw", state_class=StateClass.RESTING),
@@ -61,19 +61,19 @@ def _build() -> tuple[StateMachine, HCPCatalog]:
             gate_name="wont_fix",
         ),
     ]
-    catalog = HCPCatalog(process_name="t")
-    catalog.entries["ready_for_dev"] = HCP(
+    catalog = HumanGateCatalog(process_name="t")
+    catalog.entries["ready_for_dev"] = HumanGate(
         gate_name="ready_for_dev",
-        hcp_type=HCPType.JUDGMENT,
-        allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
-        default_level=HCPLevel.BLOCK,
+        gate_type=HumanGateType.JUDGMENT,
+        allowed_levels=[HumanGateLevel.BLOCK, HumanGateLevel.AUDIT],
+        default_level=HumanGateLevel.BLOCK,
         agent_prepares_path="ready-packet.md",
     )
-    catalog.entries["wont_fix"] = HCP(
+    catalog.entries["wont_fix"] = HumanGate(
         gate_name="wont_fix",
-        hcp_type=HCPType.JUDGMENT,
-        allowed_levels=[HCPLevel.BLOCK, HCPLevel.AUDIT],
-        default_level=HCPLevel.AUDIT,
+        gate_type=HumanGateType.JUDGMENT,
+        allowed_levels=[HumanGateLevel.BLOCK, HumanGateLevel.AUDIT],
+        default_level=HumanGateLevel.AUDIT,
         agent_prepares_path="wont-fix-note.md",
     )
     return sm, catalog
@@ -97,8 +97,8 @@ def test_available_transitions_from_working_returns_hitl_actions() -> None:
     ready = by_dest["ready_for_dev"]
     assert ready.is_gated
     assert ready.gate_name == "ready_for_dev"
-    assert ready.default_level is HCPLevel.BLOCK
-    assert ready.effective_level is HCPLevel.BLOCK
+    assert ready.default_level is HumanGateLevel.BLOCK
+    assert ready.effective_level is HumanGateLevel.BLOCK
     assert ready.grant_relaxed is False
     assert "product-manager" in ready.triggering_roles
     assert ready.agent_prepares_path == "ready-packet.md"
@@ -106,7 +106,7 @@ def test_available_transitions_from_working_returns_hitl_actions() -> None:
     assert ready.destination_state_class is StateClass.RESTING
 
     wont = by_dest["wont_fix"]
-    assert wont.default_level is HCPLevel.AUDIT
+    assert wont.default_level is HumanGateLevel.AUDIT
     assert wont.destination_terminal_taxonomy is TerminalTaxonomy.ABANDONED
 
 
@@ -117,7 +117,7 @@ def test_trust_grant_relaxes_effective_level() -> None:
         control_point="ready_for_dev",
         workflow="t",
         team="example",
-        current_level=HCPLevel.AUDIT,
+        current_level=HumanGateLevel.AUDIT,
         parameters=TrustGrantParameters(cadence="weekly"),
         evidence=[Evidence(source="manual", metric="trust", window="2026", detail="ok")],
         granted_by="lead@example.com",
@@ -129,8 +129,8 @@ def test_trust_grant_relaxes_effective_level() -> None:
     )
     by_dest = {a.destination: a for a in actions}
     ready = by_dest["ready_for_dev"]
-    assert ready.default_level is HCPLevel.BLOCK
-    assert ready.effective_level is HCPLevel.AUDIT
+    assert ready.default_level is HumanGateLevel.BLOCK
+    assert ready.effective_level is HumanGateLevel.AUDIT
     assert ready.grant_relaxed is True
     # The other gate is untouched.
     wont = by_dest["wont_fix"]

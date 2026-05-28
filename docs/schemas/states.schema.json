@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://blemees.io/schemas/blemees-workflow/states.schema.json",
   "title": "blemees-workflow state machine",
-  "description": "Schema for `*-states.json` files. Provides editor / IDE feedback on structure and enum values; cross-field rules (terminal-taxonomy presence, role/issue_types/reversibility placement, handoff partner check, spawns.advance_on key/value resolution, etc.) are enforced by the Python parser + validator and surface via `workflow validate`.",
+  "description": "Schema for `*-states.json` files. Provides editor / IDE feedback on structure and enum values; cross-field rules (terminal-taxonomy presence, role/issue_types/reversibility placement, handoff partner check, spawns.advance_on key/value resolution, etc.) are enforced by the Python parser + validator and surface via `workflow validate-workflow`.",
   "type": "object",
   "additionalProperties": true,
   "required": ["states", "transitions"],
@@ -10,10 +10,6 @@
     "$schema": {
       "type": "string",
       "description": "Optional schema URI for editor support."
-    },
-    "name": {
-      "type": "string",
-      "description": "Process name. Defaults to the file stem with `-states` stripped. The HCP catalog path is derived from this by convention: `<name>-hcps.json`."
     },
     "states": {
       "type": "object",
@@ -76,9 +72,9 @@
           "type": "boolean",
           "description": "When True, advancing into this state flips the underlying PR from draft to ready-for-review on the tracker (`gh pr ready` on GitHub). No-op when the issue isn't a pull request. Not valid on terminal states."
         },
-        "input_topics": {
+        "human_inputs": {
           "type": "array",
-          "description": "Input topics agents may invoke `request-input` on at this state. Topic ids resolve against the shared `input-topics.json`. Only valid on working states; absence / empty means `request-input` is forbidden here.",
+          "description": "Human inputs agents may invoke `request-input` on at this state. Ids resolve against the shared `human-inputs.json`. Only valid on working states; absence / empty means `request-input` is forbidden here.",
           "items": {"type": "string", "minLength": 1},
           "uniqueItems": true
         },
@@ -125,9 +121,9 @@
           "type": "string",
           "description": "Human-readable transition label. Optional except on `event` transitions (which have no auto-default). When absent, the parser auto-generates a structural label (e.g., `{role} claims {source}` for claim; `{role} → {dest}` for advance)."
         },
-        "gate": {
+        "human_gate": {
           "type": "string",
-          "description": "HCP catalog `gate_name`. Presence marks this transition as HITL-gated; absence means ungated. Replaces the old `hitl` boolean."
+          "description": "Human-gate catalog `gate_name`. Presence marks this transition as HITL-gated; absence means ungated."
         }
       }
     }

@@ -1,6 +1,6 @@
-# Input topics
+# Human inputs
 
-Topics agents may invoke `request-input` on. Working states opt-in by listing topic ids on their `input_topics` field; states with no list cannot escalate via `request-input`.
+Entries agents may invoke `request-input` on. Working states opt-in by listing ids on their `human_inputs` field; states with no list cannot escalate via `request-input`.
 
 ## `general` — General
 

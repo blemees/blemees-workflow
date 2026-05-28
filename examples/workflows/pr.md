@@ -4,7 +4,7 @@
 
 ## Issue types accepted
 
-- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create`; the framework recognises it for cross-process modelling and documentation.
+- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
 
 ## State diagram
 
@@ -45,7 +45,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `draft` | resting | reversible-fast | — | — | — | — | — |
 | `drafting` | working | — | developer | pr | — | — | — |

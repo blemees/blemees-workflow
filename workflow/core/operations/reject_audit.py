@@ -1,8 +1,8 @@
-"""advise — human claims the recognition response role.
+"""revoke — human declares an audit-level action wrong; remediation fires.
 
-Singleton claim per `hitl-principles.md` principle 6. Distinct from `review`
-and `audit` because the human is providing input rather than reviewing
-prepared work.
+Per `hitl-principles.md` principle 11. The `on_revoke` procedure named in
+the catalog row determines the remediation; this operation surfaces the
+declaration and clears the audit-pending marker.
 """
 
 from __future__ import annotations
@@ -16,11 +16,15 @@ def run(
     controller: Controller,
     *,
     issue_id: str,
+    gate: str,
+    body: str,
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.ADVISE,
+        operation=Operation.REJECT_AUDIT,
         issue_id=issue_id,
+        gate=gate,
+        body_text=body,
         actor=actor,
     )
     return dispatch(controller, request)

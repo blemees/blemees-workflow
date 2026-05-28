@@ -1,7 +1,7 @@
 """Inspector — describe an issue's next-step options to the agent.
 
 The planner *decides* what an operation does. The inspector *describes* what
-an agent at a given current state could do next, with HCP catalog rows and
+an agent at a given current state could do next, with HumanGate catalog rows and
 trust grants resolved to effective levels. CLI commands like `view`, `claim`,
 and `create --claim` call into this to surface next actions so the agent
 doesn't have to look up the process to know how to advance.
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel
+from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel
 from workflow.core.model.state_machine import (
     ReversibilityClass,
     StateClass,
@@ -29,7 +29,7 @@ from workflow.core.model.trust_grant import TrustGrant
 class AvailableTransition:
     """One transition out of a source state, enriched with gate/grant info.
 
-    `effective_level` is the HCP level after applying the team's trust grant
+    `effective_level` is the HumanGate level after applying the team's trust grant
     (if any active). `default_level` is the catalog row's default — so the UI
     can call out when the team has relaxed (or tightened) the gate.
     """
@@ -42,8 +42,8 @@ class AvailableTransition:
     # HITL enrichment (None / empty when transition is not gated)
     is_gated: bool = False
     gate_name: str | None = None
-    default_level: HCPLevel | None = None
-    effective_level: HCPLevel | None = None
+    default_level: HumanGateLevel | None = None
+    effective_level: HumanGateLevel | None = None
     triggering_roles: tuple[str, ...] = ()
     agent_prepares_path: str | None = None
 
@@ -68,7 +68,7 @@ class AvailableTransition:
 
 def available_transitions(
     state_machine: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
     grants: dict[str, TrustGrant] | None,
     source_state: str,
 ) -> list[AvailableTransition]:
@@ -87,20 +87,20 @@ def available_transitions(
             state_machine.states.get(t.destination) if t.destination != "[*]" else None
         )
 
-        hcp: HCP | None = None
+        gate: HumanGate | None = None
         if t.is_gated and catalog is not None and t.gate_name is not None:
-            hcp = catalog.entries.get(t.gate_name)
+            gate = catalog.entries.get(t.gate_name)
 
-        default_level = hcp.default_level if hcp else None
+        default_level = gate.default_level if gate else None
         effective_level = default_level
-        if hcp is not None:
-            grant = grants.get(hcp.gate_name)
+        if gate is not None:
+            grant = grants.get(gate.gate_name)
             if grant is not None and grant.effective_today:
                 effective_level = grant.current_level
 
         triggering_roles = (
             state_machine.gate_triggering_roles(t.gate_name)
-            if hcp is not None and t.gate_name is not None
+            if gate is not None and t.gate_name is not None
             else ()
         )
         out.append(
@@ -114,7 +114,7 @@ def available_transitions(
                 default_level=default_level,
                 effective_level=effective_level,
                 triggering_roles=triggering_roles,
-                agent_prepares_path=hcp.agent_prepares_path if hcp else None,
+                agent_prepares_path=gate.agent_prepares_path if gate else None,
                 destination_state_class=dst_state.state_class if dst_state else None,
                 destination_reversibility=dst_state.reversibility if dst_state else None,
                 destination_terminal_taxonomy=(

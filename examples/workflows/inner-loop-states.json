@@ -1,6 +1,5 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "name": "inner-loop",
   "states": {
     "ready_for_dev": {
       "class": "resting",
@@ -33,7 +32,7 @@
           "staged": "staged"
         }
       },
-      "input_topics": ["clarify-scope", "needs-arch-review", "needs-security-review", "blocked-on-data", "general"]
+      "human_inputs": ["clarify-scope", "needs-arch-review", "needs-security-review", "blocked-on-data", "general"]
     },
     "implementing_experiment": {
       "class": "working",
@@ -47,13 +46,13 @@
           "staged": "staged_experiment"
         }
       },
-      "input_topics": ["clarify-scope", "needs-arch-review", "general"]
+      "human_inputs": ["clarify-scope", "needs-arch-review", "general"]
     },
     "implementing_spike": {
       "class": "working",
       "roles": ["developer"],
       "issue_types": ["spike"],
-      "input_topics": ["clarify-scope", "needs-arch-review", "general"]
+      "human_inputs": ["clarify-scope", "needs-arch-review", "general"]
     },
     "implementing_hotfix": {
       "class": "working",
@@ -67,7 +66,7 @@
           "staged": "staged_hotfix"
         }
       },
-      "input_topics": ["needs-security-review", "blocked-on-data", "general"]
+      "human_inputs": ["needs-security-review", "blocked-on-data", "general"]
     },
     "pr_review": {
       "class": "resting",

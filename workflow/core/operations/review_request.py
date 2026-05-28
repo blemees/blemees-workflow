@@ -1,7 +1,8 @@
-"""review — human claims pre-action review of an awaiting gate.
+"""advise — human claims the recognition response role.
 
-Singleton claim operation (per `hitl-principles.md` principle 6). Mutually
-exclusive with `audit` and `advise` across the issue.
+Singleton claim per `hitl-principles.md` principle 6. Distinct from `review`
+and `audit` because the human is providing input rather than reviewing
+prepared work.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ def run(
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.REVIEW,
+        operation=Operation.REVIEW_REQUEST,
         issue_id=issue_id,
         actor=actor,
     )

@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass, field
 
 from workflow.backends.base import IssueState, TrackerBackend
-from workflow.core.model.hcp import HCPCatalog
+from workflow.core.model.human_gate import HumanGateCatalog
 from workflow.core.model.state_machine import StateMachine
 from workflow.core.model.trust_grant import TrustGrant
 from workflow.core.planner import (
@@ -47,7 +47,7 @@ class OperationResult:
 class Controller:
     backend: TrackerBackend
     state_machine: StateMachine
-    catalog: HCPCatalog | None = None
+    catalog: HumanGateCatalog | None = None
     grants: dict[str, TrustGrant] = field(default_factory=dict)
     dry_run: bool = False
 

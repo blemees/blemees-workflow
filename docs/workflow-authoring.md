@@ -21,13 +21,12 @@ Or rely on the workspace-wide `.vscode/settings.json` mapping that ships
 in this repo. The schema covers enum / type / required-field checks; the
 deeper cross-field rules (terminal-needs-taxonomy, role/issue_types placement,
 cross_process metadata, etc.) remain enforced by the Python parser and
-surface via `workflow validate`.
+surface via `workflow validate-workflow`.
 
 ## Minimum valid file
 
 ```json
 {
-  "name": "tiny",
   "states": {
     "raw": {"class": "resting", "reversibility": "reversible-fast"},
     "refining": {
@@ -59,9 +58,12 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `name` | string | optional | StateMachine name. Defaults to the file stem with `-states` stripped. The HCP catalog path is derived from this by convention as `<name>-hcps.json`. |
 | `states` | object | required | Map of state-id → state spec. |
 | `transitions` | list | required | Ordered list of transition specs. |
+
+The process name is derived from the filename stem (`<process>-states.json`).
+The human-gate catalog path follows the same convention as
+`<process>-human-gates.json`.
 
 ### State spec
 
@@ -76,7 +78,7 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 | `handoff` | bool | optional, resting states only | Marks the state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Replaces the old `cross_process` kind:`shared` transitions. |
 | `spawns` | object | optional, working / resting / terminal states | Subprocess / spawn contract. See "Spawns" below. |
 | `mark_pr_ready` | bool | optional, not on terminal | When advancing into this state, the backend flips the underlying PR from draft to ready-for-review (`gh pr ready` on GitHub). No-op on non-PR issues. PRs are always created as drafts; this is the only way to flip them. |
-| `input_topics` | array of strings | optional, working states only | Topic ids from the shared `input-topics.json` that agents may invoke `request-input` on at this state. Empty / absent = `request-input` is forbidden here. Each id must resolve in the directory (cross-checked by the validator). |
+| `human_inputs` | array of strings | optional, working states only | Ids from the shared `human-inputs.json` that agents may invoke `request-input` on at this state. Empty / absent = `request-input` is forbidden here. Each id must resolve in the directory (cross-checked by the validator). |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
 The parser fails loud on:
@@ -92,7 +94,7 @@ The parser fails loud on:
 | `destination` | string | yes | State id, or `"[*]"` for the exit sentinel. |
 | `type` | string | yes | `"claim"`, `"advance"`, `"event"` |
 | `label` | string | optional except on `event` | Human-readable transition label. When absent (and the type isn't `event`), the parser auto-generates a structural label: `{role(s)} claims {source}` for claim, `{role(s)} → {destination}` for advance, `{to\|from} process {other}` for cross-process. Override when the structural default reads awkwardly. |
-| `gate` | string | optional | The HCP catalog's `gate_name` for this gate. **Presence of `gate` marks the transition as HITL-gated**; absence means ungated. (Replaces the old separate `hitl` boolean.) |
+| `human_gate` | string | optional | The human-gate catalog's `gate_name` for this gate. **Presence of `human_gate` marks the transition as HITL-gated**; absence means ungated. (Replaces the old separate `hitl` boolean.) |
 
 Terminal sinks (`state → [*]: terminal (X)`) are **implicit**: the parser
 expects them not to be authored. The emitter generates them from each
@@ -138,7 +140,7 @@ Typical use: incident `stabilized` terminal spawns a postmortem.
 
 The child issue carries a `parent-of:<parent-id>` label and a `Refs
 #<parent-id>` body footer. The parent carries `subprocess:<child-id>`.
-Use `workflow spawn --issue <parent>` to create the child explicitly.
+Use `workflow spawn-issue --issue <parent>` to create the child explicitly.
 
 ## What the validator enforces
 
@@ -149,16 +151,16 @@ Use `workflow spawn --issue <parent>` to create the child explicitly.
 | 3 (claim before working) | Every working state is the destination of at least one CLAIM transition; otherwise the working state is unreachable via the documented protocol. | ERROR |
 | 8 (terminal taxonomy) | Every terminal state has a taxonomy tag. Without it, the terminal is incomplete. | parse error (terminal taxonomy is required in JSON) |
 | 9 (cross-process interfaces) | Shared handovers use `handoff: true` on the resting state; spawns use `spawns: {...}`. The legacy `cross_process` transition type is rejected with a migration hint. | parse error |
-| 11.1 (irreversible needs a gate) | Transitions landing on an irreversible destination must declare a `gate`. | WARNING |
-| 11.2 (legend ↔ catalog) | The gate names on gated transitions match the HCP catalog's gate_names. | WARNING |
+| 11.1 (irreversible needs a gate) | Transitions landing on an irreversible destination must declare a `human_gate`. | WARNING |
+| 11.2 (legend ↔ catalog) | The gate names on gated transitions match the human-gate catalog's gate_names. | WARNING |
 | 11.3 (reversibility on gate destinations) | States named as gate destinations have a reversibility declared. | WARNING |
 | 11.4 (level info NOT on diagram) | No state's notes mention `block` or `audit` (those belong in trust grants, not diagrams). | WARNING |
 
-Plus the HCP-level checks: audit-level on irreversible destinations is an
+Plus the human-gate-level checks: audit-level on irreversible destinations is an
 ERROR; missing `agent_prepares`, expired grants, and grant evidence rules
 fire warnings/errors per `hitl-principles.md` and `trust-grant-schema.md`.
 
-Run `workflow validate` to see findings in context.
+Run `workflow validate-workflow` to see findings in context.
 
 ## The shared handoff state pattern
 
@@ -208,7 +210,7 @@ Each side then references the state in its own transitions:
 ```json
 // Sender
 {"source": "refining", "destination": "ready_for_dev", "type": "advance",
- "label": "PM marks ready", "gate": "ready_for_dev"}
+ "label": "PM marks ready", "human_gate": "ready_for_dev"}
 
 // Receiver
 {"source": "ready_for_dev", "destination": "implementing", "type": "claim",
@@ -240,7 +242,7 @@ a pre-commit hook or CI check.
 
 The emitter:
 - Emits the cross-process legend block from cross-process transitions.
-- Emits the HITL legend block from gated transitions (those with `gate`) and their
+- Emits the HITL legend block from gated transitions (those with `human_gate`) and their
   destination states' reversibility.
 - Emits each transition in JSON order. `[hitl]` is appended to gated
   transition labels.
@@ -253,7 +255,7 @@ Authors never edit the mermaid or markdown files. The pre-commit / CI flow is:
 
 ```bash
 $ # edit refinement-states.json
-$ workflow validate
+$ workflow validate-workflow
 $ workflow generate-docs
 $ git add refinement-states.json refinement-states.mermaid refinement.md \
           roles.md issue-types.md README.md

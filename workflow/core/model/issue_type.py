@@ -29,7 +29,7 @@ class IssueType:
     treats `pr` as a pre-defined type so PR work items are first-class
     alongside bug/feature/etc., but they are spawned via `gh pr create`
     (typically by a developer from inner-loop's implementing state), not
-    via `workflow create`.
+    via `workflow create-issue`.
 
     Other backends may add similar fields; the framework's `type_id` is
     the canonical name.

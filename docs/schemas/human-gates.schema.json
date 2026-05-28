@@ -1,21 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://blemees.io/schemas/blemees-workflow/hcps.schema.json",
-  "title": "blemees-workflow HCP catalog",
-  "description": "Schema for `*-hcps.json` files. One catalog per process. Carries only **policy** fields — structural info (source state, destinations, triggering roles, reversibility) is derived from the paired state machine via `StateMachine.gate_*`. The process name is derived from the filename stem.",
+  "$id": "https://blemees.io/schemas/blemees-workflow/human-gates.schema.json",
+  "title": "blemees-workflow human-gate catalog",
+  "description": "Schema for `*-human-gates.json` files. One catalog per process. Carries only **policy** fields — structural info (source state, destinations, triggering roles, reversibility) is derived from the paired state machine via `StateMachine.gate_*`. The process name is derived from the filename stem.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["hcps"],
+  "required": ["human_gates"],
   "properties": {
     "$schema": {"type": "string"},
-    "hcps": {
+    "human_gates": {
       "type": "array",
-      "description": "Catalogued Human Control Points (gates) for this process.",
-      "items": {"$ref": "#/$defs/hcp"}
+      "description": "Catalogued human gates for this process.",
+      "items": {"$ref": "#/$defs/human_gate"}
     }
   },
   "$defs": {
-    "hcp": {
+    "human_gate": {
       "type": "object",
       "additionalProperties": true,
       "required": ["gate_name", "type", "allowed_levels", "default_level"],
@@ -23,15 +23,15 @@
         "gate_name": {
           "type": "string",
           "minLength": 1,
-          "description": "Unique gate identifier. Referenced by `gate` on transitions in the state machine, and by `control_point` in trust grants."
+          "description": "Unique gate identifier. Referenced by `human_gate` on transitions in the state machine, and by `control_point` in trust grants."
         },
         "type": {
           "enum": ["authority", "knowledge", "judgment", "taste", "reality"],
-          "description": "HCP type per hitl-principles.md. `taste` is an alias for `judgment`."
+          "description": "Human-gate type per hitl-principles.md. `taste` is an alias for `judgment`."
         },
         "allowed_levels": {
           "type": "array",
-          "description": "Which gating levels this HCP supports.",
+          "description": "Which gating levels this gate supports.",
           "minItems": 1,
           "items": {"enum": ["block", "audit"]},
           "uniqueItems": true

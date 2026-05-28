@@ -39,7 +39,7 @@
     },
     "pr": {
       "name": "Pull Request",
-      "description": "A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create`; the framework recognises it for cross-process modelling and documentation.",
+      "description": "A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.",
       "github_entity": "pull_request"
     },
     "incident": {

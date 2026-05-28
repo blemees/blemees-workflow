@@ -4,7 +4,12 @@ Re-exports the public types so callers can `from workflow.core.model import Stat
 without picking specific submodules.
 """
 
-from workflow.core.model.hcp import HCP, HCPCatalog, HCPLevel, HCPType
+from workflow.core.model.human_gate import (
+    HumanGate,
+    HumanGateCatalog,
+    HumanGateLevel,
+    HumanGateType,
+)
 from workflow.core.model.role import Role, RoleDirectory
 from workflow.core.model.state_machine import (
     ReversibilityClass,
@@ -26,11 +31,11 @@ __all__ = [
     "TerminalTaxonomy",
     "Transition",
     "TransitionType",
-    # HCP
-    "HCP",
-    "HCPCatalog",
-    "HCPLevel",
-    "HCPType",
+    # Human gates
+    "HumanGate",
+    "HumanGateCatalog",
+    "HumanGateLevel",
+    "HumanGateType",
     # Trust grants
     "Evidence",
     "TrustGrant",

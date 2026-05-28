@@ -66,12 +66,12 @@ def inner_loop_workflow_path(workflow_dir: Path) -> Path:
 
 @pytest.fixture
 def refinement_hcp_catalog_path(workflow_dir: Path) -> Path:
-    return workflow_dir / "refinement-hcps.json"
+    return workflow_dir / "refinement-human-gates.json"
 
 
 @pytest.fixture
 def inner_loop_hcp_catalog_path(workflow_dir: Path) -> Path:
-    return workflow_dir / "inner-loop-hcps.json"
+    return workflow_dir / "inner-loop-human-gates.json"
 
 
 @pytest.fixture

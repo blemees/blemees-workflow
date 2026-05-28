@@ -39,7 +39,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `declared` | resting | reversible-fast | — | — | — | — | — |
 | `triaging` | working | — | incident-commander | incident | — | — | — |

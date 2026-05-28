@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from workflow.backends.base import IssueState, MarkerChange
-from workflow.core.model.hcp import HCP, HCPCatalog
+from workflow.core.model.human_gate import HumanGate, HumanGateCatalog
 from workflow.core.model.state_machine import (
     ReversibilityClass,
     StateMachine,
@@ -40,23 +40,23 @@ class Operation(Enum):
     """
 
     # StateMachine
-    ADVANCE = "advance"
-    CLAIM = "claim"
-    RELEASE = "release"
-    # Catalogued — block
+    ADVANCE_ISSUE = "advance-issue"
+    CLAIM_ISSUE = "claim-issue"
+    RELEASE_ISSUE = "release-issue"
+    # Catalogued — block-level gate
     AWAIT_SIGNAL = "await-signal"
-    REVIEW = "review"
-    APPROVE = "approve"
-    REJECT = "reject"
-    # Catalogued — audit
+    REVIEW_BLOCKED = "review-blocked"
+    APPROVE_BLOCKED = "approve-blocked"
+    REJECT_BLOCKED = "reject-blocked"
+    # Catalogued — audit-level gate
     RECORD_ACTION = "record-action"
-    AUDIT = "audit"
-    CONFIRM = "confirm"
-    REVOKE = "revoke"
-    # Recognized
+    REVIEW_AUDIT = "review-audit"
+    APPROVE_AUDIT = "approve-audit"
+    REJECT_AUDIT = "reject-audit"
+    # Recognized — input request
     REQUEST_INPUT = "request-input"
-    ADVISE = "advise"
-    RESPOND = "respond"
+    REVIEW_REQUEST = "review-request"
+    RESPOND_REQUEST = "respond-request"
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,7 @@ def plan_operation(
     request: OperationRequest,
     state: IssueState,
     state_machine: StateMachine,
-    catalog: HCPCatalog | None = None,
+    catalog: HumanGateCatalog | None = None,
     grants: dict[str, TrustGrant] | None = None,
 ) -> OperationPlan:
     """Plan an operation against the current issue state.
@@ -105,35 +105,35 @@ def plan_operation(
     """
     grants = grants or {}
     match request.operation:
-        case Operation.ADVANCE:
+        case Operation.ADVANCE_ISSUE:
             return _plan_advance(request, state, state_machine, catalog, grants)
-        case Operation.CLAIM:
+        case Operation.CLAIM_ISSUE:
             return _plan_claim(request, state, state_machine)
-        case Operation.RELEASE:
+        case Operation.RELEASE_ISSUE:
             return _plan_release(request, state, state_machine)
         case Operation.AWAIT_SIGNAL:
             # Internal primitive — exposed for tests/composition; not a CLI command.
             return _plan_await_signal(request, state, state_machine, catalog)
-        case Operation.REVIEW:
+        case Operation.REVIEW_BLOCKED:
             return _plan_review(request, state)
-        case Operation.APPROVE:
+        case Operation.APPROVE_BLOCKED:
             return _plan_approve(request, state, state_machine, catalog)
-        case Operation.REJECT:
+        case Operation.REJECT_BLOCKED:
             return _plan_reject(request, state, catalog)
         case Operation.RECORD_ACTION:
             # Internal primitive — exposed for tests/composition; not a CLI command.
             return _plan_record_action(request, state, state_machine, catalog)
-        case Operation.AUDIT:
+        case Operation.REVIEW_AUDIT:
             return _plan_audit(request, state)
-        case Operation.CONFIRM:
+        case Operation.APPROVE_AUDIT:
             return _plan_confirm(request, state)
-        case Operation.REVOKE:
+        case Operation.REJECT_AUDIT:
             return _plan_revoke(request, state, catalog)
         case Operation.REQUEST_INPUT:
             return _plan_request_input(request, state, state_machine)
-        case Operation.ADVISE:
+        case Operation.REVIEW_REQUEST:
             return _plan_advise(request, state)
-        case Operation.RESPOND:
+        case Operation.RESPOND_REQUEST:
             return _plan_respond(request, state)
         case _:
             raise OperationError(f"Unknown operation: {request.operation!r}")
@@ -285,12 +285,12 @@ def _plan_advance(
     request: OperationRequest,
     state: IssueState,
     state_machine: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
     grants: dict[str, TrustGrant],
 ) -> OperationPlan:
     """Plan an `advance` request.
 
-    Consults the HCP catalog and the team's trust grants to determine whether
+    Consults the HumanGate catalog and the team's trust grants to determine whether
     the transition is HITL-gated. Dispatches to:
 
     - **Ungated:** direct state change.
@@ -311,10 +311,10 @@ def _plan_advance(
             f"{state.state!r}, transition source is {transition.source!r}."
         )
 
-    # Look up the HCP for this transition, if any.
-    hcp = _find_hcp_for_transition(catalog, transition)
+    # Look up the HumanGate for this transition, if any.
+    gate = _find_gate_for_transition(catalog, transition)
 
-    if hcp is None:
+    if gate is None:
         # Ungated direct advance. If it's a claim transition, validate the
         # actor's role and the issue's type against the destination working
         # state's `roles` / `issue_types`.
@@ -357,22 +357,22 @@ def _plan_advance(
             f"Invoked via transition {transition.label!r}."
         )
         return OperationPlan(
-            operation=Operation.ADVANCE,
+            operation=Operation.ADVANCE_ISSUE,
             change=change,
             audit_comment=audit,
         )
 
     # The transition is HITL-gated. Resolve the effective level.
-    from workflow.core.model.hcp import HCPLevel  # local import to avoid cycle
+    from workflow.core.model.human_gate import HumanGateLevel  # local import to avoid cycle
 
-    grant = grants.get(hcp.gate_name) if grants else None
+    grant = grants.get(gate.gate_name) if grants else None
     if grant is not None and grant.effective_today:
         effective_level = grant.current_level
     else:
-        effective_level = hcp.default_level
+        effective_level = gate.default_level
 
     # Validate no other gate is already in flight (principle 6).
-    if state.awaiting_gate and state.awaiting_gate != hcp.gate_name:
+    if state.awaiting_gate and state.awaiting_gate != gate.gate_name:
         raise OperationError(f"Another HITL gate is already in flight: {state.awaiting_gate!r}.")
     if state.audit_pending:
         raise OperationError(
@@ -383,18 +383,18 @@ def _plan_advance(
     # triggering roles, derived from the source state's `roles` list.
     _require_role_in_set(
         actor=request.actor,
-        allowed=state_machine.gate_triggering_roles(hcp.gate_name),
-        context=f"firing HCP gate {hcp.gate_name!r}",
+        allowed=state_machine.gate_triggering_roles(gate.gate_name),
+        context=f"firing HumanGate gate {gate.gate_name!r}",
     )
 
-    if effective_level is HCPLevel.BLOCK:
-        return _advance_block_gated(request, state, transition, hcp, state_machine)
+    if effective_level is HumanGateLevel.BLOCK:
+        return _advance_block_gated(request, state, transition, gate, state_machine)
     else:  # AUDIT
-        return _advance_audit_gated(request, state, transition, hcp, state_machine)
+        return _advance_audit_gated(request, state, transition, gate, state_machine)
 
 
-def _find_hcp_for_transition(catalog: HCPCatalog | None, transition: Transition) -> HCP | None:
-    """Find the HCP for the transition by looking up the gate name.
+def _find_gate_for_transition(catalog: HumanGateCatalog | None, transition: Transition) -> HumanGate | None:
+    """Find the HumanGate for the transition by looking up the gate name.
 
     Returns None when there's no catalog, the transition isn't gated, or
     no matching catalog row exists. The validator surfaces mismatches; the
@@ -410,26 +410,26 @@ def _advance_block_gated(
     request: OperationRequest,
     state: IssueState,
     transition: Transition,
-    hcp: HCP,
+    gate: HumanGate,
     state_machine: StateMachine,
 ) -> OperationPlan:
     """Block-gated advance: apply awaiting marker, hold claim, no state change."""
     if not request.body_text:
-        prepares = hcp.agent_prepares_path or "(catalog: agent_prepares not set)"
+        prepares = gate.agent_prepares_path or "(catalog: agent_prepares not set)"
         raise OperationError(
             f"Transition {transition.label!r} is gated at block level — provide "
             f"--body (or --body-from) with content matching {prepares}."
         )
     packet_body = request.body_text
-    change = MarkerChange(set_awaiting_gate=hcp.gate_name)
-    triggering = ", ".join(state_machine.gate_triggering_roles(hcp.gate_name)) or "?"
-    destinations = ", ".join(state_machine.gate_destinations(hcp.gate_name)) or "?"
+    change = MarkerChange(set_awaiting_gate=gate.gate_name)
+    triggering = ", ".join(state_machine.gate_triggering_roles(gate.gate_name)) or "?"
+    destinations = ", ".join(state_machine.gate_destinations(gate.gate_name)) or "?"
     audit = (
-        f"## await-signal: {hcp.gate_name}\n\n"
+        f"## await-signal: {gate.gate_name}\n\n"
         f"Triggered via `advance --transition {transition.label!r}`.\n"
         f"Triggering role(s): {triggering}\n"
         f"Destinations: {destinations}\n"
-        f"Agent prepares: {hcp.agent_prepares_path or 'n/a'}"
+        f"Agent prepares: {gate.agent_prepares_path or 'n/a'}"
     )
     return OperationPlan(
         operation=Operation.AWAIT_SIGNAL,
@@ -443,13 +443,13 @@ def _advance_audit_gated(
     request: OperationRequest,
     state: IssueState,
     transition: Transition,
-    hcp: HCP,
+    gate: HumanGate,
     state_machine: StateMachine,
 ) -> OperationPlan:
     """Audit-gated advance: state changes + audit-pending marker, atomically."""
-    if state_machine.gate_reversibility(hcp.gate_name) is ReversibilityClass.IRREVERSIBLE:
+    if state_machine.gate_reversibility(gate.gate_name) is ReversibilityClass.IRREVERSIBLE:
         raise OperationError(
-            f"Gate {hcp.gate_name!r} is at audit level but destination is "
+            f"Gate {gate.gate_name!r} is at audit level but destination is "
             "irreversible — invalid grant per hitl-principles.md#4."
         )
     notes = request.body_text
@@ -459,7 +459,7 @@ def _advance_audit_gated(
     dest = state_machine.states.get(transition.destination)
     change = MarkerChange(
         set_state=transition.destination,
-        set_audit_pending=hcp.gate_name,
+        set_audit_pending=gate.gate_name,
         clear_agent_claim=True,
         clear_last_state=True,
         close_issue=close,
@@ -468,7 +468,7 @@ def _advance_audit_gated(
     )
     audit = (
         f"## record-action: {transition.source} → {transition.destination} "
-        f"(gate {hcp.gate_name!r})\n\n"
+        f"(gate {gate.gate_name!r})\n\n"
         f"Triggered via `advance --transition {transition.label!r}`. "
         "Audit pending under the catalog/grant cadence."
     )
@@ -577,7 +577,7 @@ def _plan_release(
     if state.last_state is None:
         raise OperationError(
             "Cannot release: no last-state marker recorded. The issue must have "
-            "been claimed via `workflow claim` (which sets the origin) for "
+            "been claimed via `workflow claim-issue` (which sets the origin) for "
             "release to know where to return it."
         )
     # Sanity: a CLAIM transition from last_state → current must exist. If not,
@@ -614,9 +614,9 @@ def _plan_release(
 # ----- catalogued block operations -----
 
 
-def _require_gate(catalog: HCPCatalog | None, gate_name: str) -> HCP:
+def _require_gate(catalog: HumanGateCatalog | None, gate_name: str) -> HumanGate:
     if catalog is None:
-        raise OperationError(f"No HCP catalog loaded; cannot validate gate {gate_name!r}.")
+        raise OperationError(f"No HumanGate catalog loaded; cannot validate gate {gate_name!r}.")
     if not catalog.has(gate_name):
         raise OperationError(
             f"Gate {gate_name!r} is not in the catalog for {catalog.process_name!r}."
@@ -628,18 +628,18 @@ def _plan_await_signal(
     request: OperationRequest,
     state: IssueState,
     state_machine: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
         raise OperationError("await-signal requires --gate.")
-    hcp = _require_gate(catalog, request.gate)
-    gate_source = state_machine.gate_source(hcp.gate_name)
+    gate = _require_gate(catalog, request.gate)
+    gate_source = state_machine.gate_source(gate.gate_name)
     if state.state and gate_source and state.state != gate_source:
         raise OperationError(
-            f"Cannot await-signal for gate {hcp.gate_name!r}: "
+            f"Cannot await-signal for gate {gate.gate_name!r}: "
             f"current state is {state.state!r}; gate fires from {gate_source!r}."
         )
-    if state.awaiting_gate and state.awaiting_gate != hcp.gate_name:
+    if state.awaiting_gate and state.awaiting_gate != gate.gate_name:
         # Principle 6 — one HITL gate in flight at a time.
         raise OperationError(f"Another HITL gate is already in flight: {state.awaiting_gate!r}.")
     if state.audit_pending:
@@ -648,21 +648,21 @@ def _plan_await_signal(
         )
 
     packet_body = request.body_text
-    if packet_body is None and hcp.agent_prepares_path:
+    if packet_body is None and gate.agent_prepares_path:
         logger.info(
             "await-signal for %r: no packet body provided; catalog points at %s",
-            hcp.gate_name,
-            hcp.agent_prepares_path,
+            gate.gate_name,
+            gate.agent_prepares_path,
         )
 
-    change = MarkerChange(set_awaiting_gate=hcp.gate_name)
-    triggering = ", ".join(state_machine.gate_triggering_roles(hcp.gate_name)) or "?"
-    destinations = ", ".join(state_machine.gate_destinations(hcp.gate_name)) or "?"
+    change = MarkerChange(set_awaiting_gate=gate.gate_name)
+    triggering = ", ".join(state_machine.gate_triggering_roles(gate.gate_name)) or "?"
+    destinations = ", ".join(state_machine.gate_destinations(gate.gate_name)) or "?"
     audit = (
-        f"## await-signal: {hcp.gate_name}\n\n"
+        f"## await-signal: {gate.gate_name}\n\n"
         f"Triggering role(s): {triggering}\n"
         f"Destinations: {destinations}\n"
-        f"Agent prepares: {hcp.agent_prepares_path or 'n/a'}"
+        f"Agent prepares: {gate.agent_prepares_path or 'n/a'}"
     )
     return OperationPlan(
         operation=request.operation,
@@ -692,22 +692,22 @@ def _plan_approve(
     request: OperationRequest,
     state: IssueState,
     state_machine: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
         raise OperationError("approve requires --gate.")
-    hcp = _require_gate(catalog, request.gate)
-    if state.awaiting_gate != hcp.gate_name:
+    gate = _require_gate(catalog, request.gate)
+    if state.awaiting_gate != gate.gate_name:
         raise OperationError(
-            f"Cannot approve {hcp.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
+            f"Cannot approve {gate.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
         )
     destination = request.destination
-    gate_destinations = state_machine.gate_destinations(hcp.gate_name)
-    is_verdict_style = state_machine.gate_is_verdict_style(hcp.gate_name)
+    gate_destinations = state_machine.gate_destinations(gate.gate_name)
+    is_verdict_style = state_machine.gate_is_verdict_style(gate.gate_name)
     if not is_verdict_style:
         if not gate_destinations:
             raise OperationError(
-                f"Gate {hcp.gate_name!r} has no destinations declared on the "
+                f"Gate {gate.gate_name!r} has no destinations declared on the "
                 f"state machine."
             )
         only = gate_destinations[0]
@@ -720,7 +720,7 @@ def _plan_approve(
             )
     else:
         if not destination:
-            raise OperationError(f"Verdict-style gate {hcp.gate_name!r} requires --destination.")
+            raise OperationError(f"Verdict-style gate {gate.gate_name!r} requires --destination.")
         if destination not in gate_destinations:
             raise OperationError(
                 f"Destination {destination!r} is not among the gate's options "
@@ -735,7 +735,7 @@ def _plan_approve(
         set_state=destination,
         clear_awaiting_gate=True,
         set_reviewing=False,
-        record_approval=hcp.gate_name,
+        record_approval=gate.gate_name,
         clear_agent_claim=True,
         clear_last_state=True,
         close_issue=close,
@@ -743,7 +743,7 @@ def _plan_approve(
         set_pr_ready=bool(dest and dest.mark_pr_ready),
     )
     audit = (
-        f"## approve: gate {hcp.gate_name!r} → {destination}\n\nAuthorized via approve operation."
+        f"## approve: gate {gate.gate_name!r} → {destination}\n\nAuthorized via approve operation."
     )
     return OperationPlan(
         operation=request.operation,
@@ -755,14 +755,14 @@ def _plan_approve(
 def _plan_reject(
     request: OperationRequest,
     state: IssueState,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
         raise OperationError("reject requires --gate.")
-    hcp = _require_gate(catalog, request.gate)
-    if state.awaiting_gate != hcp.gate_name:
+    gate = _require_gate(catalog, request.gate)
+    if state.awaiting_gate != gate.gate_name:
         raise OperationError(
-            f"Cannot reject {hcp.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
+            f"Cannot reject {gate.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
         )
     feedback = request.body_text
     # State unchanged; clear queue and review markers; agent retains its claim
@@ -770,10 +770,10 @@ def _plan_reject(
     change = MarkerChange(
         clear_awaiting_gate=True,
         set_reviewing=False,
-        record_rejection=hcp.gate_name,
+        record_rejection=gate.gate_name,
     )
     audit = (
-        f"## reject: gate {hcp.gate_name!r}\n\n"
+        f"## reject: gate {gate.gate_name!r}\n\n"
         "State unchanged; agent retains claim and iterates on the packet."
     )
     return OperationPlan(
@@ -791,23 +791,23 @@ def _plan_record_action(
     request: OperationRequest,
     state: IssueState,
     state_machine: StateMachine,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
         raise OperationError("record-action requires --gate.")
-    hcp = _require_gate(catalog, request.gate)
-    if state_machine.gate_reversibility(hcp.gate_name) is ReversibilityClass.IRREVERSIBLE:
+    gate = _require_gate(catalog, request.gate)
+    if state_machine.gate_reversibility(gate.gate_name) is ReversibilityClass.IRREVERSIBLE:
         raise OperationError(
             "record-action requires a reversible destination (hitl-principles.md#4)."
         )
     destination = request.destination
-    gate_destinations = state_machine.gate_destinations(hcp.gate_name)
-    if not state_machine.gate_is_verdict_style(hcp.gate_name):
+    gate_destinations = state_machine.gate_destinations(gate.gate_name)
+    if not state_machine.gate_is_verdict_style(gate.gate_name):
         destination = destination or (gate_destinations[0] if gate_destinations else None)
     else:
         if not destination:
             raise OperationError(
-                f"Verdict-style audit gate {hcp.gate_name!r} requires --destination."
+                f"Verdict-style audit gate {gate.gate_name!r} requires --destination."
             )
         if destination not in gate_destinations:
             raise OperationError(
@@ -820,20 +820,20 @@ def _plan_record_action(
                 f"transition destination {transition.destination!r} differs from "
                 f"resolved gate destination {destination!r}."
             )
-    if state.audit_pending and state.audit_pending != hcp.gate_name:
+    if state.audit_pending and state.audit_pending != gate.gate_name:
         raise OperationError(f"Another audit is pending ({state.audit_pending!r}).")
     # Record-action leaves the working state (same shape as audit-gated advance).
     close, reason = _terminal_close_info(state_machine, destination)
     change = MarkerChange(
         set_state=destination,
-        set_audit_pending=hcp.gate_name,
+        set_audit_pending=gate.gate_name,
         clear_agent_claim=True,
         clear_last_state=True,
         close_issue=close,
         close_reason=reason,
     )
     audit = (
-        f"## record-action: {state.state} → {destination} (gate {hcp.gate_name!r})\n\n"
+        f"## record-action: {state.state} → {destination} (gate {gate.gate_name!r})\n\n"
         "Agent acted; audit pending under cadence in the catalog/grant."
     )
     return OperationPlan(
@@ -882,7 +882,7 @@ def _plan_confirm(request: OperationRequest, state: IssueState) -> OperationPlan
 def _plan_revoke(
     request: OperationRequest,
     state: IssueState,
-    catalog: HCPCatalog | None,
+    catalog: HumanGateCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
         raise OperationError("revoke requires --gate.")
@@ -898,8 +898,8 @@ def _plan_revoke(
     )
     on_revoke = ""
     if catalog is not None and catalog.has(request.gate):
-        hcp = catalog.get(request.gate)
-        if hcp.rationale:
+        gate = catalog.get(request.gate)
+        if gate.rationale:
             on_revoke = "\n\nSee catalog rationale for on_revoke procedure."
     audit = (
         f"## revoke: {request.gate!r}\n\n"
@@ -931,31 +931,31 @@ def _plan_request_input(
     if not request.body_text:
         raise OperationError("request-input requires --body or --body-from.")
 
-    # The current state must be a working state that declares input_topics.
+    # The current state must be a working state that declares human_inputs.
     # The topic must be one of the declared ids — no free-form fallback.
     current = state_machine.states.get(state.state) if state.state else None
-    if current is None or not current.input_topics:
+    if current is None or not current.human_inputs:
         raise OperationError(
-            f"State {state.state!r} does not declare `input_topics`; "
+            f"State {state.state!r} does not declare `human_inputs`; "
             f"`request-input` is not available here. Either declare topics "
-            f"on the state (and one in the shared `input-topics.json`) or "
+            f"on the state (and one in the shared `human-inputs.json`) or "
             f"release the issue."
         )
     if not request.topic:
         raise OperationError(
             f"request-input requires --topic. Allowed topics at "
-            f"{state.state!r}: {sorted(current.input_topics)}."
+            f"{state.state!r}: {sorted(current.human_inputs)}."
         )
-    if request.topic not in current.input_topics:
+    if request.topic not in current.human_inputs:
         raise OperationError(
             f"Topic {request.topic!r} is not declared on state "
-            f"{state.state!r}. Allowed: {sorted(current.input_topics)}."
+            f"{state.state!r}. Allowed: {sorted(current.human_inputs)}."
         )
 
     question = request.body_text
     change = MarkerChange(
         set_awaiting_input=True,
-        set_input_topic=request.topic,
+        set_human_input=request.topic,
     )
     audit = (
         f"## request-input: {request.topic}\n\n"
@@ -994,7 +994,7 @@ def _plan_respond(request: OperationRequest, state: IssueState) -> OperationPlan
     change = MarkerChange(
         set_awaiting_input=False,
         set_advising=False,
-        clear_input_topic=True,
+        clear_human_input=True,
         record_response=True,
     )
     audit = "## resolve: recognized HITL moment closed"

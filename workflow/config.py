@@ -3,7 +3,7 @@
 ## Discovery model
 
 The tool operates against a **workflows directory** (where the canonical
-`*-states.json`, `*-hcps.json`, and `roles.json` files live) and,
+`*-states.json`, `*-human-gates.json`, and `roles.json` files live) and,
 separately, an **agent home** — a directory on the user's filesystem that
 represents one agent's identity. Each agent has its own home; configuration
 that lives there does not bleed across agents.
@@ -50,20 +50,20 @@ from pathlib import Path
 from typing import Any
 
 from workflow.backends.base import TrackerBackend
-from workflow.core.model.hcp import HCPCatalog
-from workflow.core.model.input_topic import InputTopicDirectory
+from workflow.core.model.human_gate import HumanGateCatalog
+from workflow.core.model.human_input import HumanInputDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
 from workflow.core.model.role import RoleDirectory
 from workflow.core.model.state_machine import StateMachine
 from workflow.core.model.trust_grant import TrustGrant
 from workflow.core.parser import (
     load_team_grants,
-    parse_hcp_catalog,
+    parse_human_gate_catalog,
     parse_issue_type_directory,
     parse_role_directory,
     parse_state_machine,
 )
-from workflow.core.parser.input_topic_directory import parse_input_topic_directory
+from workflow.core.parser.human_input_directory import parse_human_input_directory
 from workflow.errors import ConfigError
 
 logger = logging.getLogger(__name__)
@@ -78,10 +78,10 @@ _AGENT_WORKFLOWS_SUBDIR = "workflows"
 class Process:
     process_name: str
     state_machine: StateMachine
-    catalog: HCPCatalog | None = None
+    catalog: HumanGateCatalog | None = None
     role_directory: RoleDirectory | None = None
     issue_type_directory: IssueTypeDirectory | None = None
-    input_topic_directory: InputTopicDirectory | None = None
+    human_input_directory: HumanInputDirectory | None = None
     grants: dict[str, TrustGrant] = field(default_factory=dict)
     backend: TrackerBackend | None = None
     workflow_dir: Path | None = None  # dir containing *-states.json files
@@ -237,7 +237,7 @@ def load_process(
 
     `process_name` is the name of the workflow to load (e.g., `refinement`);
     the corresponding files are read from `<workflow_dir>/<name>-states.json`
-    and `<workflow_dir>/<name>-hcps.json`. `roles.json` is read from the
+    and `<workflow_dir>/<name>-human-gates.json`. `roles.json` is read from the
     same directory.
 
     Discovery: if `workflow_dir` is not supplied, it is found via
@@ -275,11 +275,11 @@ def load_process(
         )
     state_machine = parse_state_machine(state_machine_path)
 
-    # HCP catalog (optional — pre-HITL workflows have none).
-    catalog: HCPCatalog | None = None
-    hcp_catalog_path = workflow_dir / f"{process_name}-hcps.json"
-    if hcp_catalog_path.exists():
-        catalog = parse_hcp_catalog(hcp_catalog_path)
+    # Human-gate catalog (optional — pre-HITL workflows have none).
+    catalog: HumanGateCatalog | None = None
+    human_gate_catalog_path = workflow_dir / f"{process_name}-human-gates.json"
+    if human_gate_catalog_path.exists():
+        catalog = parse_human_gate_catalog(human_gate_catalog_path)
 
     # Role directory (optional, shared across workflows).
     role_directory: RoleDirectory | None = None
@@ -293,11 +293,11 @@ def load_process(
     if issue_types_path.exists():
         issue_type_directory = parse_issue_type_directory(issue_types_path)
 
-    # Input topic directory (optional, shared across workflows).
-    input_topic_directory: InputTopicDirectory | None = None
-    input_topics_path = workflow_dir / "input-topics.json"
-    if input_topics_path.exists():
-        input_topic_directory = parse_input_topic_directory(input_topics_path)
+    # Human-input directory (optional, shared across workflows).
+    human_input_directory: HumanInputDirectory | None = None
+    human_inputs_path = workflow_dir / "human-inputs.json"
+    if human_inputs_path.exists():
+        human_input_directory = parse_human_input_directory(human_inputs_path)
 
     # Trust grants — priority: explicit grants_dir > env > agent config > default.
     grants: dict[str, TrustGrant] = {}
@@ -320,7 +320,7 @@ def load_process(
         catalog=catalog,
         role_directory=role_directory,
         issue_type_directory=issue_type_directory,
-        input_topic_directory=input_topic_directory,
+        human_input_directory=human_input_directory,
         grants=grants,
         backend=backend,
         workflow_dir=workflow_dir,

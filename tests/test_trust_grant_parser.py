@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from workflow.core.model.hcp import HCPLevel
+from workflow.core.model.human_gate import HumanGateLevel
 from workflow.core.parser.trust_grant import (
     load_team_grants,
     parse_trust_grant,
@@ -59,7 +59,7 @@ def test_parse_audit_level_grant() -> None:
     assert grant.control_point == "ready_for_dev"
     assert grant.workflow == "refinement"
     assert grant.team == "acme-eng"
-    assert grant.current_level is HCPLevel.AUDIT
+    assert grant.current_level is HumanGateLevel.AUDIT
     assert grant.parameters.cadence == "daily"
     assert grant.parameters.on_revoke == "rebound_to_refinement"
     assert grant.evidence
@@ -156,7 +156,7 @@ def test_load_team_grants_directory(tmp_path: Path) -> None:
 
     grants = load_team_grants(team_dir)
     assert "ready_for_dev" in grants
-    assert grants["ready_for_dev"].current_level is HCPLevel.AUDIT
+    assert grants["ready_for_dev"].current_level is HumanGateLevel.AUDIT
 
 
 def test_load_team_grants_nonexistent_returns_empty(tmp_path: Path) -> None:

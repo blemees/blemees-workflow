@@ -5,9 +5,9 @@ grant directory into a `dict[control_point, TrustGrant]`.
 
 Enforces only the hard structural rules from `trust-grant-schema.md` § 7
 that can be checked from the file alone (presence of fields, valid
-on_timeout, etc.). Cross-artifact rules (control_point matches a real HCP,
-level in HCP's allowed_levels, evidence currency vs catalog) are the
-validator's job.
+on_timeout, etc.). Cross-artifact rules (control_point matches a real
+human gate, level in the gate's allowed_levels, evidence currency vs
+catalog) are the validator's job.
 
 JSON was chosen over YAML for strictness: a truncated file fails to parse
 loudly rather than degrading silently into a partial structure. See the
@@ -22,7 +22,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from workflow.core.model.hcp import HCPLevel
+from workflow.core.model.human_gate import HumanGateLevel
 from workflow.core.model.trust_grant import (
     Evidence,
     TrustGrant,
@@ -80,7 +80,7 @@ def parse_trust_grant(source: str | Path) -> TrustGrant:
 
     level_raw = str(data["current_level"]).strip().lower()
     try:
-        current_level = HCPLevel(level_raw)
+        current_level = HumanGateLevel(level_raw)
     except ValueError as exc:
         raise ParseError(
             f"Invalid current_level {level_raw!r}; must be 'block' or 'audit'"

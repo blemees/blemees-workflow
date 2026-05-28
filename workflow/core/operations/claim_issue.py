@@ -26,7 +26,7 @@ def run(
     actor: str | None = None,
 ) -> OperationResult:
     request = OperationRequest(
-        operation=Operation.CLAIM,
+        operation=Operation.CLAIM_ISSUE,
         issue_id=issue_id,
         role=role,
         destination=destination,

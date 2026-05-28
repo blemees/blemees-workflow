@@ -27,7 +27,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Input topics | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_backport` | resting | reversible-slow | — | — | — | — | — |
 | `cherry_picking` | working | — | developer | backport | — | — | — |
