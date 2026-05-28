@@ -1,5 +1,7 @@
 # Process: pr
 
+The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state; the same workflow handles independent PRs (e.g., backports).
+
 > Defined in: `pr-states.json`
 
 ## Issue types accepted
@@ -10,6 +12,7 @@
 
 ```mermaid
 stateDiagram-v2
+    direction TB
     draft --> drafting: developer claims draft
     drafting --> needs_review: developer marks PR ready for review
     needs_review --> reviewing: reviewer claims PR
@@ -24,23 +27,10 @@ stateDiagram-v2
     qa_failed --> fixing_qa: developer claims PR for fixes
     fixing_qa --> needs_review: developer re-requests review
     qa_passed --> merging: developer claims and merges
-    merging --> staged: verified staging deploy
+    merging --> merged: verified staging deploy
     merging --> needs_review: merge conflict or failed staging deploy
-    staged --> [*]: terminal (shipped)
-
-    note right of draft: reversible-fast
-    note right of drafting: role=developer, types=pr
-    note right of needs_review: reversible-fast
-    note right of reviewing: role=peer-reviewer, types=pr
-    note right of changes_requested: reversible-fast
-    note right of fixing_review: role=developer, types=pr
-    note right of needs_qa: reversible-fast
-    note right of verifying: role=tester, types=pr
-    note right of qa_passed: reversible-fast
-    note right of qa_failed: reversible-fast
-    note right of fixing_qa: role=developer, types=pr
-    note right of merging: role=developer, types=pr
-    note right of staged: reversible-slow
+    merged --> [*]: terminal (shipped)
+    [*] --> draft: spawn
 ```
 
 ## States
@@ -59,7 +49,7 @@ stateDiagram-v2
 | `qa_failed` | resting | reversible-fast | — | — | — | — | — |
 | `fixing_qa` | working | — | developer | pr | — | — | — |
 | `merging` | working | — | developer | pr | — | — | — |
-| `staged` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `merged` | terminal | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 
@@ -79,5 +69,5 @@ stateDiagram-v2
 | `qa_failed` | `fixing_qa` | claim | 'developer claims PR for fixes' | — | — |
 | `fixing_qa` | `needs_review` | advance | 'developer re-requests review' | — | — |
 | `qa_passed` | `merging` | claim | 'developer claims and merges' | — | — |
-| `merging` | `staged` | advance | 'verified staging deploy' | — | — |
+| `merging` | `merged` | advance | 'verified staging deploy' | — | — |
 | `merging` | `needs_review` | advance | 'merge conflict or failed staging deploy' | — | — |

@@ -111,6 +111,58 @@ class Spawn:
 
 
 @dataclass(frozen=True)
+class Collects:
+    """Fan-in contract carried by a resting state — the inverse of `Spawn`.
+
+    Issues created at the host state gather existing issues from another
+    process as contributors. Used to model the release-train pattern:
+    `release.accumulating` collects staged inner-loop work.
+
+    Authoring lives on the **receiver** side (mirrors the existing
+    handoff/spawn pattern). The framework queries the candidate set at
+    `create-issue` time; it does NOT auto-create the collector — the
+    human decides when to cut. `from_states` must be resting or terminal
+    in the source process (collecting from a working state would
+    conflict with that state's claim).
+
+    `advance_on` is selective contributor-side feedback: when the
+    collector reaches a listed state, every contributor (bearing the
+    `collected-by:<collector>` marker) auto-advances to the mapped
+    state on the source process. Mirrors `Spawn.advance_on` but flows
+    the other way — instead of child-terminal → parent-state, it's
+    collector-state → contributor-state. Targets must be resting or
+    terminal on the source process (no auto-enter into working states).
+    """
+
+    process: str             # source process name
+    from_states: tuple[str, ...]  # resting/terminal states on the source process
+    # Optional issue-type filter. When empty, every issue type accepted
+    # by the source process is eligible. When set, candidates must
+    # carry one of the listed types. Use this when one process has
+    # multiple "flavors" of collectors targeting the same from_state
+    # (e.g., a `cut` release collecting bug/feature/chore PRs and a
+    # `hotfix_cut` release collecting only hotfix PRs).
+    issue_types: tuple[str, ...] = ()
+    advance_on: tuple[tuple[str, str], ...] = ()  # (collector_state, contributor_target_state)
+    # Collector states that **drop** the collection without moving the
+    # contributors. The contributor's state is unchanged; the framework
+    # clears the `collected-by:<collector>` label so the contributor is
+    # eligible for future collectors. Use this when the collector
+    # outcome (e.g., release abandoned) means "this collection didn't
+    # happen — the items are still candidates."
+    release_on: tuple[str, ...] = ()
+
+    def contributor_next_state(self, collector_state: str) -> str | None:
+        for k, v in self.advance_on:
+            if k == collector_state:
+                return v
+        return None
+
+    def releases_on(self, collector_state: str) -> bool:
+        return collector_state in self.release_on
+
+
+@dataclass(frozen=True)
 class State:
     """A node on the workflow diagram.
 
@@ -143,9 +195,22 @@ class State:
     # The registry resolves the other end(s) by name. Only valid on resting
     # states. Working / terminal states cannot be handover interfaces.
     handoff: bool = False
+    # External entry — `is_initial: true` on a resting state declares it as
+    # an external entry point. New issues materialize here from outside
+    # the workflow (manual `create-issue`, webhook, scheduled job).
+    # `initial_label`, when set, names the trigger (e.g. "issue created",
+    # "alert fires"). Only valid on resting states; mutually exclusive
+    # with `collects` and with being a spawn target — issues either
+    # arrive from outside, are gathered via collect, or are spawned.
+    is_initial: bool = False
+    initial_label: str | None = None
     # Subprocess / spawn contract. Only valid on working or terminal states.
     # See Spawn docstring for the working-vs-terminal distinction.
     spawns: Spawn | None = None
+    # Fan-in contract — only valid on resting states. See Collects docstring.
+    # When set, `create-issue --to <this state>` consults this to compute
+    # candidate contributor issues from another process.
+    collects: Collects | None = None
     # When True, advancing into this state flips the underlying PR from
     # draft to ready-for-review on the tracker (via `gh pr ready` on GitHub).
     # No-op when the issue isn't a pull request. Only valid on resting or
@@ -227,6 +292,7 @@ class StateMachine:
     """
 
     name: str
+    description: str | None = None
     states: dict[str, State] = field(default_factory=dict)
     transitions: list[Transition] = field(default_factory=list)
     gates_in_legend: dict[str, ReversibilityClass] = field(default_factory=dict)

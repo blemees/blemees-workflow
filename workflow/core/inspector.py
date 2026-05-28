@@ -36,7 +36,7 @@ class AvailableTransition:
 
     label: str
     source: str
-    destination: str  # state name or "[*]" for cross-process exits
+    destination: str  # state name (always — `[*]` endpoints aren't authored)
     transition_type: TransitionType
 
     # HITL enrichment (None / empty when transition is not gated)
@@ -83,9 +83,7 @@ def available_transitions(
         if t.source != source_state:
             continue
 
-        dst_state = (
-            state_machine.states.get(t.destination) if t.destination != "[*]" else None
-        )
+        dst_state = state_machine.states.get(t.destination)
 
         gate: HumanGate | None = None
         if t.is_gated and catalog is not None and t.gate_name is not None:

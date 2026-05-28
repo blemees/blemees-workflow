@@ -13,8 +13,6 @@ transitions in the output follows the JSON's order.
 from __future__ import annotations
 
 from workflow.core.model.state_machine import (
-    ReversibilityClass,
-    State,
     StateClass,
     StateMachine,
     Transition,
@@ -22,7 +20,11 @@ from workflow.core.model.state_machine import (
 )
 
 
-def emit_mermaid(state_machine: StateMachine) -> str:
+def emit_mermaid(
+    state_machine: StateMachine,
+    *,
+    spawn_targets: set[str] | None = None,
+) -> str:
     """Render a `StateMachine` as a `stateDiagram-v2` mermaid document.
 
     The output includes:
@@ -30,12 +32,23 @@ def emit_mermaid(state_machine: StateMachine) -> str:
       transitions exist (principle 9).
     - The HITL gate legend with reversibility (principle 11).
     - All transitions in JSON order.
-    - Notes for states with roles, reversibility, terminal_taxonomy,
-      or free-form notes — placed only when authored. For shared handoff
-      states, the receiver carries the note; the sender's side leaves it
-      blank (per the convention in `docs/state_machine-authoring.md`).
+    - Entry / exit / handoff sinks anchored to the `[*]` sentinel.
+
+    `spawn_targets`, when supplied, is the set of state names in this
+    process that are the `initial_state` of some sibling process's
+    spawn. Each such state gets a `[*] --> state: spawn` arrow on the
+    diagram so the reader sees "issues arrive here from another
+    process's spawn". The CLI computes this set per-process from the
+    registry; tests can omit it.
+
+    Per-state metadata (roles, issue_types, reversibility,
+    terminal_taxonomy, handoff flag) is intentionally NOT rendered
+    on the diagram — it would clutter the layout. The per-process
+    markdown (`<process>.md`) carries the full states table, which is
+    the right place for that detail.
     """
-    lines: list[str] = ["stateDiagram-v2"]
+    spawn_targets = spawn_targets or set()
+    lines: list[str] = ["stateDiagram-v2", "    direction TB"]
 
     cross_legend = _emit_cross_process_legend(state_machine)
     if cross_legend:
@@ -46,6 +59,17 @@ def emit_mermaid(state_machine: StateMachine) -> str:
     if hitl_legend:
         lines.extend(hitl_legend)
         lines.append("")
+
+    # External entry edges (`[*] --> state`) are derived from each state's
+    # `is_initial` flag. Emitted before the authored transitions so the
+    # diagram reads entry → body → exit.
+    for state in state_machine.states.values():
+        if not state.is_initial:
+            continue
+        if state.initial_label:
+            lines.append(f"    [*] --> {state.name}: {state.initial_label}")
+        else:
+            lines.append(f"    [*] --> {state.name}")
 
     for t in state_machine.transitions:
         lines.append(f"    {_emit_transition(t, state_machine)}")
@@ -66,10 +90,50 @@ def emit_mermaid(state_machine: StateMachine) -> str:
                 f"    {state.name} --> [*]: terminal ({state.terminal_taxonomy.value})"
             )
 
-    note_lines = _emit_notes(state_machine)
-    if note_lines:
-        lines.append("")
-        lines.extend(note_lines)
+    # Auto-emit handoff arrows for each `handoff: true` state. The
+    # direction(s) emitted depend on this process's role:
+    #   - sender side    (no local claim out) → `state --> [*]: handoff`
+    #   - receiver side  (no local advance in) → `[*] --> state: handoff`
+    # A state can be both at once (silent declaration or genuinely
+    # bidirectional handoff); both arrows render. A state that's neither
+    # (local advance in AND local claim out) is fully internal — no
+    # handoff arrows needed beyond its in-process transitions.
+    claims_out_of: set[str] = {
+        t.source
+        for t in state_machine.transitions
+        if t.transition_type is TransitionType.CLAIM
+    }
+    advances_into: set[str] = {
+        t.destination
+        for t in state_machine.transitions
+        if t.transition_type
+        in (TransitionType.ADVANCE, TransitionType.EVENT)
+    }
+    for state in state_machine.states.values():
+        if not state.handoff:
+            continue
+        if state.name not in advances_into:
+            # Receiver side: issue arrives at this state from outside.
+            lines.append(f"    [*] --> {state.name}: handoff")
+        if state.name not in claims_out_of:
+            # Sender side: issue leaves this state to another process.
+            lines.append(f"    {state.name} --> [*]: handoff")
+
+    # Spawn-target arrows. Sibling processes that spawn into this
+    # process declare an `initial_state`; from this process's diagram
+    # the issue arrives at that state from outside (the spawning
+    # parent process), so an `[*] -->` arrow visually anchors it.
+    for state_name in sorted(spawn_targets):
+        if state_name in state_machine.states:
+            lines.append(f"    [*] --> {state_name}: spawn")
+
+    # Collect entry arrows. States declaring `collects` are entered via
+    # `create-issue --to <state>` (with the contributor refs); the
+    # collector issue materializes at this state. Visually that's an
+    # entry from outside the local transitions.
+    for state in state_machine.states.values():
+        if state.collects is not None:
+            lines.append(f"    [*] --> {state.name}: collect")
 
     return "\n".join(lines) + "\n"
 
@@ -114,84 +178,9 @@ def _emit_transition(t: Transition, state_machine: StateMachine) -> str:
     if t.is_gated:
         label_parts.append("[hitl]")
 
-    # Terminal sinks include the taxonomy in the label for visual clarity.
-    if t.destination == "[*]" and t.source in state_machine.states:
-        src = state_machine.states[t.source]
-        if src.state_class is StateClass.TERMINAL and src.terminal_taxonomy is not None:
-            taxonomy = f"terminal ({src.terminal_taxonomy.value})"
-            if not t.label:
-                label_parts = [taxonomy]
-            else:
-                label_parts.append(taxonomy)
-
     body = " ".join(label_parts).strip()
     if body:
         return f"{t.source} --> {t.destination}: {body}"
     return f"{t.source} --> {t.destination}"
 
 
-def _emit_notes(state_machine: StateMachine) -> list[str]:
-    lines: list[str] = []
-    for state in state_machine.states.values():
-        text = _state_note_text(state, state_machine)
-        if text is None:
-            continue
-        side = _choose_note_side(state, state_machine)
-        lines.append(f"    note {side} of {state.name}: {text}")
-    return lines
-
-
-def _state_note_text(state: State, state_machine: StateMachine) -> str | None:
-    """Build the per-state note text from typed fields + free-form notes.
-
-    Returns None when the state has no metadata worth showing. Shared
-    handoff states whose receiver-side metadata is missing get no note on
-    the sender's side (per convention)."""
-    parts: list[str] = []
-    if state.roles:
-        if len(state.roles) == 1:
-            parts.append(f"role={state.roles[0]}")
-        else:
-            parts.append(f"roles={', '.join(state.roles)}")
-    if state.issue_types:
-        parts.append(f"types={', '.join(state.issue_types)}")
-    if state.handoff:
-        parts.append("handoff")
-    # Reversibility on the state node only when it isn't already covered by
-    # the HITL legend (the legend's reversibility column propagates back to
-    # the state from the parser's view; emit on the state when there's no
-    # legend entry for it).
-    legend_has = state.name in state_machine.gates_in_legend
-    if state.reversibility is not None and not legend_has:
-        parts.append(_reversibility_token(state.reversibility))
-    # Free-form notes from JSON come after structured metadata.
-    if state.notes:
-        parts.extend(state.notes)
-    if not parts:
-        return None
-    return ", ".join(parts)
-
-
-def _reversibility_token(rev: ReversibilityClass) -> str:
-    return rev.value
-
-
-def _choose_note_side(state: State, state_machine: StateMachine) -> str:
-    """Pick a layout-friendly note side for a state.
-
-    Heuristic: states near the top of the diagram (entry side) get
-    `left of`, others get `right of`. Mermaid renders these by attaching
-    the note to the named side of the state node; the choice is purely
-    visual.
-    """
-    if not state_machine.transitions:
-        return "right"
-    first_state = next(
-        (
-            t.destination
-            for t in state_machine.transitions
-            if t.source == "[*]" and t.destination != "[*]"
-        ),
-        None,
-    )
-    return "left" if state.name == first_state else "right"

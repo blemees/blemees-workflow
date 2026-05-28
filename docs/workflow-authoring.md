@@ -28,7 +28,7 @@ surface via `workflow validate-workflow`.
 ```json
 {
   "states": {
-    "raw": {"class": "resting", "reversibility": "reversible-fast"},
+    "raw": {"class": "resting", "reversibility": "reversible-fast", "initial": "issue created"},
     "refining": {
       "class": "working",
       "roles": ["product-manager"],
@@ -42,7 +42,6 @@ surface via `workflow validate-workflow`.
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "raw", "type": "event", "label": "issue created"},
     {"source": "raw", "destination": "refining", "type": "claim", "label": "product-manager claims raw"},
     {"source": "refining", "destination": "done", "type": "advance", "label": "product-manager ships"}
   ]
@@ -58,6 +57,7 @@ with a terminal sink and a `note left of raw: claim-role=product-manager`.
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
+| `description` | string | optional | One-paragraph prose summary. Rendered into the per-process `<process>.md` opening section and used as this process's tail in the workflow `README.md` index. Keep it under ~3 sentences. |
 | `states` | object | required | Map of state-id → state spec. |
 | `transitions` | list | required | Ordered list of transition specs. |
 
@@ -76,6 +76,8 @@ The human-gate catalog path follows the same convention as
 | `issue_types` | array of strings | required on working states, forbidden on resting/terminal | Issue type ids this working state accepts. Checked at claim time: the issue's type must be in this set. The process's overall accepted set is derived as the union of every working state's `issue_types` — there is no separate process-level field. |
 | `close_reason` | string | required on terminal states, forbidden elsewhere | Backend close-reason. For GitHub: `"completed"` or `"not planned"`. Every terminal closes the tracker's issue with this reason. |
 | `handoff` | bool | optional, resting states only | Marks the state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Replaces the old `cross_process` kind:`shared` transitions. |
+| `initial` | bool or string | optional, resting states only | Marks the state as an **external entry point** — new issues materialize here from outside the workflow (manual `create-issue`, webhook, scheduled job). `true` is a bare marker; a string adds a trigger label (e.g., `"issue created"`, `"alert / report triggers incident"`). Mutually exclusive with `collects` and with being a spawn target. Replaces the legacy `{source: "[*]", destination: <state>, type: "event"}` transition shape. |
+| `collects` | object | optional, resting states only | Fan-in contract — issues created here gather contributors from another process. See "Collects" below. |
 | `spawns` | object | optional, working / resting / terminal states | Subprocess / spawn contract. See "Spawns" below. |
 | `mark_pr_ready` | bool | optional, not on terminal | When advancing into this state, the backend flips the underlying PR from draft to ready-for-review (`gh pr ready` on GitHub). No-op on non-PR issues. PRs are always created as drafts; this is the only way to flip them. |
 | `human_inputs` | array of strings | optional, working states only | Ids from the shared `human-inputs.json` that agents may invoke `request-input` on at this state. Empty / absent = `request-input` is forbidden here. Each id must resolve in the directory (cross-checked by the validator). |
@@ -90,8 +92,8 @@ The parser fails loud on:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `source` | string | yes | State id, or `"[*]"` for the entry sentinel. |
-| `destination` | string | yes | State id, or `"[*]"` for the exit sentinel. |
+| `source` | string | yes | State id. `"[*]"` is no longer authored — use the `initial` field on a resting state to declare external entry. |
+| `destination` | string | yes | State id. Terminal sinks are implicit; the emitter generates them from each terminal state's `terminal_taxonomy`. |
 | `type` | string | yes | `"claim"`, `"advance"`, `"event"` |
 | `label` | string | optional except on `event` | Human-readable transition label. When absent (and the type isn't `event`), the parser auto-generates a structural label: `{role(s)} claims {source}` for claim, `{role(s)} → {destination}` for advance, `{to\|from} process {other}` for cross-process. Override when the structural default reads awkwardly. |
 | `human_gate` | string | optional | The human-gate catalog's `gate_name` for this gate. **Presence of `human_gate` marks the transition as HITL-gated**; absence means ungated. (Replaces the old separate `hitl` boolean.) |

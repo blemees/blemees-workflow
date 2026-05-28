@@ -1,5 +1,6 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes when the writeup is approved.",
   "states": {
     "pending": {
       "class": "resting",
@@ -7,8 +8,12 @@
     },
     "drafting": {
       "class": "working",
-      "roles": ["product-manager"],
-      "issue_types": ["postmortem"]
+      "roles": [
+        "product-manager"
+      ],
+      "issue_types": [
+        "postmortem"
+      ]
     },
     "ready_for_followups": {
       "class": "resting",
@@ -16,8 +21,12 @@
     },
     "creating_followups": {
       "class": "working",
-      "roles": ["product-manager"],
-      "issue_types": ["postmortem"]
+      "roles": [
+        "product-manager"
+      ],
+      "issue_types": [
+        "postmortem"
+      ]
     },
     "complete": {
       "class": "terminal",
@@ -27,9 +36,29 @@
     }
   },
   "transitions": [
-    {"source": "pending", "destination": "drafting", "type": "claim", "label": "PM claims postmortem"},
-    {"source": "drafting", "destination": "ready_for_followups", "type": "advance", "label": "PM completes postmortem narrative"},
-    {"source": "ready_for_followups", "destination": "creating_followups", "type": "claim", "label": "PM claims for follow-up filing"},
-    {"source": "creating_followups", "destination": "complete", "type": "advance", "label": "PM files compensating issues (spawn events to process refinement)"}
+    {
+      "source": "pending",
+      "destination": "drafting",
+      "type": "claim",
+      "label": "PM claims postmortem"
+    },
+    {
+      "source": "drafting",
+      "destination": "ready_for_followups",
+      "type": "advance",
+      "label": "PM completes postmortem narrative"
+    },
+    {
+      "source": "ready_for_followups",
+      "destination": "creating_followups",
+      "type": "claim",
+      "label": "PM claims for follow-up filing"
+    },
+    {
+      "source": "creating_followups",
+      "destination": "complete",
+      "type": "advance",
+      "label": "PM files compensating issues (spawn events to process refinement)"
+    }
   ]
 }

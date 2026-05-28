@@ -42,6 +42,7 @@ class ProcessDocInput:
     catalog: HumanGateCatalog | None = None
     issue_type_directory: IssueTypeDirectory | None = None
     grants: dict[str, TrustGrant] | None = None
+    spawn_targets: frozenset[str] | None = None
 
 
 def emit_process_doc(inputs: ProcessDocInput) -> str:
@@ -50,6 +51,9 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
     out: list[str] = []
     out.append(f"# Process: {sm.name}")
     out.append("")
+    if sm.description:
+        out.append(sm.description)
+        out.append("")
     out.append(f"> Defined in: `{sm.name}-states.json`")
     if inputs.catalog is not None and inputs.catalog.entries:
         out.append(f"> HumanGate catalog: `{sm.name}-human-gates.json`")
@@ -59,7 +63,8 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
     if accepted:
         out.extend(_section_issue_types(accepted, inputs.issue_type_directory))
 
-    out.extend(_section_diagram(sm))
+    out.extend(_section_entry_points(sm))
+    out.extend(_section_diagram(sm, spawn_targets=inputs.spawn_targets))
     out.extend(_section_states(sm))
     out.extend(_section_transitions(sm, inputs.catalog, inputs.grants))
     if inputs.catalog is not None and inputs.catalog.entries:
@@ -189,32 +194,89 @@ def emit_human_inputs_doc(
 
 
 def emit_process_map(processes: list[Any]) -> str:
-    """Auto-generate a mermaid flowchart of inter-process handoffs.
+    """Auto-generate a mermaid `stateDiagram-v2` of inter-process flow.
 
-    Each process is a node; each cross-process transition becomes an edge.
-    Edges are deduped across both ends of a shared handoff (the same edge
-    appears in both processes' JSON — one as an exit, one as an entry).
+    Each process is a state node; the built-in `[*]` sentinel marks
+    external entry and exit. Edge labels carry a kind prefix so readers
+    can tell relationships apart in v2's single-arrow style:
 
-    Shared handoffs (same work item continues) render as `==>` (thick);
-    spawn events (new work item created) render as `-.->` (dashed). Edge
-    labels name the shared state or spawn target state.
+    - `▶ <state>`           — entry: `[*] --> process` (where new issues land)
+    - `■ <state>`           — exit: `process --> [*]` (where issues close;
+      excludes feedback terminals — those are drawn separately).
+    - `⇄ <state>`           — handoff: process → process, shared resting
+      state. Bidirectional handoffs (each side both sends and receives)
+      emit two edges in opposite directions.
+    - `⤴ <src>→<dst>`        — spawn: process creates a child issue on
+      another process.
+    - `⤵ <src>→<dst>`        — collect: receiver gathers contributors from
+      another process.
+    - `↺ <child>→<parent>`   — feedback: the inverse of a spawn's
+      `advance_on` mapping. When the child terminates at the labelled
+      state, the parent auto-advances. Pairs with the `⤴` edge to show
+      the round-trip.
+
+    Processes with hyphenated names get an `as` alias so the v2 parser
+    accepts a clean id while preserving the human label.
     """
-    lines: list[str] = ["flowchart LR", ""]
+    lines: list[str] = ["stateDiagram-v2", "    direction TB", ""]
     sorted_processes = sorted(processes, key=lambda p: p.process_name)
+
+    # Emit process nodes. Hyphenated names need the `state "label" as id`
+    # alias because stateDiagram-v2 identifiers can't include hyphens.
     for p in sorted_processes:
-        lines.append(f"    {_node_id(p.process_name)}({p.process_name})")
+        if "-" in p.process_name:
+            lines.append(
+                f"    state \"{p.process_name}\" as {_node_id(p.process_name)}"
+            )
+
     if not sorted_processes:
         return "\n".join(lines) + "\n"
 
-    # Two edge sources:
-    #
-    # 1. Shared handoffs: resting states marked `handoff: true` that appear
-    #    in two or more processes. Render as bidirectional thick edges
-    #    between every pair of declaring processes. Symbol: `===`.
-    # 2. Spawns: working / terminal states with `spawns: {...}` that create
-    #    a new issue on another process. Render as dashed directed edges.
-    #    Symbol: `-.->`.
-    edges: set[tuple[str, str, str, str]] = set()
+    # A terminal that's named as a `spawn.advance_on` key on some other
+    # process is a "feedback terminal" — the spawn child closes here,
+    # then the parent process advances. From the workflow flow's
+    # perspective the work continues in the parent; that's a feedback
+    # signal, not a true workflow exit. Build the set so we can skip
+    # exit edges for these.
+    feedback_terminals_by_process: dict[str, set[str]] = {}
+    for p in sorted_processes:
+        for s in p.state_machine.states.values():
+            if s.spawns is None:
+                continue
+            for child_terminal, _parent_next in s.spawns.advance_on:
+                feedback_terminals_by_process.setdefault(
+                    s.spawns.process, set()
+                ).add(child_terminal)
+
+    # Identify external entry / exit.
+    entry_edges: list[tuple[str, str]] = []  # (process_name, destination_state)
+    exit_edges: list[tuple[str, str]] = []  # (process_name, terminal_state)
+    for p in sorted_processes:
+        feedback_terminals = feedback_terminals_by_process.get(p.process_name, set())
+        for s in p.state_machine.states.values():
+            if s.is_initial:
+                entry_edges.append((p.process_name, s.name))
+            if s.state_class is StateClass.TERMINAL and s.name not in feedback_terminals:
+                exit_edges.append((p.process_name, s.name))
+    entry_edges.sort()
+    exit_edges.sort()
+
+    # Cross-process edges.
+    process_by_name = {p.process_name: p for p in processes}
+
+    def _sides_for(state_name: str, p: Any) -> tuple[bool, bool]:
+        is_sender = False
+        is_receiver = False
+        for t in p.state_machine.transitions:
+            if t.destination == state_name and t.source != state_name:
+                is_sender = True
+            if t.source == state_name and t.destination != state_name:
+                is_receiver = True
+        return is_sender, is_receiver
+
+    # Edges: (src, dst, label). stateDiagram-v2 uses one arrow style so
+    # the kind is encoded in the label prefix.
+    cross_edges: set[tuple[str, str, str]] = set()
 
     # Handoffs — pair every (process, other) declaring the same state.
     handoff_by_state: dict[str, list[str]] = {}
@@ -226,73 +288,119 @@ def emit_process_map(processes: list[Any]) -> str:
         sorted_procs = sorted(procs)
         for i, a in enumerate(sorted_procs):
             for b in sorted_procs[i + 1 :]:
-                edges.add((a, b, state_name, "handoff"))
+                a_send, a_recv = _sides_for(state_name, process_by_name[a])
+                b_send, b_recv = _sides_for(state_name, process_by_name[b])
+                a_silent = not a_send and not a_recv
+                b_silent = not b_send and not b_recv
+                flow_ab = (a_send or a_silent) and (b_recv or b_silent)
+                flow_ba = (b_send or b_silent) and (a_recv or a_silent)
+                if a_silent and b_silent:
+                    flow_ab = flow_ba = False
 
-    # Spawns — walk every state's `spawns` field. Subprocess spawns (working
-    # states) and independent spawns (terminal states) both contribute edges.
+                label = f"⇄ {state_name}"
+                if flow_ab and flow_ba:
+                    # Bidirectional — emit both directions as separate edges.
+                    cross_edges.add((a, b, label))
+                    cross_edges.add((b, a, label))
+                elif flow_ab:
+                    cross_edges.add((a, b, label))
+                elif flow_ba:
+                    cross_edges.add((b, a, label))
+                else:
+                    # Malformed handoff — pick a direction arbitrarily so
+                    # the edge still appears in the map for visibility.
+                    cross_edges.add((a, b, label))
+
+    # Spawns.
     for p in processes:
         for s in p.state_machine.states.values():
             if s.spawns is None:
                 continue
-            label = f"{s.name}→{s.spawns.initial_state}"
-            edges.add((p.process_name, s.spawns.process, label, "spawn"))
+            label = f"⤴ {s.name}→{s.spawns.initial_state}"
+            cross_edges.add((p.process_name, s.spawns.process, label))
 
-    if edges:
+    # Collects.
+    for p in processes:
+        for s in p.state_machine.states.values():
+            if s.collects is None:
+                continue
+            type_suffix = (
+                f" [{','.join(s.collects.issue_types)}]"
+                if s.collects.issue_types
+                else ""
+            )
+            for from_state in s.collects.from_states:
+                label = f"⤵ {from_state}→{s.name}{type_suffix}"
+                cross_edges.add((s.collects.process, p.process_name, label))
+
+    # Feedback edges — the inverse of a spawn. When the child terminates
+    # at a state listed in the spawn's `advance_on`, the parent
+    # auto-advances. Drawing this lets readers see the full round-trip:
+    # parent spawns child; child returns findings; parent moves on.
+    for p in processes:
+        for s in p.state_machine.states.values():
+            if s.spawns is None:
+                continue
+            for child_terminal, parent_next in s.spawns.advance_on:
+                label = f"↺ {child_terminal}→{parent_next}"
+                cross_edges.add((s.spawns.process, p.process_name, label))
+
+    # Collector → contributor feedback. The inverse of collect's data
+    # flow: when the collector enters a listed state, contributors
+    # either auto-advance (advance_on) or are released back to
+    # candidacy without moving (release_on). Drawn collector_process →
+    # source_process to mirror "this is where contributors are
+    # affected next".
+    for p in processes:
+        for s in p.state_machine.states.values():
+            if s.collects is None:
+                continue
+            for collector_state, contributor_target in s.collects.advance_on:
+                label = f"↺ {collector_state}→{contributor_target}"
+                cross_edges.add((p.process_name, s.collects.process, label))
+            for collector_state in s.collects.release_on:
+                label = f"↩ {collector_state}"
+                cross_edges.add((p.process_name, s.collects.process, label))
+
+    if entry_edges or cross_edges or exit_edges:
         lines.append("")
-    for src, dst, label, kind in sorted(edges):
-        arrow = "===" if kind == "handoff" else "-.->"
-        lines.append(f"    {_node_id(src)} {arrow}|{label}| {_node_id(dst)}")
+    # Entry edges first (top), cross-process middle, exit edges last
+    # (bottom) — preserves top-to-bottom flow in the v2 renderer.
+    for process_name, dest_state in entry_edges:
+        lines.append(
+            f"    [*] --> {_node_id(process_name)}: ▶ {dest_state}"
+        )
+    for src, dst, label in sorted(cross_edges):
+        lines.append(f"    {_node_id(src)} --> {_node_id(dst)}: {label}")
+    for process_name, terminal_state in exit_edges:
+        lines.append(
+            f"    {_node_id(process_name)} --> [*]: ■ {terminal_state}"
+        )
 
     return "\n".join(lines) + "\n"
 
 
-def emit_process_map_doc() -> str:
-    """A brief reader's guide for the auto-generated process map."""
-    return (
-        "# Process map\n"
-        "\n"
-        "Auto-generated overview of every process in this workflow and the "
-        "handoffs between them. The canonical source is each "
-        "`<process>-states.json`; this map is regenerated from those.\n"
-        "\n"
-        "## How to read it\n"
-        "\n"
-        "Nodes are processes; edges are cross-process handoffs. Edge styling:\n"
-        "\n"
-        "- **`==>` (thick solid)** — *shared* handoff: the same work item continues on the destination process's state machine. Both processes declare the shared resting state.\n"
-        "- **`-.->` (dashed)** — *spawn*: a new work item is created on the destination process. The originating issue and the spawned issue are tracked independently.\n"
-        "\n"
-        "Edge labels name the state involved in the handoff — the shared "
-        "resting state for shared handoffs, or the destination state for "
-        "spawn events.\n"
-        "\n"
-        "## Diagram\n"
-        "\n"
-        "See [`process-map.mermaid`](./process-map.mermaid). It is regenerated by "
-        "`workflow generate-docs` from the cross-process metadata in each "
-        "`*-states.json`.\n"
-        "\n"
-        "## What this map does NOT show\n"
-        "\n"
-        "- **Editorial groupings** (Build / Ship / Respond / Learn lanes). The "
-        "auto-generated map has no concept of phase — add a `phase` field to "
-        "each state machine JSON if you want lanes.\n"
-        "- **Edge tiers** (primary happy path vs feedback vs conditional). The "
-        "auto-generated map distinguishes only shared vs spawn.\n"
-        "- **Rolled-up labels** like `ready_for_dev / exp / spike` — each shared "
-        "state appears as its own edge.\n"
-    )
-
-
 def emit_index_doc(
-    process_names: list[str],
+    processes: dict[str, str | None],
     *,
     has_roles: bool,
     has_issue_types: bool,
     has_human_inputs: bool = False,
-    has_process_map: bool = False,
+    process_map_mermaid: str | None = None,
 ) -> str:
-    """Top-level README linking to every generated doc."""
+    """Top-level README linking to every generated doc.
+
+    `processes` is a map of process name → authored description (from the
+    process's top-level `description` field in its `<process>-states.json`).
+    Descriptions render as the tail of each list entry; processes without a
+    description fall back to a generic "state machine, human gates,
+    handoffs" suffix.
+
+    When `process_map_mermaid` is provided, an embedded "Process map"
+    section is rendered with the diagram inline plus a reader's guide.
+    The standalone `process-map.mermaid` source is still emitted alongside
+    for tools that want to ingest the raw mermaid.
+    """
     out: list[str] = [
         "# Workflow",
         "",
@@ -300,15 +408,56 @@ def emit_index_doc(
         "Authored sources are the `*.json` files; regenerate with `workflow generate-docs`.",
         "",
     ]
-    if has_process_map:
-        out.append("- [Process map](./process-map.md) — auto-generated handoff overview")
-        out.append("")
+    if process_map_mermaid is not None:
+        out.extend([
+            "## Process map",
+            "",
+            "Auto-generated overview of every process in this workflow and the "
+            "handoffs between them. The canonical source is each "
+            "`<process>-states.json`; the diagram is regenerated from those.",
+            "",
+            "Rendered as a `stateDiagram-v2` so it shares the visual "
+            "language of the per-process state diagrams. Nodes are "
+            "processes; the built-in `[*]` sentinel marks external entry "
+            "(top) and external exit (bottom). The diagram reads "
+            "top-to-bottom: new issues flow from `[*]`, through "
+            "processes (handoffs and spawns between them), and back to "
+            "`[*]` as each terminal state is reached.",
+            "",
+            "Edge labels carry a symbol prefix indicating the relationship "
+            "kind:",
+            "",
+            "- **`▶ <state>`** — entry: a new external issue materializes at the labelled state.",
+            "- **`■ <state>`** — exit: an issue closes at the labelled terminal **and** no parent process has it listed as a spawn feedback target. Terminals named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.",
+            "- **`⇄ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.",
+            "- **`⤴ <src>→<dst>`** — spawn: the source process creates a child issue on the destination at the labelled initial state.",
+            "- **`⤵ <src>→<dst>`** — collect: the destination process (authored via `collects`) gathers contributors from the source process's labelled state.",
+            "- **`↺ <child>→<parent>`** — feedback: the inverse of a spawn's `advance_on` (child terminates → parent auto-advances) **or** a collect's `advance_on` (collector reaches a state → contributors advance). Pairs with the originating `⤴`/`⤵` edge to show the round-trip.",
+            "- **`↩ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.",
+            "",
+            "Edge labels name the state involved — the shared resting state for "
+            "handoffs, or the originating → destination state pair for spawns.",
+            "",
+            "```mermaid",
+            process_map_mermaid.rstrip(),
+            "```",
+            "",
+            "The raw mermaid source is also available at "
+            "[`process-map.mermaid`](./process-map.mermaid).",
+            "",
+            "**What this map does NOT show:** editorial groupings (Build / Ship "
+            "lanes), edge tiers (happy path vs feedback), or rolled-up labels. "
+            "Each shared state appears as its own edge.",
+            "",
+        ])
     out.extend([
         "## Processes",
         "",
     ])
-    for name in sorted(process_names):
-        out.append(f"- [`{name}`](./{name}.md) — state machine, human gates, handoffs")
+    for name in sorted(processes):
+        description = processes[name]
+        tail = description.strip() if description else "state machine, human gates, handoffs"
+        out.append(f"- [`{name}`](./{name}.md) — {tail}")
     if has_roles or has_issue_types or has_human_inputs:
         out.append("")
         out.append("## Shared resources")
@@ -348,12 +497,43 @@ def _section_issue_types(
     return out
 
 
-def _section_diagram(sm: StateMachine) -> list[str]:
+def _section_entry_points(sm: StateMachine) -> list[str]:
+    """Render the list of external entry states (those with `initial`).
+
+    Empty when no state declares `initial` (typical for spawn-only
+    processes like `pr` or `postmortem`).
+    """
+    entries = [s for s in sm.states.values() if s.is_initial]
+    if not entries:
+        return []
+    out = ["## External entry points", ""]
+    out.append(
+        "States where new issues materialize from outside the workflow — "
+        "manual `create-issue --to <state>`, a webhook, or a scheduled "
+        "job. Distinct from spawn / collect targets, which are reached "
+        "via upstream work in another process; the framework enforces "
+        "the two as mutually exclusive per state."
+    )
+    out.append("")
+    for s in entries:
+        label = (s.initial_label or "").strip()
+        suffix = f" — {label}" if label else ""
+        out.append(f"- `{s.name}`{suffix}")
+    out.append("")
+    return out
+
+
+def _section_diagram(
+    sm: StateMachine,
+    *,
+    spawn_targets: frozenset[str] | None = None,
+) -> list[str]:
+    targets = set(spawn_targets) if spawn_targets else None
     return [
         "## State diagram",
         "",
         "```mermaid",
-        emit_mermaid(sm).rstrip(),
+        emit_mermaid(sm, spawn_targets=targets).rstrip(),
         "```",
         "",
     ]
@@ -465,7 +645,8 @@ def _section_human_gates(
 def _section_cross_process(sm: StateMachine) -> list[str]:
     handoffs = [s for s in sm.states.values() if s.handoff]
     spawners = [s for s in sm.states.values() if s.spawns is not None]
-    if not handoffs and not spawners:
+    collectors = [s for s in sm.states.values() if s.collects is not None]
+    if not handoffs and not spawners and not collectors:
         return []
     out = ["## Cross-process handoffs", ""]
     if handoffs:
@@ -489,6 +670,33 @@ def _section_cross_process(sm: StateMachine) -> list[str]:
             for child_term, parent_next in sp.advance_on:
                 out.append(
                     f"    - on child `{child_term}` → parent `{parent_next}`"
+                )
+        out.append("")
+    if collectors:
+        out.append(
+            "**Collects** (states that gather contributors from other "
+            "processes when an issue is created here):"
+        )
+        out.append("")
+        for s in collectors:
+            c = s.collects
+            assert c is not None
+            sources = ", ".join(f"`{fs}`" for fs in c.from_states)
+            type_suffix = (
+                f" (types: {', '.join(f'`{t}`' for t in c.issue_types)})"
+                if c.issue_types
+                else ""
+            )
+            out.append(
+                f"- `{s.name}` ← process `{c.process}` from {sources}{type_suffix}"
+            )
+            for collector_state, contributor_target in c.advance_on:
+                out.append(
+                    f"    - on collector `{collector_state}` → contributors `{contributor_target}`"
+                )
+            for collector_state in c.release_on:
+                out.append(
+                    f"    - on collector `{collector_state}` → contributors released (back to candidacy)"
                 )
         out.append("")
     return out

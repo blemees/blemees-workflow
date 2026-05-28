@@ -81,6 +81,9 @@ def validate_state_machine(
         findings.extend(_check_handoffs_have_partners(state_machine, handoff_index))
     if sibling_machines is not None:
         findings.extend(_check_spawns(state_machine, sibling_machines))
+        findings.extend(_check_collects(state_machine, sibling_machines))
+        findings.extend(_check_entry_not_also_target(state_machine, sibling_machines))
+        findings.extend(_check_process_reachable(state_machine, sibling_machines))
 
     if catalog is not None:
         findings.extend(_check_legend_catalog_sync(state_machine, catalog))
@@ -388,15 +391,17 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
     - ADVANCE: working → resting | terminal
     - EVENT: resting → resting | terminal
 
-    `[*]` endpoints are sentinels, not states, so source/dest checks are
-    skipped when an endpoint is `[*]`. ERROR-level — these are hard
-    structural rules. Cross-process relationships are not transitions
-    (see `State.handoff` and `State.spawns` for the data model).
+    `[*]` endpoints are no longer authored as transition endpoints —
+    entries are declared via `State.is_initial` and terminal sinks are
+    implicit. Source/destination are real state names here. ERROR-level
+    — these are hard structural rules. Cross-process relationships are
+    not transitions (see `State.handoff` and `State.spawns` for the data
+    model).
     """
     findings: list[ValidationFinding] = []
     for t in state_machine.transitions:
-        src_state = state_machine.states.get(t.source) if t.source != "[*]" else None
-        dst_state = state_machine.states.get(t.destination) if t.destination != "[*]" else None
+        src_state = state_machine.states.get(t.source)
+        dst_state = state_machine.states.get(t.destination)
 
         # CLAIM: resting → working
         if t.transition_type is TransitionType.CLAIM:
@@ -457,41 +462,34 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
                     )
                 )
 
-        # EVENT: resting → resting | terminal.
-        # Note: `terminal_state → [*]` is the conventional sink marker for a
-        # terminal — visual, not a real transition. Skip class checks when the
-        # destination is `[*]` (the sink). When the source is `[*]` (entry),
-        # the destination must be RESTING.
+        # EVENT: resting → resting | terminal (system / time trigger).
         elif t.transition_type is TransitionType.EVENT:
-            if t.destination == "[*]":
-                pass  # sink marker; no class rule applies
-            else:
-                if src_state is not None and src_state.state_class is not StateClass.RESTING:
-                    findings.append(
-                        ValidationFinding(
-                            severity=Severity.ERROR,
-                            principle_cite="state-machine-principles.md#2",
-                            message=(
-                                f"External transition {t.source!r} → {t.destination!r} "
-                                f"({t.label!r}) must originate in a RESTING state; "
-                                f"source is {src_state.state_class.value}."
-                            ),
-                            location=state_machine.source_path,
-                        )
+            if src_state is not None and src_state.state_class is not StateClass.RESTING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#2",
+                        message=(
+                            f"Event transition {t.source!r} → {t.destination!r} "
+                            f"({t.label!r}) must originate in a RESTING state; "
+                            f"source is {src_state.state_class.value}."
+                        ),
+                        location=state_machine.source_path,
                     )
-                if dst_state is not None and dst_state.state_class is StateClass.WORKING:
-                    findings.append(
-                        ValidationFinding(
-                            severity=Severity.ERROR,
-                            principle_cite="state-machine-principles.md#2",
-                            message=(
-                                f"External transition {t.source!r} → {t.destination!r} "
-                                f"({t.label!r}) must land in a RESTING or TERMINAL state; "
-                                f"destination is {dst_state.state_class.value}."
-                            ),
-                            location=state_machine.source_path,
-                        )
+                )
+            if dst_state is not None and dst_state.state_class is StateClass.WORKING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#2",
+                        message=(
+                            f"Event transition {t.source!r} → {t.destination!r} "
+                            f"({t.label!r}) must land in a RESTING or TERMINAL state; "
+                            f"destination is {dst_state.state_class.value}."
+                        ),
+                        location=state_machine.source_path,
                     )
+                )
 
     return findings
 
@@ -797,6 +795,315 @@ def _check_spawns(
                             location=state_machine.source_path,
                         )
                     )
+    return findings
+
+
+def _check_collects(
+    state_machine: StateMachine,
+    sibling_machines: dict[str, StateMachine],
+) -> list[ValidationFinding]:
+    """Validate every state's `collects` declaration against the source process.
+
+    - Only valid on resting states (parser already enforces; reasserted
+      here for cross-artifact consistency).
+    - Source process must exist in the sibling machines map.
+    - Every `from_states` entry must exist on the source process AND be
+      resting or terminal (collecting from a working state would conflict
+      with that state's claim).
+    """
+    findings: list[ValidationFinding] = []
+    for state in state_machine.states.values():
+        collects = state.collects
+        if collects is None:
+            continue
+        if state.state_class is not StateClass.RESTING:
+            # Parser catches this; redundant guard for downstream callers.
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r}: `collects` is only valid on "
+                        f"resting states (got {state.state_class.value!r})."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+            continue
+        target = sibling_machines.get(collects.process)
+        if target is None:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r}: `collects.process` "
+                        f"{collects.process!r} is not a known process."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+            continue
+        for from_state_name in collects.from_states:
+            from_state = target.states.get(from_state_name)
+            if from_state is None:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `collects.from_states` "
+                            f"entry {from_state_name!r} is not declared on "
+                            f"process {collects.process!r}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+                continue
+            if from_state.state_class is StateClass.WORKING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `collects.from_states` "
+                            f"entry {from_state_name!r} is a working state "
+                            f"on {collects.process!r}. Collect only from "
+                            f"resting or terminal states (working-state "
+                            f"items are already claimed)."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+
+        # `issue_types` entries must be a subset of the source process's
+        # accepted_issue_types (derived from its working states).
+        if collects.issue_types:
+            source_types = set(target.accepted_issue_types)
+            unknown = set(collects.issue_types) - source_types
+            if unknown:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `collects.issue_types` "
+                            f"contains {sorted(unknown)} which are not "
+                            f"accepted by process {collects.process!r} "
+                            f"(accepts: {sorted(source_types)})."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+
+        # `advance_on` keys must be declared states on THIS process (the
+        # collector); values must be declared resting or terminal states
+        # on the source process (no auto-enter into working).
+        for collector_state, contributor_target in collects.advance_on:
+            if collector_state not in state_machine.states:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `collects.advance_on` key "
+                            f"{collector_state!r} is not a declared state on "
+                            f"this process."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            contributor_state = target.states.get(contributor_target)
+            if contributor_state is None:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `collects.advance_on"
+                            f"[{collector_state!r}]` → {contributor_target!r} "
+                            f"is not a declared state on process "
+                            f"{collects.process!r}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+                continue
+            if contributor_state.state_class is StateClass.WORKING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#3",
+                        message=(
+                            f"State {state.name!r}: `collects.advance_on"
+                            f"[{collector_state!r}]` → {contributor_target!r} "
+                            f"on {collects.process!r} must be resting or "
+                            f"terminal — auto-advancing contributors into a "
+                            f"working state would bypass the "
+                            f"claim-before-working invariant."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+
+        # `release_on` entries must be declared states on THIS process.
+        # The label-clearing applies regardless of where the contributor
+        # currently is, so there's no need to validate against the source
+        # process; the trigger condition is just "collector enters this
+        # state".
+        for collector_state in collects.release_on:
+            if collector_state not in state_machine.states:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `collects.release_on` "
+                            f"entry {collector_state!r} is not a declared "
+                            f"state on this process."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+    return findings
+
+
+def _check_entry_not_also_target(
+    state_machine: StateMachine,
+    sibling_machines: dict[str, StateMachine],
+) -> list[ValidationFinding]:
+    """External entry, spawn target, and collector are mutually exclusive.
+
+    `is_initial: true` declares "issues materialize at this state from
+    outside the workflow" (manual `create-issue`, webhook, scheduler).
+    A spawn target lands here because some upstream process created it.
+    A `collects` state is reached by gathering existing items from
+    another process. Each describes a different entry path; combining
+    them implies an issue can arrive via two paths simultaneously, which
+    is ambiguous about provenance. Author the one that describes the
+    true origin.
+    """
+    findings: list[ValidationFinding] = []
+    entry_states = {s.name for s in state_machine.states.values() if s.is_initial}
+    if not entry_states:
+        return findings
+
+    # collects on the same state: contradiction.
+    for state_name in entry_states:
+        state = state_machine.states.get(state_name)
+        if state is not None and state.collects is not None:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#2",
+                    message=(
+                        f"State {state_name!r} declares `initial` AND "
+                        f"`collects`. These describe contradictory entry "
+                        f"paths (external creation vs. gathering existing "
+                        f"items). Pick one: drop `initial`, or drop "
+                        f"`collects`."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+
+    # The state is the initial_state of a spawn from any sibling.
+    inbound_spawn_targets: set[str] = set()
+    for other in sibling_machines.values():
+        if other.name == state_machine.name:
+            continue
+        for s in other.states.values():
+            if s.spawns is not None and s.spawns.process == state_machine.name:
+                inbound_spawn_targets.add(s.spawns.initial_state)
+    for state_name in entry_states & inbound_spawn_targets:
+        findings.append(
+            ValidationFinding(
+                severity=Severity.ERROR,
+                principle_cite="state-machine-principles.md#2",
+                message=(
+                    f"State {state_name!r} declares `initial` AND is a "
+                    f"spawn target from another process. An issue here "
+                    f"either materializes from outside or is created by "
+                    f"spawn — pick one."
+                ),
+                location=state_machine.source_path,
+            )
+        )
+    return findings
+
+
+def _check_process_reachable(
+    state_machine: StateMachine,
+    sibling_machines: dict[str, StateMachine],
+) -> list[ValidationFinding]:
+    """Warn if the process has no way for issues to arrive.
+
+    A process is reachable if at least one of the following is true:
+    - it has a state with `is_initial: true` (an external entry point);
+    - it has a state declaring `collects` (the human creates collectors
+      here via `create-issue --to <state>` — a legitimate entry path);
+    - it is the target of a `spawns.process` field on some sibling's state;
+    - it shares a `handoff: true` resting state with at least one sibling
+      (the issue arrives via the cross-process handover).
+
+    Truly orphan processes (none of the above) are almost certainly an
+    authoring oversight — they're loaded but unreachable. The warning
+    surfaces this so the author can either add `initial`, a `collects`
+    declaration, a spawn from somewhere, or remove the process.
+    """
+    findings: list[ValidationFinding] = []
+
+    has_initial = any(s.is_initial for s in state_machine.states.values())
+    if has_initial:
+        return findings  # External entry — already reachable.
+
+    # Any state declares `collects`? Creating a collector at that state
+    # IS the entry path for this process.
+    has_collects = any(s.collects is not None for s in state_machine.states.values())
+    if has_collects:
+        return findings
+
+    # Is some other process spawning into us?
+    has_inbound_spawn = any(
+        s.spawns is not None and s.spawns.process == state_machine.name
+        for other in sibling_machines.values()
+        if other.name != state_machine.name
+        for s in other.states.values()
+    )
+    if has_inbound_spawn:
+        return findings
+
+    # Do we share a handoff state with anyone?
+    our_handoffs = {s.name for s in state_machine.states.values() if s.handoff}
+    has_handoff_partner = False
+    for other in sibling_machines.values():
+        if other.name == state_machine.name:
+            continue
+        for s in other.states.values():
+            if s.handoff and s.name in our_handoffs:
+                has_handoff_partner = True
+                break
+        if has_handoff_partner:
+            break
+    if has_handoff_partner:
+        return findings
+
+    findings.append(
+        ValidationFinding(
+            severity=Severity.WARNING,
+            principle_cite="state-machine-principles.md#2",
+            message=(
+                f"Process {state_machine.name!r} has no `initial` state, "
+                f"no `collects` declaration, no inbound spawn from any "
+                f"other process, and no shared handoff state. New issues "
+                f"cannot reach it. Mark an entry state with `\"initial\": "
+                f"true` (or `\"initial\": \"<label>\"`), declare "
+                f"`collects`, wire it as a spawn target, or share a "
+                f"handoff state."
+            ),
+            location=state_machine.source_path,
+        )
+    )
     return findings
 
 

@@ -7,10 +7,12 @@ from datetime import date, timedelta
 from workflow.backends.base import IssueState
 from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
 from workflow.core.model.state_machine import (
+    Collects,
     ReversibilityClass,
     State,
     StateClass,
     StateMachine,
+    TerminalTaxonomy,
     Transition,
     TransitionType,
 )
@@ -279,6 +281,233 @@ def test_runtime_two_claim_singletons_errors() -> None:
         and "singleton" in f.message.lower()
         for f in findings
     )
+
+
+def _collector_workflow(collects: Collects) -> StateMachine:
+    """Build a small collector workflow (single resting state with collects)."""
+    sm = StateMachine(name="collector_proc")
+    sm.states["accumulating"] = State(
+        name="accumulating",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        collects=collects,
+    )
+    return sm
+
+
+def _source_workflow_with_terminal_staged() -> StateMachine:
+    """A minimal source workflow with a `staged` terminal state."""
+    sm = StateMachine(name="src_proc")
+    sm.states["draft"] = State(
+        name="draft",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    sm.states["staged"] = State(
+        name="staged",
+        state_class=StateClass.TERMINAL,
+        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
+        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        close_reason="completed",
+    )
+    return sm
+
+
+def test_collects_unknown_process_errors() -> None:
+    parent = _collector_workflow(Collects(process="ghost", from_states=("staged",)))
+    findings = validate_state_machine(
+        parent,
+        catalog=None,
+        sibling_machines={"collector_proc": parent},
+    )
+    assert any(
+        "collects.process" in f.message and "not a known process" in f.message
+        for f in findings
+    )
+
+
+def test_collects_unknown_from_state_errors() -> None:
+    parent = _collector_workflow(Collects(process="src_proc", from_states=("nope",)))
+    src = _source_workflow_with_terminal_staged()
+    findings = validate_state_machine(
+        parent,
+        catalog=None,
+        sibling_machines={"collector_proc": parent, "src_proc": src},
+    )
+    assert any(
+        "collects.from_states" in f.message and "not declared" in f.message
+        for f in findings
+    )
+
+
+def test_collects_working_from_state_errors() -> None:
+    parent = _collector_workflow(Collects(process="src_proc", from_states=("doing",)))
+    src = StateMachine(name="src_proc")
+    src.states["doing"] = State(
+        name="doing",
+        state_class=StateClass.WORKING,
+        roles=("worker",),
+        issue_types=("bug",),
+    )
+    findings = validate_state_machine(
+        parent,
+        catalog=None,
+        sibling_machines={"collector_proc": parent, "src_proc": src},
+    )
+    assert any(
+        "Collect only from resting or terminal" in f.message for f in findings
+    )
+
+
+def test_entry_with_collects_on_same_state_errors() -> None:
+    """A state declaring `collects` cannot also have `is_initial=True` —
+    the two describe contradictory provenance."""
+    sm = StateMachine(name="bad")
+    sm.states["accumulating"] = State(
+        name="accumulating",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        is_initial=True,
+        initial_label="new",
+        collects=Collects(process="src", from_states=("staged",)),
+    )
+    src = StateMachine(name="src")
+    src.states["staged"] = State(
+        name="staged",
+        state_class=StateClass.TERMINAL,
+        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
+        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        close_reason="completed",
+    )
+    findings = validate_state_machine(
+        sm,
+        catalog=None,
+        sibling_machines={"bad": sm, "src": src},
+    )
+    assert any(
+        f.severity is Severity.ERROR and "contradictory entry paths" in f.message
+        for f in findings
+    )
+
+
+def test_entry_with_inbound_spawn_target_errors() -> None:
+    """A state that is the initial_state of an inbound spawn cannot also
+    have `is_initial=True`."""
+    from workflow.core.model.state_machine import Spawn
+
+    target = StateMachine(name="target")
+    target.states["queue"] = State(
+        name="queue",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        is_initial=True,
+        initial_label="created",
+    )
+    parent = StateMachine(name="parent")
+    parent.states["working_state"] = State(
+        name="working_state",
+        state_class=StateClass.WORKING,
+        roles=("worker",),
+        issue_types=("bug",),
+        spawns=Spawn(
+            process="target",
+            issue_type="bug",
+            initial_state="queue",
+        ),
+    )
+    findings = validate_state_machine(
+        target,
+        catalog=None,
+        sibling_machines={"target": target, "parent": parent},
+    )
+    assert any(
+        f.severity is Severity.ERROR and "spawn target" in f.message
+        for f in findings
+    )
+
+
+def test_orphan_process_warns() -> None:
+    """A process with no `[*]→`, no inbound spawn, no shared handoff is
+    unreachable — the validator surfaces a WARNING."""
+    orphan = StateMachine(name="orphan")
+    orphan.states["resting"] = State(
+        name="resting",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    findings = validate_state_machine(
+        orphan,
+        catalog=None,
+        sibling_machines={"orphan": orphan},
+    )
+    assert any(
+        f.severity is Severity.WARNING and "cannot reach it" in f.message
+        for f in findings
+    )
+
+
+def test_process_with_initial_state_does_not_warn() -> None:
+    sm = StateMachine(name="entry_proc")
+    sm.states["raw"] = State(
+        name="raw",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        is_initial=True,
+        initial_label="issue created",
+    )
+    findings = validate_state_machine(
+        sm,
+        catalog=None,
+        sibling_machines={"entry_proc": sm},
+    )
+    assert not any("cannot reach it" in f.message for f in findings)
+
+
+def test_process_reached_via_spawn_does_not_warn() -> None:
+    from workflow.core.model.state_machine import Spawn
+
+    target = StateMachine(name="child_proc")
+    target.states["queue"] = State(
+        name="queue",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    parent = StateMachine(name="parent_proc")
+    parent.states["working_state"] = State(
+        name="working_state",
+        state_class=StateClass.WORKING,
+        roles=("worker",),
+        issue_types=("bug",),
+        spawns=Spawn(
+            process="child_proc",
+            issue_type="bug",
+            initial_state="queue",
+        ),
+    )
+    parent.states["entry"] = State(
+        name="entry",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        is_initial=True,
+    )
+    findings = validate_state_machine(
+        target,
+        catalog=None,
+        sibling_machines={"child_proc": target, "parent_proc": parent},
+    )
+    assert not any("cannot reach it" in f.message for f in findings)
+
+
+def test_collects_valid_passes() -> None:
+    parent = _collector_workflow(Collects(process="src_proc", from_states=("staged",)))
+    src = _source_workflow_with_terminal_staged()
+    findings = validate_state_machine(
+        parent,
+        catalog=None,
+        sibling_machines={"collector_proc": parent, "src_proc": src},
+    )
+    # No findings cite the `collects` checks for this happy path.
+    assert not any("collects" in f.message for f in findings)
 
 
 def test_resting_spawn_cannot_advance_into_working() -> None:

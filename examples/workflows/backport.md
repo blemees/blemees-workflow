@@ -1,5 +1,7 @@
 # Process: backport
 
+Cherry-pick a fix from the trunk to a maintenance branch. Triggered post-merge when a release manager elects to ship the fix on an older line; closes once the patch release ships.
+
 > Defined in: `backport-states.json`
 
 ## Issue types accepted
@@ -10,19 +12,13 @@
 
 ```mermaid
 stateDiagram-v2
+    direction TB
     ready_for_backport --> cherry_picking: developer claims backport
     cherry_picking --> backport_pr_review: developer opens backport PR (spawns PR on process pr-review)
     backport_pr_review --> backport_merged: from process pr-review (backport PR merged to release branch)
     backport_merged --> patch_releasing: patch release triggered (spawns patch train on process release, IC bypass of release gate)
     patch_releasing --> backported: from process release (patch deployed to production)
     backported --> [*]: terminal (shipped)
-
-    note right of ready_for_backport: reversible-slow
-    note right of cherry_picking: role=developer, types=backport
-    note right of backport_pr_review: reversible-fast
-    note right of backport_merged: reversible-slow
-    note right of patch_releasing: reversible-slow
-    note right of backported: reversible-slow
 ```
 
 ## States

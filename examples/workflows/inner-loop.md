@@ -1,5 +1,7 @@
 # Process: inner-loop
 
+The developer's day-to-day flow: claim a refined ticket, implement, open a PR, ship. Spawns a PR child issue and tracks staged/shipped state.
+
 > Defined in: `inner-loop-states.json`
 
 ## Issue types accepted
@@ -15,46 +17,27 @@
 
 ```mermaid
 stateDiagram-v2
+    direction TB
     %% Cross-process interfaces:
     %%   Handoff: ready_for_dev (shared resting state)
-    %%   Handoff: ready_for_experiment (shared resting state)
     %%   Handoff: ready_for_hotfix (shared resting state)
     %%   Handoff: ready_bounced (shared resting state)
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
-    %%   Spawn:   implementing_experiment → process pr (issue_type=pr, initial=draft)
-    %%   Spawn:   implementing_hotfix → process pr (issue_type=pr, initial=draft)
     %%
 
     ready_for_dev --> implementing: developer claims issue
-    ready_for_experiment --> implementing_experiment: developer claims experiment
     ready_for_spike --> implementing_spike: developer claims spike
-    ready_for_hotfix --> implementing_hotfix: developer claims hotfix
+    ready_for_hotfix --> implementing: developer claims hotfix
     implementing --> ready_bounced: developer bounces ticket
-    implementing --> pr_review: developer requests PR review
-    implementing_experiment --> pr_review_experiment: developer requests PR review
-    implementing_hotfix --> pr_review_hotfix: developer requests PR review
+    implementing --> staged: PR merged (auto from pr)
+    staged --> shipped: release shipped (auto from release)
     implementing_spike --> spike_completed: developer posts spike findings
-    pr_review --> staged: from process pr-review (PR merged)
-    pr_review_experiment --> staged_experiment: from process pr-review (PR merged)
-    pr_review_hotfix --> staged_hotfix: from process pr-review (PR merged)
+    shipped --> [*]: terminal (shipped)
     spike_completed --> [*]: terminal (resolved)
-
-    note right of ready_for_dev: handoff, reversible-slow
-    note right of ready_for_experiment: handoff, reversible-slow
-    note right of ready_for_spike: reversible-slow
-    note right of ready_for_hotfix: handoff, reversible-fast
-    note right of implementing: role=developer, types=bug, feature, chore
-    note right of implementing_experiment: role=developer, types=experiment
-    note right of implementing_spike: role=developer, types=spike
-    note right of implementing_hotfix: role=developer, types=hotfix
-    note right of pr_review: reversible-fast
-    note right of pr_review_experiment: reversible-fast
-    note right of pr_review_hotfix: reversible-fast
-    note right of staged: reversible-slow
-    note right of staged_experiment: reversible-slow
-    note right of staged_hotfix: reversible-slow
-    note right of spike_completed: reversible-fast
-    note right of ready_bounced: handoff, reversible-fast
+    [*] --> ready_for_dev: handoff
+    [*] --> ready_for_hotfix: handoff
+    ready_bounced --> [*]: handoff
+    [*] --> ready_for_spike: spawn
 ```
 
 ## States
@@ -62,19 +45,12 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_dev` | resting | reversible-slow | — | — | — | — | — |
-| `ready_for_experiment` | resting | reversible-slow | — | — | — | — | — |
 | `ready_for_spike` | resting | reversible-slow | — | — | — | — | — |
 | `ready_for_hotfix` | resting | reversible-fast | — | — | — | — | — |
-| `implementing` | working | — | developer | bug, feature, chore | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
-| `implementing_experiment` | working | — | developer | experiment | clarify-scope, needs-arch-review, general | — | — |
+| `implementing` | working | — | developer | bug, feature, chore, experiment, hotfix | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
 | `implementing_spike` | working | — | developer | spike | clarify-scope, needs-arch-review, general | — | — |
-| `implementing_hotfix` | working | — | developer | hotfix | needs-security-review, blocked-on-data, general | — | — |
-| `pr_review` | resting | reversible-fast | — | — | — | — | — |
-| `pr_review_experiment` | resting | reversible-fast | — | — | — | — | — |
-| `pr_review_hotfix` | resting | reversible-fast | — | — | — | — | — |
 | `staged` | resting | reversible-slow | — | — | — | — | — |
-| `staged_experiment` | resting | reversible-slow | — | — | — | — | — |
-| `staged_hotfix` | resting | reversible-slow | — | — | — | — | — |
+| `shipped` | terminal | reversible-slow | — | — | — | shipped | completed |
 | `spike_completed` | terminal | reversible-fast | — | — | — | resolved | completed |
 | `ready_bounced` | resting | reversible-fast | — | — | — | — | — |
 
@@ -83,32 +59,22 @@ stateDiagram-v2
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
 | `ready_for_dev` | `implementing` | claim | 'developer claims issue' | — | — |
-| `ready_for_experiment` | `implementing_experiment` | claim | 'developer claims experiment' | — | — |
 | `ready_for_spike` | `implementing_spike` | claim | 'developer claims spike' | — | — |
-| `ready_for_hotfix` | `implementing_hotfix` | claim | 'developer claims hotfix' | — | — |
+| `ready_for_hotfix` | `implementing` | claim | 'developer claims hotfix' | — | — |
 | `implementing` | `ready_bounced` | advance | 'developer bounces ticket' | — | — |
-| `implementing` | `pr_review` | advance | 'developer requests PR review' | — | — |
-| `implementing_experiment` | `pr_review_experiment` | advance | 'developer requests PR review' | — | — |
-| `implementing_hotfix` | `pr_review_hotfix` | advance | 'developer requests PR review' | — | — |
+| `implementing` | `staged` | advance | 'PR merged (auto from pr)' | — | — |
+| `staged` | `shipped` | event | 'release shipped (auto from release)' | — | — |
 | `implementing_spike` | `spike_completed` | advance | 'developer posts spike findings' | — | — |
-| `pr_review` | `staged` | event | 'from process pr-review (PR merged)' | — | — |
-| `pr_review_experiment` | `staged_experiment` | event | 'from process pr-review (PR merged)' | — | — |
-| `pr_review_hotfix` | `staged_hotfix` | event | 'from process pr-review (PR merged)' | — | — |
 
 ## Cross-process handoffs
 
 **Handoff states** (shared resting states declared in ≥2 processes):
 
 - `ready_for_dev` — interface state, also declared by the partner process(es).
-- `ready_for_experiment` — interface state, also declared by the partner process(es).
 - `ready_for_hotfix` — interface state, also declared by the partner process(es).
 - `ready_bounced` — interface state, also declared by the partner process(es).
 
 **Spawns** (states that create child issues on other processes):
 
 - `implementing` (subprocess) → process `pr` as `pr` issue at `draft`
-    - on child `staged` → parent `staged`
-- `implementing_experiment` (subprocess) → process `pr` as `pr` issue at `draft`
-    - on child `staged` → parent `staged_experiment`
-- `implementing_hotfix` (subprocess) → process `pr` as `pr` issue at `draft`
-    - on child `staged` → parent `staged_hotfix`
+    - on child `merged` → parent `staged`

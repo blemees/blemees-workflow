@@ -1,5 +1,7 @@
 # Process: experimentation
 
+Measure a flag-gated experiment in production and reach a verdict — ship-to-all, kill, or iterate. Owned by the product owner once the dev work is merged.
+
 > Defined in: `experimentation-states.json`
 
 ## Issue types accepted
@@ -10,6 +12,7 @@
 
 ```mermaid
 stateDiagram-v2
+    direction TB
     measuring --> measurement_complete: measurement window elapses (time)
     measuring --> aborting: PO claims to abort
     aborting --> aborted: PO publishes abort reason
@@ -22,15 +25,6 @@ stateDiagram-v2
     killed --> [*]: terminal (abandoned)
     iterated --> [*]: terminal (superseded)
     aborted --> [*]: terminal (abandoned)
-
-    note right of measuring: reversible-slow
-    note right of measurement_complete: reversible-fast
-    note right of analyzing: role=product-owner, types=experiment
-    note right of aborting: role=product-owner, types=experiment
-    note right of promoted: reversible-slow
-    note right of killed: reversible-slow
-    note right of iterated: reversible-fast
-    note right of aborted: reversible-fast
 ```
 
 ## States

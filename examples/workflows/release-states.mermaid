@@ -1,8 +1,7 @@
 stateDiagram-v2
-    [*] --> accumulating: new train opens (on cadence, or after previous release closes)
-    accumulating --> cut: cadence timer elapses (time)
-    accumulating --> cut: RM triggers cut script
-    cut --> preparing: RM claims train
+    direction TB
+    cut --> preparing: RM claims release train
+    hotfix_cut --> preparing: IC / RM claims hotfix train
     preparing --> ready_for_release_decision: RM publishes release notes, tags release candidate
     ready_for_release_decision --> reviewing_release: PO claims train
     reviewing_release --> gated_nogo: PO defers with blocking reason
@@ -19,19 +18,5 @@ stateDiagram-v2
     abandoned --> [*]: terminal (abandoned)
     rolled_back --> [*]: terminal (reverted)
     released --> [*]: terminal (shipped)
-
-    note left of accumulating: reversible-fast
-    note right of cut: reversible-slow
-    note right of preparing: role=release-manager, types=release
-    note right of ready_for_release_decision: reversible-slow
-    note right of reviewing_release: role=product-owner, types=release
-    note right of gated_nogo: reversible-fast
-    note right of abandoning: role=product-owner, types=release
-    note right of abandoned: reversible-fast
-    note right of deploying: reversible-slow
-    note right of rolling_out: reversible-slow
-    note right of ready_for_monitoring: reversible-slow
-    note right of monitoring: role=developer, types=release
-    note right of rolling_back: roles=incident-commander, release-manager, types=release
-    note right of rolled_back: reversible-slow
-    note right of released: reversible-slow
+    [*] --> cut: collect
+    [*] --> hotfix_cut: collect

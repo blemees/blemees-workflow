@@ -20,7 +20,11 @@ from workflow.errors import ParseError
 def _minimal() -> dict:
     return {
         "states": {
-            "a": {"class": "resting", "reversibility": "reversible-fast"},
+            "a": {
+                "class": "resting",
+                "reversibility": "reversible-fast",
+                "initial": "in",
+            },
             "b": {
                 "class": "working",
                 "roles": ["product-manager"],
@@ -34,7 +38,6 @@ def _minimal() -> dict:
             },
         },
         "transitions": [
-            {"source": "[*]", "destination": "a", "type": "event", "label": "in"},
             {"source": "a", "destination": "b", "type": "claim", "label": "pm claims a"},
             {"source": "b", "destination": "c", "type": "advance", "label": "pm ships"},
         ],
@@ -50,8 +53,10 @@ def test_parses_minimal_workflow() -> None:
     assert workflow.states["b"].roles == ("product-manager",)
     assert workflow.states["c"].state_class is StateClass.TERMINAL
     assert workflow.states["c"].terminal_taxonomy is TerminalTaxonomy.SHIPPED
-    assert len(workflow.transitions) == 3
-    assert workflow.transitions[1].transition_type is TransitionType.CLAIM
+    assert workflow.states["a"].is_initial is True
+    assert workflow.states["a"].initial_label == "in"
+    assert len(workflow.transitions) == 2
+    assert workflow.transitions[0].transition_type is TransitionType.CLAIM
 
 
 def test_terminal_requires_taxonomy() -> None:
@@ -116,7 +121,7 @@ def test_hitl_field_rejected() -> None:
     """`hitl` was merged into `gate` — presence of `gate` is the marker.
     The parser rejects the legacy field outright."""
     bad = _minimal()
-    bad["transitions"][2]["hitl"] = True
+    bad["transitions"][1]["hitl"] = True
     with pytest.raises(ParseError, match="`hitl` was removed"):
         parse_state_machine(json.dumps(bad))
 
@@ -125,9 +130,9 @@ def test_human_gate_alone_makes_transition_gated() -> None:
     """Adding `human_gate` to a transition marks it as HITL-gated; no `hitl`
     field needed."""
     spec = _minimal()
-    spec["transitions"][2]["human_gate"] = "ship"
+    spec["transitions"][1]["human_gate"] = "ship"
     workflow = parse_state_machine(json.dumps(spec))
-    advance = workflow.transitions[2]
+    advance = workflow.transitions[1]
     assert advance.gate_name == "ship"
     assert advance.is_gated is True
 
@@ -139,7 +144,7 @@ def test_cross_process_transition_type_rejected() -> None:
     transitions with a clear migration hint."""
     bad = _minimal()
     bad["transitions"].append(
-        {"source": "c", "destination": "[*]", "type": "cross_process",
+        {"source": "a", "destination": "b", "type": "cross_process",
          "label": "to x", "kind": "shared", "process": "x"}
     )
     with pytest.raises(ParseError, match="cross_process.*removed"):
@@ -159,7 +164,7 @@ def test_gates_in_legend_built_from_gated_transitions() -> None:
     # Make b → c a HITL transition by setting `human_gate` (and update
     # reversibility on c).
     spec["states"]["c"]["reversibility"] = "reversible-slow"
-    spec["transitions"][2]["human_gate"] = "ship"
+    spec["transitions"][1]["human_gate"] = "ship"
     workflow = parse_state_machine(json.dumps(spec))
     assert workflow.gates_in_legend == {"ship": ReversibilityClass.REVERSIBLE_SLOW}
 
@@ -242,6 +247,122 @@ def test_spawns_allowed_on_resting() -> None:
     assert workflow.states["a"].spawns.process == "other"
 
 
+def test_initial_bool_true_marks_state() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["initial"] = True
+    workflow = parse_state_machine(json.dumps(spec))
+    assert workflow.states["a"].is_initial is True
+    assert workflow.states["a"].initial_label is None
+
+
+def test_initial_string_stores_label() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["initial"] = "alert fires"
+    workflow = parse_state_machine(json.dumps(spec))
+    assert workflow.states["a"].is_initial is True
+    assert workflow.states["a"].initial_label == "alert fires"
+
+
+def test_initial_false_or_absent_is_default() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["initial"] = False
+    workflow = parse_state_machine(json.dumps(spec))
+    assert workflow.states["a"].is_initial is False
+    assert workflow.states["a"].initial_label is None
+
+
+def test_initial_forbidden_on_working() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["initial"] = True
+    with pytest.raises(ParseError, match="initial.*only valid on resting"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_initial_forbidden_on_terminal() -> None:
+    spec = _minimal()
+    spec["states"]["c"]["initial"] = True
+    with pytest.raises(ParseError, match="initial.*only valid on resting"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_initial_empty_string_rejected() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["initial"] = ""
+    with pytest.raises(ParseError, match="initial.*non-empty"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_sentinel_source_transition_rejected_with_migration_hint() -> None:
+    spec = _minimal()
+    spec["transitions"].append(
+        {"source": "[*]", "destination": "a", "type": "event", "label": "extra"}
+    )
+    with pytest.raises(ParseError, match=r"\[\*\]→state.*no longer authored"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_sentinel_destination_transition_rejected() -> None:
+    spec = _minimal()
+    spec["transitions"].append(
+        {"source": "c", "destination": "[*]", "type": "event", "label": "out"}
+    )
+    with pytest.raises(ParseError, match=r"state→\[\*\].*implicit"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_collects_parses_on_resting() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["collects"] = {
+        "process": "pr",
+        "from_states": ["staged"],
+    }
+    workflow = parse_state_machine(json.dumps(spec))
+    state_a = workflow.states["a"]
+    assert state_a.collects is not None
+    assert state_a.collects.process == "pr"
+    assert state_a.collects.from_states == ("staged",)
+
+
+def test_collects_forbidden_on_working() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["collects"] = {  # b is working
+        "process": "pr",
+        "from_states": ["staged"],
+    }
+    with pytest.raises(ParseError, match="collects.*only valid on resting"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_collects_forbidden_on_terminal() -> None:
+    spec = _minimal()
+    spec["states"]["c"]["collects"] = {  # c is terminal
+        "process": "pr",
+        "from_states": ["staged"],
+    }
+    with pytest.raises(ParseError, match="collects.*only valid on resting"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_collects_requires_from_states_non_empty() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["collects"] = {
+        "process": "pr",
+        "from_states": [],
+    }
+    with pytest.raises(ParseError, match="from_states.*non-empty"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_collects_rejects_duplicate_from_states() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["collects"] = {
+        "process": "pr",
+        "from_states": ["staged", "staged"],
+    }
+    with pytest.raises(ParseError, match="duplicate state"):
+        parse_state_machine(json.dumps(spec))
+
+
 def test_mark_pr_ready_forbidden_on_terminal() -> None:
     spec = _minimal()
     spec["states"]["c"]["mark_pr_ready"] = True
@@ -315,32 +436,40 @@ def test_terminal_state_requires_close_reason() -> None:
 
 def test_label_auto_generated_for_claim_transition() -> None:
     spec = _minimal()
-    del spec["transitions"][1]["label"]
+    # transitions[0] is the CLAIM (a→b).
+    del spec["transitions"][0]["label"]
     workflow = parse_state_machine(json.dumps(spec))
-    claim = workflow.transitions[1]
+    claim = workflow.transitions[0]
     assert claim.transition_type is TransitionType.CLAIM
     assert claim.label == "product-manager claims a"
 
 
 def test_label_auto_generated_for_advance_transition() -> None:
     spec = _minimal()
-    del spec["transitions"][2]["label"]
+    # transitions[1] is the ADVANCE (b→c).
+    del spec["transitions"][1]["label"]
     workflow = parse_state_machine(json.dumps(spec))
-    adv = workflow.transitions[2]
+    adv = workflow.transitions[1]
     assert adv.transition_type is TransitionType.ADVANCE
     assert adv.label == "product-manager → c"
 
 
 def test_label_required_on_event() -> None:
     spec = _minimal()
-    del spec["transitions"][0]["label"]
+    # _minimal() has no event transitions (entry is now via `initial`);
+    # add an a→c event transition without a label to drive the rule.
+    spec["transitions"].append(
+        {"source": "a", "destination": "c", "type": "event"}
+    )
     with pytest.raises(ParseError, match="event transitions"):
         parse_state_machine(json.dumps(spec))
 
 
 def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None:
-    """Inner-loop has four variation groups (feature/bug/chore, experiment,
-    spike, hotfix), each with entry, claim, PR-review, and staged states."""
+    """Inner-loop has one consolidated `implementing` working state that
+    accepts every PR-producing issue type (bug/feature/chore/experiment/
+    hotfix). Spike is the lone exception — it has its own working state
+    because it doesn't spawn a PR."""
     workflow = parse_state_machine(inner_loop_workflow_path)
     assert workflow.name == "inner-loop"
     assert workflow.states["ready_for_dev"].state_class is StateClass.RESTING
@@ -348,13 +477,18 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     # the resting queue.
     assert "developer" in workflow.states["implementing"].roles
     assert "implementing" in workflow.states
-    assert "implementing_experiment" in workflow.states
     assert "implementing_spike" in workflow.states
-    assert "implementing_hotfix" in workflow.states
-    # `implementing` declares a subprocess spawn into the pr process.
+    assert "implementing_experiment" not in workflow.states  # consolidated
+    assert "implementing_hotfix" not in workflow.states  # consolidated
+    # `implementing` accepts every PR-producing type via multi-issue-type.
     impl = workflow.states["implementing"]
+    assert set(impl.issue_types) >= {"bug", "feature", "chore", "experiment", "hotfix"}
+    # `implementing` declares a subprocess spawn into the pr process.
     assert impl.spawns is not None
     assert impl.spawns.process == "pr"
     assert impl.spawns.issue_type == "pr"
     assert impl.spawns.initial_state == "draft"
-    assert impl.spawns.advance_on == (("staged", "staged"),)
+    # PR terminal `merged` → parent inner-loop resting state `staged`.
+    # (PR's terminal was renamed from `staged` to `merged` so state names
+    # don't collide across processes.)
+    assert impl.spawns.advance_on == (("merged", "staged"),)

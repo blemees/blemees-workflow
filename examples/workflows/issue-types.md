@@ -46,7 +46,7 @@ A proposed code change. Spawned by a developer running `gh pr create` from inner
 
 ## `incident` — Incident
 
-Live production incident. Opened by the IC at declaration; carries through incident-response and any mitigation work on the same ticket. Closes at `stabilized`; postmortem is a separate (spawned) ticket.
+Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
 
 **GitHub Issue Type**: `Incident` · **Color**: `red`
 

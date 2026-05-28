@@ -156,6 +156,7 @@ _TOP_DESCRIPTION = """Canonical operation mechanism for agent workflows.
 
 Agent-facing commands:
   create-issue, spawn-issue             — open a new issue in a given initial state
+  collect-into                          — add contributor issues to a collector (states with `collects`)
   advance-issue, claim-issue, release-issue
                                         — workflow ownership and state changes
   request-input                         — recognized HITL (state-orthogonal pause)
@@ -564,11 +565,69 @@ def build_parser() -> argparse.ArgumentParser:
         dest="refs",
         action="append",
         default=None,
-        help="(PR types only) Ticket id(s) this PR addresses. Repeat for "
-        "multiple parents (e.g., --refs 123 --refs 456). Rendered as "
-        "'Refs #N' in the standard message footer.",
+        help="Ticket id(s) referenced by this issue. For PR types: parents the "
+        "PR addresses, rendered as 'Refs #N' in the message footer. For "
+        "states declaring `collects`: contributor ids to gather into this "
+        "collector (each gets `collected-by:<new>` and the new issue gets "
+        "`collects:<each>`).",
+    )
+    p_create_issue.add_argument(
+        "--all-candidates",
+        action="store_true",
+        default=False,
+        help="(states with `collects` only) Gather every eligible candidate "
+        "in the source process. Mutually exclusive with --refs and --none.",
+    )
+    p_create_issue.add_argument(
+        "--none",
+        dest="collect_none",
+        action="store_true",
+        default=False,
+        help="(states with `collects` only) Create an empty collector with "
+        "no contributors. Mutually exclusive with --refs and --all-candidates.",
+    )
+    p_create_issue.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="(states with `collects` only) Skip the candidate-eligibility "
+        "check when validating --refs. Use when an already-collected issue "
+        "must be re-routed.",
     )
     p_create_issue.set_defaults(func=_do_create_issue)
+
+    p_collect = subparsers.add_parser(
+        "collect-into",
+        help="Add contributor issue(s) to an existing collector.",
+        description=(
+            "Append contributors to a collector issue after creation. The "
+            "collector must reside on a state declaring `collects`; each "
+            "contributor must be in one of `collects.from_states` on the "
+            "source process and not already collected (use --force to "
+            "override). Applies `collects:<contributor>` to the collector "
+            "and `collected-by:<collector>` to each contributor."
+        ),
+    )
+    p_collect.add_argument(
+        "--issue",
+        required=True,
+        help="The collector issue id (the one created on a `collects` state).",
+    )
+    p_collect.add_argument(
+        "--refs",
+        dest="refs",
+        action="append",
+        required=True,
+        help="Contributor issue id(s). Repeat for multiple "
+        "(e.g., --refs 101 --refs 102).",
+    )
+    p_collect.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Skip the candidate-eligibility check.",
+    )
+    p_collect.set_defaults(func=_do_collect_into)
 
     p_view_inbox = subparsers.add_parser(
         "view-inbox",
@@ -1967,10 +2026,27 @@ def _do_create_issue(args: argparse.Namespace) -> int:
 
     is_pr = type_entry is not None and type_entry.github_entity == "pull_request"
 
+    # Does the target state declare `collects`? If so, the same `--refs`
+    # flag is repurposed to name contributor issues (mutually exclusive
+    # with the PR-side use of --refs because PR types are never receivers).
+    initial_state_def = process.state_machine.states.get(args.initial_state)
+    collects = initial_state_def.collects if initial_state_def is not None else None
+
     # PR-specific flag gating. --head/--base/--refs are valid only when the
     # resolved type maps to pull-requests; conversely, PR creates require
-    # --head and at least one --refs.
+    # --head and at least one --refs. For collect-targeted states, --refs
+    # is also accepted (and may be empty when `--none` or `--all-candidates`
+    # are used).
     if is_pr:
+        if collects is not None:
+            _handle_workflow_error(
+                ConfigError(
+                    f"State {args.initial_state!r} declares `collects` but the "
+                    f"resolved type is a pull request — collectors must not be "
+                    f"pull-request types."
+                )
+            )
+            return 2
         if not args.head:
             _handle_workflow_error(
                 ConfigError(
@@ -1986,12 +2062,55 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 )
             )
             return 2
+        if args.all_candidates or args.collect_none:
+            _handle_workflow_error(
+                ConfigError(
+                    "--all-candidates / --none are only valid when --to "
+                    "lands on a state declaring `collects`."
+                )
+            )
+            return 2
+    elif collects is not None:
+        if args.head or args.base:
+            _handle_workflow_error(
+                ConfigError(
+                    "--head / --base are only valid when creating pull requests."
+                )
+            )
+            return 2
+        # Exactly one of --refs, --all-candidates, --none must be provided
+        # to make the contributor set explicit. Listing candidates without
+        # selecting any is a usage error.
+        modes = [
+            bool(args.refs),
+            bool(args.all_candidates),
+            bool(args.collect_none),
+        ]
+        if sum(modes) != 1:
+            _handle_workflow_error(
+                ConfigError(
+                    f"State {args.initial_state!r} declares `collects`. "
+                    f"Pass exactly one of --refs N (repeat for multiple), "
+                    f"--all-candidates (gather every candidate), or --none "
+                    f"(empty collector)."
+                )
+            )
+            return 2
     else:
         if args.head or args.base or args.refs:
             _handle_workflow_error(
                 ConfigError(
                     "--head / --base / --refs are only valid when --type "
-                    "maps to GitHub pull requests."
+                    "maps to GitHub pull requests or --to lands on a state "
+                    "declaring `collects`."
+                )
+            )
+            return 2
+        if args.all_candidates or args.collect_none:
+            _handle_workflow_error(
+                ConfigError(
+                    "--all-candidates / --none are only valid when --to "
+                    "lands on a state declaring `collects`."
                 )
             )
             return 2
@@ -2027,8 +2146,22 @@ def _do_create_issue(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # Contributor ids resolved against `collects`. For dry-run we pin to
+    # whatever the user requested (no backend query); real-run also runs
+    # the candidate validation against the backend.
+    contributor_ids: list[str] = []
+    if collects is not None:
+        if args.refs:
+            contributor_ids = [r.lstrip("#") for r in args.refs]
+        # --all-candidates / --none paths populate via the backend below.
+
     if is_pr:
         body = _format_pr_body(body_text or "", refs=args.refs)
+    elif collects is not None and contributor_ids:
+        suffix_refs = ", ".join(f"#{c}" for c in contributor_ids)
+        base_body = (body_text or "").rstrip()
+        sep = "\n\n---\n\n" if base_body else ""
+        body = f"{base_body}{sep}Collects {suffix_refs}\n"
     else:
         body = body_text if body_text is not None else ""
 
@@ -2051,6 +2184,16 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 payload["base"] = args.base
                 payload["refs"] = [r.lstrip("#") for r in args.refs]
                 payload["draft"] = args.initial_state == "draft"
+            if collects is not None:
+                payload["collects"] = {
+                    "process": collects.process,
+                    "from_states": list(collects.from_states),
+                    "contributors": contributor_ids if not args.all_candidates else "(all candidates)",
+                    "mode": (
+                        "refs" if args.refs
+                        else ("all-candidates" if args.all_candidates else "none")
+                    ),
+                }
             print(_json.dumps(payload, indent=2))
         else:
             noun = "pull request" if is_pr else "issue"
@@ -2064,6 +2207,16 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 print(f"  base:          {args.base or '(repo default)'}")
                 print(f"  refs:          {', '.join('#' + r.lstrip('#') for r in args.refs)}")
                 print(f"  draft:         {args.initial_state == 'draft'}")
+            if collects is not None:
+                src_states = ", ".join(collects.from_states)
+                print(f"  collects from: {collects.process}.{src_states}")
+                if args.all_candidates:
+                    print("  contributors:  (all candidates — querying skipped in dry-run)")
+                elif args.collect_none:
+                    print("  contributors:  (none — empty collector)")
+                else:
+                    refs_str = ", ".join(f"#{c}" for c in contributor_ids)
+                    print(f"  contributors:  {refs_str}")
             if claim_role:
                 print(f"  claim:         {claim_role}")
             print(f"  body:          {len(body)} character(s)")
@@ -2075,6 +2228,51 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     except WorkflowError as exc:
         _handle_workflow_error(exc)
         return 2
+
+    # Resolve contributors against the backend: query candidates (uncollected
+    # issues in any `from_states` of the source process) when --all-candidates,
+    # validate --refs when given.
+    if collects is not None and not args.collect_none:
+        candidates: list[str] = []
+        from workflow.backends.base import IssueFilters
+        for from_state in collects.from_states:
+            try:
+                rows = backend.list_issues(IssueFilters(state=from_state, limit=200))
+            except BackendError as exc:
+                _handle_workflow_error(exc)
+                return 2
+            for row in rows:
+                if row.collected_by is None:
+                    candidates.append(row.issue_id)
+        if args.all_candidates:
+            if not candidates:
+                _handle_workflow_error(
+                    ConfigError(
+                        f"--all-candidates: no uncollected issues found in "
+                        f"{collects.process} states "
+                        f"{list(collects.from_states)}."
+                    )
+                )
+                return 2
+            contributor_ids = candidates
+            # Re-render the body footer now that the set is known.
+            suffix_refs = ", ".join(f"#{c}" for c in contributor_ids)
+            base_body = (body_text or "").rstrip()
+            sep = "\n\n---\n\n" if base_body else ""
+            body = f"{base_body}{sep}Collects {suffix_refs}\n"
+        elif args.refs and not args.force:
+            candidate_set = set(candidates)
+            invalid = [c for c in contributor_ids if c not in candidate_set]
+            if invalid:
+                _handle_workflow_error(
+                    ConfigError(
+                        f"--refs references issue(s) {invalid} that are not "
+                        f"uncollected candidates in {collects.process} states "
+                        f"{list(collects.from_states)}. Pass --force to "
+                        f"override the eligibility check."
+                    )
+                )
+                return 2
 
     if is_pr:
         # PRs don't carry a native GitHub Issue Type and don't get a
@@ -2112,17 +2310,37 @@ def _do_create_issue(args: argparse.Namespace) -> int:
         # Create at the initial state with no claim label. Claiming, if
         # requested, runs as a second operation so the state machine moves
         # resting → working properly (sets wip:<role> AND last-state:<initial_state>).
+        collect_labels = [f"collects:{cid}" for cid in contributor_ids]
         try:
             new_id = backend.create_issue(
                 title=args.title,
                 body=body,
                 state=args.initial_state,
-                extra_labels=type_extra_labels,
+                extra_labels=[*type_extra_labels, *collect_labels],
                 issue_type=backend_issue_type,
             )
         except BackendError as exc:
             _handle_workflow_error(exc)
             return 2
+
+        # Apply the inverse `collected-by:<new_id>` label on each
+        # contributor so the relationship is queryable from either side.
+        if contributor_ids:
+            from workflow.backends.base import MarkerChange
+            for cid in contributor_ids:
+                try:
+                    backend.apply_marker_change(
+                        cid,
+                        MarkerChange(set_collected_by=str(new_id)),
+                        audit_comment=f"Collected into #{new_id}.",
+                    )
+                except BackendError as exc:
+                    # Issue exists; contributor link partially applied.
+                    print(
+                        f"Created #{new_id} but failed to mark contributor "
+                        f"#{cid} as collected-by:{new_id} — {exc}",
+                        file=sys.stderr,
+                    )
 
     # 6. If --claim, immediately claim the new issue.
     claim_result = None
@@ -2204,6 +2422,131 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             if actions:
                 print("")
                 _print_next_actions(actions, current_state=args.initial_state, last_state=None)
+    return 0
+
+
+def _do_collect_into(args: argparse.Namespace) -> int:
+    """Add contributor issue(s) to an existing collector.
+
+    Validates that the collector resides on a state declaring `collects`,
+    that each contributor lives on one of the declared `from_states`, and
+    (unless --force) is not already collected. Applies the dual labels
+    atomically per contributor.
+    """
+    from workflow.backends.base import IssueFilters, MarkerChange
+
+    ctx = _ctx_obj_from_args(args)
+    contributor_ids = [r.lstrip("#") for r in args.refs]
+    if not contributor_ids:
+        _handle_workflow_error(ConfigError("--refs requires at least one id."))
+        return 2
+
+    # 1. Resolve the collector — read its state, then look up the
+    #    `collects` declaration on that state.
+    try:
+        collector_ctx = _build_context_for_issue(ctx, args.issue)
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+    backend = collector_ctx.backend
+    try:
+        collector_state_obj = backend.read_issue(args.issue)
+    except BackendError as exc:
+        _handle_workflow_error(exc)
+        return 2
+    if collector_state_obj.state is None:
+        _handle_workflow_error(
+            ConfigError(
+                f"Issue #{args.issue} has no `state:` label; cannot resolve `collects`."
+            )
+        )
+        return 2
+    collector_state_def = collector_ctx.state_machine.states.get(collector_state_obj.state)
+    collects = collector_state_def.collects if collector_state_def is not None else None
+    if collects is None:
+        _handle_workflow_error(
+            ConfigError(
+                f"Issue #{args.issue} is on state "
+                f"{collector_state_obj.state!r}, which does not declare "
+                f"`collects`. Only states with a `collects` field can act "
+                f"as collectors."
+            )
+        )
+        return 2
+
+    # 2. Validate each contributor against the candidate set (unless --force).
+    if not args.force:
+        candidates: set[str] = set()
+        for from_state in collects.from_states:
+            try:
+                rows = backend.list_issues(IssueFilters(state=from_state, limit=200))
+            except BackendError as exc:
+                _handle_workflow_error(exc)
+                return 2
+            for row in rows:
+                if row.collected_by is None:
+                    candidates.add(row.issue_id)
+        invalid = [cid for cid in contributor_ids if cid not in candidates]
+        if invalid:
+            _handle_workflow_error(
+                ConfigError(
+                    f"--refs references issue(s) {invalid} that are not "
+                    f"uncollected candidates in {collects.process} states "
+                    f"{list(collects.from_states)}. Pass --force to override."
+                )
+            )
+            return 2
+
+    # 3. Dry-run path.
+    if ctx["dry_run"]:
+        if ctx["json_output"]:
+            print(_json.dumps({
+                "collector": str(args.issue),
+                "contributors": contributor_ids,
+                "dry_run": True,
+            }, indent=2))
+        else:
+            print(f"[dry-run] would add {len(contributor_ids)} contributor(s) to #{args.issue}:")
+            for cid in contributor_ids:
+                print(f"  #{cid}")
+        return 0
+
+    # 4. Apply the dual labels: collects:<contributor> on the collector,
+    #    collected-by:<collector> on each contributor.
+    try:
+        backend.apply_marker_change(
+            str(args.issue),
+            MarkerChange(add_collects=tuple(contributor_ids)),
+            audit_comment=(
+                f"Collected " + ", ".join(f"#{c}" for c in contributor_ids) + "."
+            ),
+        )
+    except BackendError as exc:
+        _handle_workflow_error(exc)
+        return 2
+    for cid in contributor_ids:
+        try:
+            backend.apply_marker_change(
+                cid,
+                MarkerChange(set_collected_by=str(args.issue)),
+                audit_comment=f"Collected into #{args.issue}.",
+            )
+        except BackendError as exc:
+            print(
+                f"Collector #{args.issue} labelled, but failed to mark "
+                f"contributor #{cid} as collected-by — {exc}",
+                file=sys.stderr,
+            )
+            return 2
+
+    if ctx["json_output"]:
+        print(_json.dumps({
+            "collector": str(args.issue),
+            "contributors": contributor_ids,
+        }, indent=2))
+    else:
+        refs_str = ", ".join(f"#{c}" for c in contributor_ids)
+        print(f"Added {refs_str} as contributor(s) to #{args.issue}.")
     return 0
 
 
@@ -2604,13 +2947,12 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     from workflow.config import build_registry
     from workflow.core.emitter import (
         ProcessDocInput,
-        emit_index_doc,
         emit_human_inputs_doc,
+        emit_index_doc,
         emit_issue_types_doc,
         emit_mermaid,
         emit_process_doc,
         emit_process_map,
-        emit_process_map_doc,
         emit_roles_doc,
     )
 
@@ -2637,6 +2979,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     issue_type_directory = None
     human_input_directory = None
     processes_loaded: list[Any] = []
+    # First pass: load every discovered process.
     for wf_name in process_names:
         try:
             process = registry.get_process(wf_name)
@@ -2655,13 +2998,34 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         if human_input_directory is None and process.human_input_directory is not None:
             human_input_directory = process.human_input_directory
 
+    # Compute spawn-targets per process: for each sibling's `spawns`,
+    # record the destination process's `initial_state` so its diagram
+    # gets a `[*] --> state: spawn` arrow.
+    spawn_targets_by_process: dict[str, set[str]] = {}
+    for p in processes_loaded:
+        for s in p.state_machine.states.values():
+            if s.spawns is None:
+                continue
+            spawn_targets_by_process.setdefault(s.spawns.process, set()).add(
+                s.spawns.initial_state
+            )
+
+    # Second pass: emit mermaid + markdown per process now that
+    # cross-process info is available.
+    for process in processes_loaded:
+        wf_name = process.process_name
+        spawn_targets = spawn_targets_by_process.get(wf_name)
+
         if workflow_dir is None:
             # No on-disk target; print to stdout and continue.
-            print(emit_mermaid(process.state_machine))
+            print(emit_mermaid(process.state_machine, spawn_targets=spawn_targets))
             continue
 
         mermaid_path = workflow_dir / f"{wf_name}-states.mermaid"
-        mermaid_path.write_text(emit_mermaid(process.state_machine), encoding="utf-8")
+        mermaid_path.write_text(
+            emit_mermaid(process.state_machine, spawn_targets=spawn_targets),
+            encoding="utf-8",
+        )
         written.append(str(mermaid_path))
 
         doc_path = workflow_dir / f"{wf_name}.md"
@@ -2672,23 +3036,23 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
                     catalog=process.catalog,
                     issue_type_directory=process.issue_type_directory,
                     grants=process.grants,
+                    spawn_targets=frozenset(spawn_targets) if spawn_targets else None,
                 )
             ),
             encoding="utf-8",
         )
         written.append(str(doc_path))
 
-    has_process_map = False
+    process_map_mermaid: str | None = None
     if workflow_dir is not None and processes_loaded:
         # Process map shows up only when we've got at least one process to
-        # plot — otherwise the diagram would be empty.
+        # plot — otherwise the diagram would be empty. The raw mermaid lands
+        # at `process-map.mermaid` for downstream tools; README.md embeds it
+        # inline alongside the reader's guide.
+        process_map_mermaid = emit_process_map(processes_loaded)
         map_path = workflow_dir / "process-map.mermaid"
-        map_path.write_text(emit_process_map(processes_loaded), encoding="utf-8")
+        map_path.write_text(process_map_mermaid, encoding="utf-8")
         written.append(str(map_path))
-        map_doc_path = workflow_dir / "process-map.md"
-        map_doc_path.write_text(emit_process_map_doc(), encoding="utf-8")
-        written.append(str(map_doc_path))
-        has_process_map = True
 
     if workflow_dir is not None:
         sms = [p.state_machine for p in processes_loaded]
@@ -2711,11 +3075,11 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         readme_path = workflow_dir / "README.md"
         readme_path.write_text(
             emit_index_doc(
-                process_names,
+                {p.state_machine.name: p.state_machine.description for p in processes_loaded},
                 has_roles=role_directory is not None,
                 has_issue_types=issue_type_directory is not None,
                 has_human_inputs=human_input_directory is not None,
-                has_process_map=has_process_map,
+                process_map_mermaid=process_map_mermaid,
             ),
             encoding="utf-8",
         )

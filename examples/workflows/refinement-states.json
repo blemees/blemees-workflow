@@ -1,15 +1,30 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills.",
   "states": {
     "raw": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "initial": "issue created (external)"
     },
     "refining": {
       "class": "working",
-      "roles": ["product-manager"],
-      "issue_types": ["bug", "feature", "chore", "experiment"],
-      "human_inputs": ["clarify-scope", "needs-arch-review", "needs-security-review", "needs-ux-input", "general"]
+      "roles": [
+        "product-manager"
+      ],
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ],
+      "human_inputs": [
+        "clarify-scope",
+        "needs-arch-review",
+        "needs-security-review",
+        "needs-ux-input",
+        "general"
+      ]
     },
     "consult_requested": {
       "class": "resting",
@@ -17,9 +32,22 @@
     },
     "consulting": {
       "class": "working",
-      "issue_types": ["bug", "feature", "chore", "experiment"],
-      "roles": ["architect", "designer", "security-engineer"],
-      "human_inputs": ["needs-arch-review", "needs-security-review", "general"]
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ],
+      "roles": [
+        "architect",
+        "designer",
+        "security-engineer"
+      ],
+      "human_inputs": [
+        "needs-arch-review",
+        "needs-security-review",
+        "general"
+      ]
     },
     "consult_complete": {
       "class": "resting",
@@ -27,14 +55,21 @@
     },
     "spiking": {
       "class": "resting",
+      "reversibility": "reversible-fast",
+      "spawns": {
+        "process": "inner-loop",
+        "issue_type": "spike",
+        "initial_state": "ready_for_spike",
+        "advance_on": {
+          "spike_completed": "spike_returned"
+        }
+      }
+    },
+    "spike_returned": {
+      "class": "resting",
       "reversibility": "reversible-fast"
     },
     "ready_for_dev": {
-      "class": "resting",
-      "reversibility": "reversible-slow",
-      "handoff": true
-    },
-    "ready_for_experiment": {
       "class": "resting",
       "reversibility": "reversible-slow",
       "handoff": true
@@ -62,23 +97,101 @@
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "raw", "type": "event", "label": "issue created (external)"},
-    {"source": "raw", "destination": "refining", "type": "claim", "label": "PM claims raw"},
-    {"source": "refining", "destination": "duplicate", "type": "advance", "label": "PM marks duplicate"},
-    {"source": "refining", "destination": "wont_fix", "type": "advance", "label": "PM marks won't-fix"},
-    {"source": "refining", "destination": "consult_requested", "type": "advance", "label": "PM requests consult"},
-    {"source": "consult_requested", "destination": "consulting", "type": "claim", "label": "consultant claims consult"},
-    {"source": "consulting", "destination": "consult_complete", "type": "advance", "label": "consultant posts findings"},
-    {"source": "consult_complete", "destination": "refining", "type": "claim", "label": "PM claims consult feedback"},
-    {"source": "consulting", "destination": "spiking", "type": "advance", "label": "consultant creates spike sub-issue (spawns spike to inner-loop ready_for_spike)"},
-    {"source": "spiking", "destination": "consulting", "type": "claim", "label": "consultant claims spike findings"},
-    {"source": "refining", "destination": "ready_for_dev", "type": "advance", "label": "PM marks ready (feat/bug/chore)"},
-    {"source": "refining", "destination": "ready_for_experiment", "type": "advance", "label": "PM marks ready (exp)"},
-    {"source": "ready_bounced", "destination": "refining", "type": "claim", "label": "PM claims bounced issue"},
-    {"source": "refining", "destination": "deprioritized", "type": "advance", "label": "PM parks issue"},
-    {"source": "ready_for_dev", "destination": "deprioritized", "type": "advance", "label": "PM parks issue"},
-    {"source": "ready_for_experiment", "destination": "deprioritized", "type": "advance", "label": "PM parks issue"},
-    {"source": "deprioritized", "destination": "refining", "type": "claim", "label": "PM claims to re-refine (staleness check)"},
-    {"source": "deprioritized", "destination": "wont_fix", "type": "advance", "label": "PM kills parked issue"}
+    {
+      "source": "raw",
+      "destination": "refining",
+      "type": "claim",
+      "label": "PM claims raw"
+    },
+    {
+      "source": "refining",
+      "destination": "duplicate",
+      "type": "advance",
+      "label": "PM marks duplicate"
+    },
+    {
+      "source": "refining",
+      "destination": "wont_fix",
+      "type": "advance",
+      "label": "PM marks won't-fix"
+    },
+    {
+      "source": "refining",
+      "destination": "consult_requested",
+      "type": "advance",
+      "label": "PM requests consult"
+    },
+    {
+      "source": "consult_requested",
+      "destination": "consulting",
+      "type": "claim",
+      "label": "consultant claims consult"
+    },
+    {
+      "source": "consulting",
+      "destination": "consult_complete",
+      "type": "advance",
+      "label": "consultant posts findings"
+    },
+    {
+      "source": "consult_complete",
+      "destination": "refining",
+      "type": "claim",
+      "label": "PM claims consult feedback"
+    },
+    {
+      "source": "consulting",
+      "destination": "spiking",
+      "type": "advance",
+      "label": "consultant requests spike sub-issue on inner-loop"
+    },
+    {
+      "source": "spiking",
+      "destination": "spike_returned",
+      "type": "event",
+      "label": "spike sub-issue completed (auto from inner-loop)"
+    },
+    {
+      "source": "spike_returned",
+      "destination": "consulting",
+      "type": "claim",
+      "label": "consultant claims to process spike findings"
+    },
+    {
+      "source": "refining",
+      "destination": "ready_for_dev",
+      "type": "advance",
+      "label": "PM marks ready (feat/bug/chore/exp)"
+    },
+    {
+      "source": "ready_bounced",
+      "destination": "refining",
+      "type": "claim",
+      "label": "PM claims bounced issue"
+    },
+    {
+      "source": "refining",
+      "destination": "deprioritized",
+      "type": "advance",
+      "label": "PM parks issue"
+    },
+    {
+      "source": "ready_for_dev",
+      "destination": "deprioritized",
+      "type": "advance",
+      "label": "PM parks issue"
+    },
+    {
+      "source": "deprioritized",
+      "destination": "refining",
+      "type": "claim",
+      "label": "PM claims to re-refine (staleness check)"
+    },
+    {
+      "source": "deprioritized",
+      "destination": "wont_fix",
+      "type": "advance",
+      "label": "PM kills parked issue"
+    }
   ]
 }

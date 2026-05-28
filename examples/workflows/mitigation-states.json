@@ -1,5 +1,6 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Roll back or feature-flag-off shipped behavior to stop bleeding during an active incident. Branches off incident-response when a revert is the right call.",
   "states": {
     "ready_for_rollback": {
       "class": "resting",
@@ -14,23 +15,16 @@
       "reversibility": "reversible-fast",
       "handoff": true
     },
-    "rolling_back": {
+    "applying_mitigation": {
       "class": "working",
-      "roles": ["incident-responder"],
-      "issue_types": ["incident"]
+      "roles": [
+        "incident-responder"
+      ],
+      "issue_types": [
+        "incident"
+      ]
     },
-    "rolled_back": {
-      "class": "terminal",
-      "reversibility": "reversible-slow",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
-    },
-    "toggling_flag": {
-      "class": "working",
-      "roles": ["incident-responder"],
-      "issue_types": ["incident"]
-    },
-    "flag_toggled": {
+    "mitigated": {
       "class": "terminal",
       "reversibility": "reversible-slow",
       "terminal_taxonomy": "shipped",
@@ -38,9 +32,23 @@
     }
   },
   "transitions": [
-    {"source": "ready_for_rollback", "destination": "rolling_back", "type": "claim", "label": "responder claims rollback"},
-    {"source": "rolling_back", "destination": "rolled_back", "type": "advance", "label": "responder completes rollback"},
-    {"source": "ready_for_flag_toggle", "destination": "toggling_flag", "type": "claim", "label": "responder claims flag toggle"},
-    {"source": "toggling_flag", "destination": "flag_toggled", "type": "advance", "label": "responder completes toggle"}
+    {
+      "source": "ready_for_rollback",
+      "destination": "applying_mitigation",
+      "type": "claim",
+      "label": "responder claims rollback"
+    },
+    {
+      "source": "ready_for_flag_toggle",
+      "destination": "applying_mitigation",
+      "type": "claim",
+      "label": "responder claims flag toggle"
+    },
+    {
+      "source": "applying_mitigation",
+      "destination": "mitigated",
+      "type": "advance",
+      "label": "responder completes mitigation"
+    }
   ]
 }

@@ -1,5 +1,7 @@
 # Process: progressive-rollout
 
+Gradually expand a flag-gated change across user cohorts while watching SLIs. Promotes through cohort tiers or aborts on regression.
+
 > Defined in: `progressive-rollout-states.json`
 
 ## Issue types accepted
@@ -10,6 +12,7 @@
 
 ```mermaid
 stateDiagram-v2
+    direction TB
     soaking --> ready_for_stage_analysis: soak window elapses (time)
     ready_for_stage_analysis --> analyzing: on-call claims stage analysis
     analyzing --> soaking: on-call advances to next stage
@@ -20,14 +23,6 @@ stateDiagram-v2
     killing --> kill_switched: on-call disables flag, files compensating bug
     complete --> [*]: terminal (shipped)
     kill_switched --> [*]: terminal (reverted)
-
-    note right of soaking: reversible-slow
-    note right of ready_for_stage_analysis: reversible-fast
-    note right of analyzing: role=developer, types=release
-    note right of holding: reversible-fast
-    note right of killing: roles=incident-commander, incident-responder, types=release
-    note right of complete: reversible-slow
-    note right of kill_switched: reversible-slow
 ```
 
 ## States

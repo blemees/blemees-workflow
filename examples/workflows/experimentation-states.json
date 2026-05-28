@@ -1,5 +1,6 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Measure a flag-gated experiment in production and reach a verdict — ship-to-all, kill, or iterate. Owned by the product owner once the dev work is merged.",
   "states": {
     "measuring": {
       "class": "resting",
@@ -11,13 +12,21 @@
     },
     "analyzing": {
       "class": "working",
-      "roles": ["product-owner"],
-      "issue_types": ["experiment"]
+      "roles": [
+        "product-owner"
+      ],
+      "issue_types": [
+        "experiment"
+      ]
     },
     "aborting": {
       "class": "working",
-      "issue_types": ["experiment"],
-      "roles": ["product-owner"]
+      "issue_types": [
+        "experiment"
+      ],
+      "roles": [
+        "product-owner"
+      ]
     },
     "promoted": {
       "class": "terminal",
@@ -45,13 +54,53 @@
     }
   },
   "transitions": [
-    {"source": "measuring", "destination": "measurement_complete", "type": "event", "label": "measurement window elapses (time)"},
-    {"source": "measuring", "destination": "aborting", "type": "claim", "label": "PO claims to abort"},
-    {"source": "aborting", "destination": "aborted", "type": "advance", "label": "PO publishes abort reason"},
-    {"source": "measurement_complete", "destination": "analyzing", "type": "claim", "label": "PO claims experiment for analysis"},
-    {"source": "analyzing", "destination": "measuring", "type": "advance", "label": "PO extends experiment, resets window"},
-    {"source": "analyzing", "destination": "promoted", "type": "advance", "label": "PO promotes experiment to feature (files promotion chore on process refinement)"},
-    {"source": "analyzing", "destination": "killed", "type": "advance", "label": "PO kills experiment (files cleanup chore on process refinement)"},
-    {"source": "analyzing", "destination": "iterated", "type": "advance", "label": "PO requests experiment iteration (files new experiment on process refinement)"}
+    {
+      "source": "measuring",
+      "destination": "measurement_complete",
+      "type": "event",
+      "label": "measurement window elapses (time)"
+    },
+    {
+      "source": "measuring",
+      "destination": "aborting",
+      "type": "claim",
+      "label": "PO claims to abort"
+    },
+    {
+      "source": "aborting",
+      "destination": "aborted",
+      "type": "advance",
+      "label": "PO publishes abort reason"
+    },
+    {
+      "source": "measurement_complete",
+      "destination": "analyzing",
+      "type": "claim",
+      "label": "PO claims experiment for analysis"
+    },
+    {
+      "source": "analyzing",
+      "destination": "measuring",
+      "type": "advance",
+      "label": "PO extends experiment, resets window"
+    },
+    {
+      "source": "analyzing",
+      "destination": "promoted",
+      "type": "advance",
+      "label": "PO promotes experiment to feature (files promotion chore on process refinement)"
+    },
+    {
+      "source": "analyzing",
+      "destination": "killed",
+      "type": "advance",
+      "label": "PO kills experiment (files cleanup chore on process refinement)"
+    },
+    {
+      "source": "analyzing",
+      "destination": "iterated",
+      "type": "advance",
+      "label": "PO requests experiment iteration (files new experiment on process refinement)"
+    }
   ]
 }

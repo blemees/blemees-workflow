@@ -1,5 +1,7 @@
 stateDiagram-v2
+    direction TB
     %% Cross-process interfaces:
+    %%   Spawn:   mitigating → process mitigation (issue_type=incident, initial=ready_for_rollback)
     %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
     %%
 
@@ -14,13 +16,3 @@ stateDiagram-v2
     verifying --> cause_identified: responder reports mitigation failed
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
     stabilized --> [*]: terminal (superseded)
-
-    note left of declared: reversible-fast
-    note right of triaging: role=incident-commander, types=incident
-    note right of needs_diagnosis: reversible-fast
-    note right of diagnosing: role=incident-responder, types=incident
-    note right of cause_identified: reversible-fast
-    note right of mitigating: role=incident-commander, types=incident
-    note right of needs_verification: reversible-fast
-    note right of verifying: role=incident-responder, types=incident
-    note right of stabilized: reversible-fast

@@ -1,5 +1,7 @@
 # Process: postmortem
 
+Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes when the writeup is approved.
+
 > Defined in: `postmortem-states.json`
 
 ## Issue types accepted
@@ -10,17 +12,13 @@
 
 ```mermaid
 stateDiagram-v2
+    direction TB
     pending --> drafting: PM claims postmortem
     drafting --> ready_for_followups: PM completes postmortem narrative
     ready_for_followups --> creating_followups: PM claims for follow-up filing
     creating_followups --> complete: PM files compensating issues (spawn events to process refinement)
     complete --> [*]: terminal (resolved)
-
-    note right of pending: reversible-slow
-    note right of drafting: role=product-manager, types=postmortem
-    note right of ready_for_followups: reversible-fast
-    note right of creating_followups: role=product-manager, types=postmortem
-    note right of complete: reversible-slow
+    [*] --> pending: spawn
 ```
 
 ## States

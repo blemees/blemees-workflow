@@ -1,8 +1,9 @@
 stateDiagram-v2
+    direction TB
     %% Cross-process interfaces:
     %%   Handoff: ready_for_dev (shared resting state)
-    %%   Handoff: ready_for_experiment (shared resting state)
     %%   Handoff: ready_bounced (shared resting state)
+    %%   Spawn:   spiking → process inner-loop (issue_type=spike, initial=ready_for_spike)
     %%
 
     [*] --> raw: issue created (external)
@@ -13,28 +14,16 @@ stateDiagram-v2
     consult_requested --> consulting: consultant claims consult
     consulting --> consult_complete: consultant posts findings
     consult_complete --> refining: PM claims consult feedback
-    consulting --> spiking: consultant creates spike sub-issue (spawns spike to inner-loop ready_for_spike)
-    spiking --> consulting: consultant claims spike findings
-    refining --> ready_for_dev: PM marks ready (feat/bug/chore)
-    refining --> ready_for_experiment: PM marks ready (exp)
+    consulting --> spiking: consultant requests spike sub-issue on inner-loop
+    spiking --> spike_returned: spike sub-issue completed (auto from inner-loop)
+    spike_returned --> consulting: consultant claims to process spike findings
+    refining --> ready_for_dev: PM marks ready (feat/bug/chore/exp)
     ready_bounced --> refining: PM claims bounced issue
     refining --> deprioritized: PM parks issue
     ready_for_dev --> deprioritized: PM parks issue
-    ready_for_experiment --> deprioritized: PM parks issue
     deprioritized --> refining: PM claims to re-refine (staleness check)
     deprioritized --> wont_fix: PM kills parked issue
     duplicate --> [*]: terminal (deduplicated)
     wont_fix --> [*]: terminal (abandoned)
-
-    note left of raw: reversible-fast
-    note right of refining: role=product-manager, types=bug, feature, chore, experiment
-    note right of consult_requested: reversible-fast
-    note right of consulting: roles=architect, designer, security-engineer, types=bug, feature, chore, experiment
-    note right of consult_complete: reversible-fast
-    note right of spiking: reversible-fast
-    note right of ready_for_dev: handoff, reversible-slow
-    note right of ready_for_experiment: handoff, reversible-slow
-    note right of ready_bounced: handoff, reversible-fast
-    note right of deprioritized: reversible-fast
-    note right of duplicate: reversible-fast
-    note right of wont_fix: reversible-fast
+    ready_for_dev --> [*]: handoff
+    [*] --> ready_bounced: handoff

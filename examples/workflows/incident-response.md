@@ -1,16 +1,26 @@
 # Process: incident-response
 
+Coordinate the live response to a production incident: declare, mitigate, stabilize. Spawns a postmortem on stabilization.
+
 > Defined in: `incident-response-states.json`
 
 ## Issue types accepted
 
-- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response and any mitigation work on the same ticket. Closes at `stabilized`; postmortem is a separate (spawned) ticket.
+- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
+
+## External entry points
+
+States where new issues materialize from outside the workflow — manual `create-issue --to <state>`, a webhook, or a scheduled job. Distinct from spawn / collect targets, which are reached via upstream work in another process; the framework enforces the two as mutually exclusive per state.
+
+- `declared` — alert / report triggers incident (external)
 
 ## State diagram
 
 ```mermaid
 stateDiagram-v2
+    direction TB
     %% Cross-process interfaces:
+    %%   Spawn:   mitigating → process mitigation (issue_type=incident, initial=ready_for_rollback)
     %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
     %%
 
@@ -25,16 +35,6 @@ stateDiagram-v2
     verifying --> cause_identified: responder reports mitigation failed
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
     stabilized --> [*]: terminal (superseded)
-
-    note left of declared: reversible-fast
-    note right of triaging: role=incident-commander, types=incident
-    note right of needs_diagnosis: reversible-fast
-    note right of diagnosing: role=incident-responder, types=incident
-    note right of cause_identified: reversible-fast
-    note right of mitigating: role=incident-commander, types=incident
-    note right of needs_verification: reversible-fast
-    note right of verifying: role=incident-responder, types=incident
-    note right of stabilized: reversible-fast
 ```
 
 ## States
@@ -55,7 +55,6 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `declared` | event | 'alert / report triggers incident (external)' | — | — |
 | `declared` | `triaging` | claim | 'IC claims incident' | — | — |
 | `triaging` | `needs_diagnosis` | advance | 'IC assigns severity, assigns responder' | — | — |
 | `needs_diagnosis` | `diagnosing` | claim | 'responder claims diagnosis' | — | — |
@@ -70,4 +69,6 @@ stateDiagram-v2
 
 **Spawns** (states that create child issues on other processes):
 
+- `mitigating` (subprocess) → process `mitigation` as `incident` issue at `ready_for_rollback`
+    - on child `mitigated` → parent `needs_verification`
 - `stabilized` (independent) → process `postmortem` as `postmortem` issue at `pending`

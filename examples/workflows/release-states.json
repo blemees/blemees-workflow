@@ -1,18 +1,41 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Cut, review, and ship a release train. The release manager assembles a candidate from staged work, runs the go/no-go review, then ships or defers.",
   "states": {
-    "accumulating": {
-      "class": "resting",
-      "reversibility": "reversible-fast"
-    },
     "cut": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "collects": {
+        "process": "inner-loop",
+        "from_states": ["staged"],
+        "issue_types": ["bug", "feature", "chore", "experiment"],
+        "advance_on": {
+          "released": "shipped"
+        },
+        "release_on": ["abandoned", "rolled_back"]
+      }
+    },
+    "hotfix_cut": {
+      "class": "resting",
+      "reversibility": "reversible-fast",
+      "collects": {
+        "process": "inner-loop",
+        "from_states": ["staged"],
+        "issue_types": ["hotfix"],
+        "advance_on": {
+          "released": "shipped"
+        },
+        "release_on": ["abandoned", "rolled_back"]
+      }
     },
     "preparing": {
       "class": "working",
-      "roles": ["release-manager"],
-      "issue_types": ["release"]
+      "roles": [
+        "release-manager"
+      ],
+      "issue_types": [
+        "release"
+      ]
     },
     "ready_for_release_decision": {
       "class": "resting",
@@ -20,8 +43,12 @@
     },
     "reviewing_release": {
       "class": "working",
-      "roles": ["product-owner"],
-      "issue_types": ["release"]
+      "roles": [
+        "product-owner"
+      ],
+      "issue_types": [
+        "release"
+      ]
     },
     "gated_nogo": {
       "class": "resting",
@@ -29,8 +56,12 @@
     },
     "abandoning": {
       "class": "working",
-      "roles": ["product-owner"],
-      "issue_types": ["release"]
+      "roles": [
+        "product-owner"
+      ],
+      "issue_types": [
+        "release"
+      ]
     },
     "abandoned": {
       "class": "terminal",
@@ -52,13 +83,22 @@
     },
     "monitoring": {
       "class": "working",
-      "roles": ["developer"],
-      "issue_types": ["release"]
+      "roles": [
+        "developer"
+      ],
+      "issue_types": [
+        "release"
+      ]
     },
     "rolling_back": {
       "class": "working",
-      "issue_types": ["release"],
-      "roles": ["incident-commander", "release-manager"]
+      "issue_types": [
+        "release"
+      ],
+      "roles": [
+        "incident-commander",
+        "release-manager"
+      ]
     },
     "rolled_back": {
       "class": "terminal",
@@ -74,22 +114,95 @@
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "accumulating", "type": "event", "label": "new train opens (on cadence, or after previous release closes)"},
-    {"source": "accumulating", "destination": "cut", "type": "event", "label": "cadence timer elapses (time)"},
-    {"source": "accumulating", "destination": "cut", "type": "event", "label": "RM triggers cut script"},
-    {"source": "cut", "destination": "preparing", "type": "claim", "label": "RM claims train"},
-    {"source": "preparing", "destination": "ready_for_release_decision", "type": "advance", "label": "RM publishes release notes, tags release candidate"},
-    {"source": "ready_for_release_decision", "destination": "reviewing_release", "type": "claim", "label": "PO claims train"},
-    {"source": "reviewing_release", "destination": "gated_nogo", "type": "advance", "label": "PO defers with blocking reason"},
-    {"source": "reviewing_release", "destination": "deploying", "type": "advance", "label": "PO approves go (or IC approves for patch train)"},
-    {"source": "gated_nogo", "destination": "reviewing_release", "type": "claim", "label": "PO re-claims deferred train"},
-    {"source": "gated_nogo", "destination": "abandoning", "type": "claim", "label": "PO claims to abandon train"},
-    {"source": "abandoning", "destination": "abandoned", "type": "advance", "label": "PO closes train, issues revert to inner-loop.staged for next train"},
-    {"source": "deploying", "destination": "rolling_out", "type": "event", "label": "production deploy completes (external \u2014 progressive rollout starts)"},
-    {"source": "rolling_out", "destination": "ready_for_monitoring", "type": "event", "label": "rollout reaches 100% (from process progressive-rollout)"},
-    {"source": "ready_for_monitoring", "destination": "monitoring", "type": "claim", "label": "on-call claims post-deploy watch"},
-    {"source": "monitoring", "destination": "released", "type": "advance", "label": "on-call confirms post-deploy window clean"},
-    {"source": "monitoring", "destination": "rolling_back", "type": "advance", "label": "on-call triggers rollback"},
-    {"source": "rolling_back", "destination": "rolled_back", "type": "advance", "label": "rollback completes"}
+    {
+      "source": "cut",
+      "destination": "preparing",
+      "type": "claim",
+      "label": "RM claims release train"
+    },
+    {
+      "source": "hotfix_cut",
+      "destination": "preparing",
+      "type": "claim",
+      "label": "IC / RM claims hotfix train"
+    },
+    {
+      "source": "preparing",
+      "destination": "ready_for_release_decision",
+      "type": "advance",
+      "label": "RM publishes release notes, tags release candidate"
+    },
+    {
+      "source": "ready_for_release_decision",
+      "destination": "reviewing_release",
+      "type": "claim",
+      "label": "PO claims train"
+    },
+    {
+      "source": "reviewing_release",
+      "destination": "gated_nogo",
+      "type": "advance",
+      "label": "PO defers with blocking reason"
+    },
+    {
+      "source": "reviewing_release",
+      "destination": "deploying",
+      "type": "advance",
+      "label": "PO approves go (or IC approves for patch train)"
+    },
+    {
+      "source": "gated_nogo",
+      "destination": "reviewing_release",
+      "type": "claim",
+      "label": "PO re-claims deferred train"
+    },
+    {
+      "source": "gated_nogo",
+      "destination": "abandoning",
+      "type": "claim",
+      "label": "PO claims to abandon train"
+    },
+    {
+      "source": "abandoning",
+      "destination": "abandoned",
+      "type": "advance",
+      "label": "PO closes train, issues revert to inner-loop.staged for next train"
+    },
+    {
+      "source": "deploying",
+      "destination": "rolling_out",
+      "type": "event",
+      "label": "production deploy completes (external — progressive rollout starts)"
+    },
+    {
+      "source": "rolling_out",
+      "destination": "ready_for_monitoring",
+      "type": "event",
+      "label": "rollout reaches 100% (from process progressive-rollout)"
+    },
+    {
+      "source": "ready_for_monitoring",
+      "destination": "monitoring",
+      "type": "claim",
+      "label": "on-call claims post-deploy watch"
+    },
+    {
+      "source": "monitoring",
+      "destination": "released",
+      "type": "advance",
+      "label": "on-call confirms post-deploy window clean"
+    },
+    {
+      "source": "monitoring",
+      "destination": "rolling_back",
+      "type": "advance",
+      "label": "on-call triggers rollback"
+    },
+    {
+      "source": "rolling_back",
+      "destination": "rolled_back",
+      "type": "advance",
+      "label": "rollback completes"
+    }
   ]
 }

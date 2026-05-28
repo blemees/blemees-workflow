@@ -3,20 +3,82 @@
 Generated documentation for the processes defined in this workflow.
 Authored sources are the `*.json` files; regenerate with `workflow generate-docs`.
 
-- [Process map](./process-map.md) — auto-generated handoff overview
+## Process map
+
+Auto-generated overview of every process in this workflow and the handoffs between them. The canonical source is each `<process>-states.json`; the diagram is regenerated from those.
+
+Rendered as a `stateDiagram-v2` so it shares the visual language of the per-process state diagrams. Nodes are processes; the built-in `[*]` sentinel marks external entry (top) and external exit (bottom). The diagram reads top-to-bottom: new issues flow from `[*]`, through processes (handoffs and spawns between them), and back to `[*]` as each terminal state is reached.
+
+Edge labels carry a symbol prefix indicating the relationship kind:
+
+- **`▶ <state>`** — entry: a new external issue materializes at the labelled state.
+- **`■ <state>`** — exit: an issue closes at the labelled terminal **and** no parent process has it listed as a spawn feedback target. Terminals named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.
+- **`⇄ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.
+- **`⤴ <src>→<dst>`** — spawn: the source process creates a child issue on the destination at the labelled initial state.
+- **`⤵ <src>→<dst>`** — collect: the destination process (authored via `collects`) gathers contributors from the source process's labelled state.
+- **`↺ <child>→<parent>`** — feedback: the inverse of a spawn's `advance_on` (child terminates → parent auto-advances) **or** a collect's `advance_on` (collector reaches a state → contributors advance). Pairs with the originating `⤴`/`⤵` edge to show the round-trip.
+- **`↩ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.
+
+Edge labels name the state involved — the shared resting state for handoffs, or the originating → destination state pair for spawns.
+
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    state "incident-response" as incident_response
+    state "inner-loop" as inner_loop
+    state "progressive-rollout" as progressive_rollout
+
+    [*] --> incident_response: ▶ declared
+    [*] --> refinement: ▶ raw
+    incident_response --> mitigation: ⤴ mitigating→ready_for_rollback
+    incident_response --> postmortem: ⤴ stabilized→pending
+    inner_loop --> pr: ⤴ implementing→draft
+    inner_loop --> refinement: ↺ spike_completed→spike_returned
+    inner_loop --> refinement: ⇄ ready_bounced
+    inner_loop --> release: ⤵ staged→cut [bug,feature,chore,experiment]
+    inner_loop --> release: ⤵ staged→hotfix_cut [hotfix]
+    mitigation --> incident_response: ↺ mitigated→needs_verification
+    mitigation --> inner_loop: ⇄ ready_for_hotfix
+    pr --> inner_loop: ↺ merged→staged
+    refinement --> inner_loop: ⇄ ready_for_dev
+    refinement --> inner_loop: ⤴ spiking→ready_for_spike
+    release --> inner_loop: ↩ abandoned
+    release --> inner_loop: ↩ rolled_back
+    release --> inner_loop: ↺ released→shipped
+    backport --> [*]: ■ backported
+    experimentation --> [*]: ■ aborted
+    experimentation --> [*]: ■ iterated
+    experimentation --> [*]: ■ killed
+    experimentation --> [*]: ■ promoted
+    incident_response --> [*]: ■ stabilized
+    inner_loop --> [*]: ■ shipped
+    postmortem --> [*]: ■ complete
+    progressive_rollout --> [*]: ■ complete
+    progressive_rollout --> [*]: ■ kill_switched
+    refinement --> [*]: ■ duplicate
+    refinement --> [*]: ■ wont_fix
+    release --> [*]: ■ abandoned
+    release --> [*]: ■ released
+    release --> [*]: ■ rolled_back
+```
+
+The raw mermaid source is also available at [`process-map.mermaid`](./process-map.mermaid).
+
+**What this map does NOT show:** editorial groupings (Build / Ship lanes), edge tiers (happy path vs feedback), or rolled-up labels. Each shared state appears as its own edge.
 
 ## Processes
 
-- [`backport`](./backport.md) — state machine, human gates, handoffs
-- [`experimentation`](./experimentation.md) — state machine, human gates, handoffs
-- [`incident-response`](./incident-response.md) — state machine, human gates, handoffs
-- [`inner-loop`](./inner-loop.md) — state machine, human gates, handoffs
-- [`mitigation`](./mitigation.md) — state machine, human gates, handoffs
-- [`postmortem`](./postmortem.md) — state machine, human gates, handoffs
-- [`pr`](./pr.md) — state machine, human gates, handoffs
-- [`progressive-rollout`](./progressive-rollout.md) — state machine, human gates, handoffs
-- [`refinement`](./refinement.md) — state machine, human gates, handoffs
-- [`release`](./release.md) — state machine, human gates, handoffs
+- [`backport`](./backport.md) — Cherry-pick a fix from the trunk to a maintenance branch. Triggered post-merge when a release manager elects to ship the fix on an older line; closes once the patch release ships.
+- [`experimentation`](./experimentation.md) — Measure a flag-gated experiment in production and reach a verdict — ship-to-all, kill, or iterate. Owned by the product owner once the dev work is merged.
+- [`incident-response`](./incident-response.md) — Coordinate the live response to a production incident: declare, mitigate, stabilize. Spawns a postmortem on stabilization.
+- [`inner-loop`](./inner-loop.md) — The developer's day-to-day flow: claim a refined ticket, implement, open a PR, ship. Spawns a PR child issue and tracks staged/shipped state.
+- [`mitigation`](./mitigation.md) — Roll back or feature-flag-off shipped behavior to stop bleeding during an active incident. Branches off incident-response when a revert is the right call.
+- [`postmortem`](./postmortem.md) — Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes when the writeup is approved.
+- [`pr`](./pr.md) — The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state; the same workflow handles independent PRs (e.g., backports).
+- [`progressive-rollout`](./progressive-rollout.md) — Gradually expand a flag-gated change across user cohorts while watching SLIs. Promotes through cohort tiers or aborts on regression.
+- [`refinement`](./refinement.md) — Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills.
+- [`release`](./release.md) — Cut, review, and ship a release train. The release manager assembles a candidate from staged work, runs the go/no-go review, then ships or defers.
 
 ## Shared resources
 

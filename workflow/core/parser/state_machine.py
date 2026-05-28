@@ -16,6 +16,7 @@ are gone — the schema demands intent.
     "raw": {
       "class": "resting",
       "reversibility": "reversible-fast",
+      "initial": "issue created",
       "notes": ["optional prose for visualization"]
     },
     "refining": {
@@ -34,12 +35,11 @@ are gone — the schema demands intent.
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "raw", "type": "event", "label": "issue created"},
     {"source": "raw", "destination": "refining", "type": "claim", "label": "product-manager claims raw"},
     {"source": "refining", "destination": "ready_for_dev", "type": "advance",
-     "label": "product-manager marks ready", "hitl": true},
+     "label": "product-manager marks ready", "human_gate": "ready_for_dev"},
     {"source": "refining", "destination": "wont_fix", "type": "advance",
-     "label": "product-manager marks wont-fix", "hitl": true},
+     "label": "product-manager marks wont-fix", "human_gate": "wont_fix"},
     {"source": "ready_for_dev", "destination": "refining", "type": "claim",
      "label": "product-manager claims (revision)"}
   ]
@@ -78,8 +78,10 @@ same convention: `<process>-human-gates.json`.
   in the typed fields above.
 
 ### Transitions
-- `source` (string, required): state id or `"[*]"`.
-- `destination` (string, required): state id or `"[*]"`.
+- `source` (string, required): state id. `"[*]"` is no longer authored —
+  use the `initial` field on a resting state instead.
+- `destination` (string, required): state id. Terminal sinks are implicit;
+  the emitter generates them from each terminal state's `terminal_taxonomy`.
 - `type` (string, required): `"claim"` | `"advance"` | `"event"`.
 - `label` (string, required): the human-readable transition label.
 - `human_gate` (string, optional): the human-gate catalog's `gate_name` for
@@ -101,6 +103,7 @@ from pathlib import Path
 from typing import Any
 
 from workflow.core.model.state_machine import (
+    Collects,
     ReversibilityClass,
     Spawn,
     State,
@@ -196,6 +199,13 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
             "accepted set is derived as the union."
         )
 
+    description_raw = data.get("description")
+    if description_raw is not None and not isinstance(description_raw, str):
+        raise ParseError("Top-level `description` must be a string if present.")
+    description = description_raw.strip() if isinstance(description_raw, str) else None
+    if description == "":
+        description = None
+
     states_raw = data.get("states")
     if not isinstance(states_raw, dict):
         raise ParseError("`states` must be a JSON object (id → state spec).")
@@ -243,6 +253,7 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
 
     return StateMachine(
         name=name,
+        description=description,
         states=states,
         transitions=transitions,
         gates_in_legend=gates_in_legend,
@@ -408,6 +419,11 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         )
 
     spawns = _parse_spawns(state_id, state_class, spec.get("spawns"))
+    collects = _parse_collects(state_id, state_class, spec.get("collects"))
+
+    is_initial, initial_label = _parse_initial(
+        state_id, state_class, spec.get("initial")
+    )
 
     mark_pr_ready_raw = spec.get("mark_pr_ready", False)
     if not isinstance(mark_pr_ready_raw, bool):
@@ -471,7 +487,10 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         issue_types=state_issue_types,
         close_reason=close_reason,
         handoff=handoff_raw,
+        is_initial=is_initial,
+        initial_label=initial_label,
         spawns=spawns,
+        collects=collects,
         mark_pr_ready=mark_pr_ready_raw,
         human_inputs=tuple(human_inputs_parsed),
         notes=notes,
@@ -561,16 +580,209 @@ def _parse_spawns(
     )
 
 
+def _parse_collects(
+    state_id: str, state_class: StateClass, raw: Any
+) -> Collects | None:
+    """Parse the optional `collects` field. Only valid on resting states.
+
+    Cross-process validation (`process` resolves, `from_states` are
+    resting/terminal in that process) lives in the validator — the parser
+    doesn't have other workflows in scope here.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ParseError(
+            f"State {state_id!r}: `collects` must be an object "
+            f"(got {type(raw).__name__})."
+        )
+    if state_class is not StateClass.RESTING:
+        raise ParseError(
+            f"State {state_id!r}: `collects` is only valid on resting states "
+            f"(state class is {state_class.value!r}). Move it to the resting "
+            f"state where the collector issue is created."
+        )
+
+    process = raw.get("process")
+    if not isinstance(process, str) or not process.strip():
+        raise ParseError(
+            f"State {state_id!r}: `collects.process` is required and must be "
+            f"a non-empty string."
+        )
+
+    from_states_raw = raw.get("from_states")
+    if not isinstance(from_states_raw, list) or not from_states_raw:
+        raise ParseError(
+            f"State {state_id!r}: `collects.from_states` must be a non-empty "
+            f"list of state names."
+        )
+    from_states: list[str] = []
+    for i, s in enumerate(from_states_raw):
+        if not isinstance(s, str) or not s.strip():
+            raise ParseError(
+                f"State {state_id!r}: `collects.from_states[{i}]` must be a "
+                f"non-empty string (got {s!r})."
+            )
+        cleaned = s.strip()
+        if cleaned in from_states:
+            raise ParseError(
+                f"State {state_id!r}: duplicate state {cleaned!r} in "
+                f"`collects.from_states`."
+            )
+        from_states.append(cleaned)
+
+    issue_types_raw = raw.get("issue_types")
+    issue_types: list[str] = []
+    if issue_types_raw is not None:
+        if not isinstance(issue_types_raw, list):
+            raise ParseError(
+                f"State {state_id!r}: `collects.issue_types` must be a list "
+                f"of issue-type ids if present (got "
+                f"{type(issue_types_raw).__name__})."
+            )
+        for i, t in enumerate(issue_types_raw):
+            if not isinstance(t, str) or not t.strip():
+                raise ParseError(
+                    f"State {state_id!r}: `collects.issue_types[{i}]` must be "
+                    f"a non-empty string (got {t!r})."
+                )
+            cleaned = t.strip()
+            if cleaned in issue_types:
+                raise ParseError(
+                    f"State {state_id!r}: duplicate type {cleaned!r} in "
+                    f"`collects.issue_types`."
+                )
+            issue_types.append(cleaned)
+
+    advance_on_raw = raw.get("advance_on")
+    advance_on: list[tuple[str, str]] = []
+    if advance_on_raw is not None:
+        if not isinstance(advance_on_raw, dict):
+            raise ParseError(
+                f"State {state_id!r}: `collects.advance_on` must be an object "
+                f"mapping collector-state → contributor-state (got "
+                f"{type(advance_on_raw).__name__})."
+            )
+        for k, v in advance_on_raw.items():
+            if not isinstance(k, str) or not k.strip():
+                raise ParseError(
+                    f"State {state_id!r}: `collects.advance_on` keys must be "
+                    f"collector-state names (got {k!r})."
+                )
+            if not isinstance(v, str) or not v.strip():
+                raise ParseError(
+                    f"State {state_id!r}: `collects.advance_on[{k!r}]` must be "
+                    f"a contributor-state name (got {v!r})."
+                )
+            advance_on.append((k.strip(), v.strip()))
+
+    release_on_raw = raw.get("release_on")
+    release_on: list[str] = []
+    if release_on_raw is not None:
+        if not isinstance(release_on_raw, list):
+            raise ParseError(
+                f"State {state_id!r}: `collects.release_on` must be a list of "
+                f"collector-state names (got {type(release_on_raw).__name__})."
+            )
+        for i, s in enumerate(release_on_raw):
+            if not isinstance(s, str) or not s.strip():
+                raise ParseError(
+                    f"State {state_id!r}: `collects.release_on[{i}]` must be a "
+                    f"non-empty string (got {s!r})."
+                )
+            cleaned = s.strip()
+            if cleaned in release_on:
+                raise ParseError(
+                    f"State {state_id!r}: duplicate state {cleaned!r} in "
+                    f"`collects.release_on`."
+                )
+            release_on.append(cleaned)
+
+    overlap = {k for k, _ in advance_on} & set(release_on)
+    if overlap:
+        raise ParseError(
+            f"State {state_id!r}: `collects.advance_on` and `collects.release_on` "
+            f"share state(s) {sorted(overlap)}. A collector state either moves "
+            f"contributors (advance_on) or releases them in place (release_on); "
+            f"choose one per state."
+        )
+
+    return Collects(
+        process=process.strip(),
+        from_states=tuple(from_states),
+        issue_types=tuple(issue_types),
+        advance_on=tuple(advance_on),
+        release_on=tuple(release_on),
+    )
+
+
+def _parse_initial(
+    state_id: str, state_class: StateClass, raw: Any
+) -> tuple[bool, str | None]:
+    """Parse the optional `initial` field.
+
+    Accepts:
+      - absent / null / False  → (False, None)
+      - True                   → (True, None)
+      - non-empty string       → (True, <label>)
+
+    Only valid on resting states (parser-enforced). Mutual exclusion
+    with `collects` and inbound-spawn targets is checked by the
+    validator (it needs the sibling-machines map).
+    """
+    if raw is None or raw is False:
+        return False, None
+    if raw is True:
+        if state_class is not StateClass.RESTING:
+            raise ParseError(
+                f"State {state_id!r}: `initial` is only valid on resting "
+                f"states (state class is {state_class.value!r})."
+            )
+        return True, None
+    if isinstance(raw, str):
+        cleaned = raw.strip()
+        if not cleaned:
+            raise ParseError(
+                f"State {state_id!r}: `initial` must be a non-empty string "
+                f"or boolean (got empty string)."
+            )
+        if state_class is not StateClass.RESTING:
+            raise ParseError(
+                f"State {state_id!r}: `initial` is only valid on resting "
+                f"states (state class is {state_class.value!r})."
+            )
+        return True, cleaned
+    raise ParseError(
+        f"State {state_id!r}: `initial` must be a boolean or non-empty "
+        f"string (got {type(raw).__name__})."
+    )
+
+
 def _parse_transition(
     idx: int, spec: dict[str, Any], states: dict[str, State]
 ) -> Transition:
     source = _require_endpoint(spec, "source", idx)
     destination = _require_endpoint(spec, "destination", idx)
-    if source != "[*]" and source not in states:
+    if source == "[*]":
+        raise ParseError(
+            f"transitions[{idx}]: `[*]→state` transitions are no longer "
+            f"authored. Mark the destination state with `\"initial\": true` "
+            f"(or `\"initial\": \"<label>\"`) instead. Example: move "
+            f"`{{\"source\": \"[*]\", \"destination\": {destination!r}, "
+            f"\"type\": \"event\", \"label\": \"<label>\"}}` to the "
+            f"{destination!r} state spec as `\"initial\": \"<label>\"`."
+        )
+    if destination == "[*]":
+        raise ParseError(
+            f"transitions[{idx}]: `state→[*]` transitions are implicit; the "
+            f"emitter generates terminal sinks from each terminal state's "
+            f"`terminal_taxonomy`. Remove this transition."
+        )
+    if source not in states:
         raise ParseError(
             f"transitions[{idx}]: source {source!r} is not a declared state."
         )
-    if destination != "[*]" and destination not in states:
+    if destination not in states:
         raise ParseError(
             f"transitions[{idx}]: destination {destination!r} is not a declared state."
         )

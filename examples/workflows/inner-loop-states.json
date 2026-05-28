@@ -1,12 +1,8 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "description": "The developer's day-to-day flow: claim a refined ticket, implement, open a PR, ship. Spawns a PR child issue and tracks staged/shipped state.",
   "states": {
     "ready_for_dev": {
-      "class": "resting",
-      "reversibility": "reversible-slow",
-      "handoff": true
-    },
-    "ready_for_experiment": {
       "class": "resting",
       "reversibility": "reversible-slow",
       "handoff": true
@@ -22,75 +18,55 @@
     },
     "implementing": {
       "class": "working",
-      "roles": ["developer"],
-      "issue_types": ["bug", "feature", "chore"],
+      "roles": [
+        "developer"
+      ],
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment",
+        "hotfix"
+      ],
       "spawns": {
         "process": "pr",
         "issue_type": "pr",
         "initial_state": "draft",
         "advance_on": {
-          "staged": "staged"
+          "merged": "staged"
         }
       },
-      "human_inputs": ["clarify-scope", "needs-arch-review", "needs-security-review", "blocked-on-data", "general"]
-    },
-    "implementing_experiment": {
-      "class": "working",
-      "roles": ["developer"],
-      "issue_types": ["experiment"],
-      "spawns": {
-        "process": "pr",
-        "issue_type": "pr",
-        "initial_state": "draft",
-        "advance_on": {
-          "staged": "staged_experiment"
-        }
-      },
-      "human_inputs": ["clarify-scope", "needs-arch-review", "general"]
+      "human_inputs": [
+        "clarify-scope",
+        "needs-arch-review",
+        "needs-security-review",
+        "blocked-on-data",
+        "general"
+      ]
     },
     "implementing_spike": {
       "class": "working",
-      "roles": ["developer"],
-      "issue_types": ["spike"],
-      "human_inputs": ["clarify-scope", "needs-arch-review", "general"]
-    },
-    "implementing_hotfix": {
-      "class": "working",
-      "roles": ["developer"],
-      "issue_types": ["hotfix"],
-      "spawns": {
-        "process": "pr",
-        "issue_type": "pr",
-        "initial_state": "draft",
-        "advance_on": {
-          "staged": "staged_hotfix"
-        }
-      },
-      "human_inputs": ["needs-security-review", "blocked-on-data", "general"]
-    },
-    "pr_review": {
-      "class": "resting",
-      "reversibility": "reversible-fast"
-    },
-    "pr_review_experiment": {
-      "class": "resting",
-      "reversibility": "reversible-fast"
-    },
-    "pr_review_hotfix": {
-      "class": "resting",
-      "reversibility": "reversible-fast"
+      "roles": [
+        "developer"
+      ],
+      "issue_types": [
+        "spike"
+      ],
+      "human_inputs": [
+        "clarify-scope",
+        "needs-arch-review",
+        "general"
+      ]
     },
     "staged": {
       "class": "resting",
       "reversibility": "reversible-slow"
     },
-    "staged_experiment": {
-      "class": "resting",
-      "reversibility": "reversible-slow"
-    },
-    "staged_hotfix": {
-      "class": "resting",
-      "reversibility": "reversible-slow"
+    "shipped": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
     },
     "spike_completed": {
       "class": "terminal",
@@ -105,17 +81,47 @@
     }
   },
   "transitions": [
-    {"source": "ready_for_dev", "destination": "implementing", "type": "claim", "label": "developer claims issue"},
-    {"source": "ready_for_experiment", "destination": "implementing_experiment", "type": "claim", "label": "developer claims experiment"},
-    {"source": "ready_for_spike", "destination": "implementing_spike", "type": "claim", "label": "developer claims spike"},
-    {"source": "ready_for_hotfix", "destination": "implementing_hotfix", "type": "claim", "label": "developer claims hotfix"},
-    {"source": "implementing", "destination": "ready_bounced", "type": "advance", "label": "developer bounces ticket"},
-    {"source": "implementing", "destination": "pr_review", "type": "advance", "label": "developer requests PR review"},
-    {"source": "implementing_experiment", "destination": "pr_review_experiment", "type": "advance", "label": "developer requests PR review"},
-    {"source": "implementing_hotfix", "destination": "pr_review_hotfix", "type": "advance", "label": "developer requests PR review"},
-    {"source": "implementing_spike", "destination": "spike_completed", "type": "advance", "label": "developer posts spike findings"},
-    {"source": "pr_review", "destination": "staged", "type": "event", "label": "from process pr-review (PR merged)"},
-    {"source": "pr_review_experiment", "destination": "staged_experiment", "type": "event", "label": "from process pr-review (PR merged)"},
-    {"source": "pr_review_hotfix", "destination": "staged_hotfix", "type": "event", "label": "from process pr-review (PR merged)"}
+    {
+      "source": "ready_for_dev",
+      "destination": "implementing",
+      "type": "claim",
+      "label": "developer claims issue"
+    },
+    {
+      "source": "ready_for_spike",
+      "destination": "implementing_spike",
+      "type": "claim",
+      "label": "developer claims spike"
+    },
+    {
+      "source": "ready_for_hotfix",
+      "destination": "implementing",
+      "type": "claim",
+      "label": "developer claims hotfix"
+    },
+    {
+      "source": "implementing",
+      "destination": "ready_bounced",
+      "type": "advance",
+      "label": "developer bounces ticket"
+    },
+    {
+      "source": "implementing",
+      "destination": "staged",
+      "type": "advance",
+      "label": "PR merged (auto from pr)"
+    },
+    {
+      "source": "staged",
+      "destination": "shipped",
+      "type": "event",
+      "label": "release shipped (auto from release)"
+    },
+    {
+      "source": "implementing_spike",
+      "destination": "spike_completed",
+      "type": "advance",
+      "label": "developer posts spike findings"
+    }
   ]
 }

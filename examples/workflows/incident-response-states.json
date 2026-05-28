@@ -1,14 +1,20 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Coordinate the live response to a production incident: declare, mitigate, stabilize. Spawns a postmortem on stabilization.",
   "states": {
     "declared": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "initial": "alert / report triggers incident (external)"
     },
     "triaging": {
       "class": "working",
-      "roles": ["incident-commander"],
-      "issue_types": ["incident"]
+      "roles": [
+        "incident-commander"
+      ],
+      "issue_types": [
+        "incident"
+      ]
     },
     "needs_diagnosis": {
       "class": "resting",
@@ -16,9 +22,16 @@
     },
     "diagnosing": {
       "class": "working",
-      "roles": ["incident-responder"],
-      "issue_types": ["incident"],
-      "human_inputs": ["blocked-on-data", "general"]
+      "roles": [
+        "incident-responder"
+      ],
+      "issue_types": [
+        "incident"
+      ],
+      "human_inputs": [
+        "blocked-on-data",
+        "general"
+      ]
     },
     "cause_identified": {
       "class": "resting",
@@ -26,9 +39,25 @@
     },
     "mitigating": {
       "class": "working",
-      "roles": ["incident-commander"],
-      "issue_types": ["incident"],
-      "human_inputs": ["needs-security-review", "blocked-on-data", "general"]
+      "roles": [
+        "incident-commander"
+      ],
+      "issue_types": [
+        "incident"
+      ],
+      "human_inputs": [
+        "needs-security-review",
+        "blocked-on-data",
+        "general"
+      ],
+      "spawns": {
+        "process": "mitigation",
+        "issue_type": "incident",
+        "initial_state": "ready_for_rollback",
+        "advance_on": {
+          "mitigated": "needs_verification"
+        }
+      }
     },
     "needs_verification": {
       "class": "resting",
@@ -36,8 +65,12 @@
     },
     "verifying": {
       "class": "working",
-      "roles": ["incident-responder"],
-      "issue_types": ["incident"]
+      "roles": [
+        "incident-responder"
+      ],
+      "issue_types": [
+        "incident"
+      ]
     },
     "stabilized": {
       "class": "terminal",
@@ -52,15 +85,59 @@
     }
   },
   "transitions": [
-    {"source": "[*]", "destination": "declared", "type": "event", "label": "alert / report triggers incident (external)"},
-    {"source": "declared", "destination": "triaging", "type": "claim", "label": "IC claims incident"},
-    {"source": "triaging", "destination": "needs_diagnosis", "type": "advance", "label": "IC assigns severity, assigns responder"},
-    {"source": "needs_diagnosis", "destination": "diagnosing", "type": "claim", "label": "responder claims diagnosis"},
-    {"source": "diagnosing", "destination": "cause_identified", "type": "advance", "label": "responder reports root cause"},
-    {"source": "cause_identified", "destination": "mitigating", "type": "claim", "label": "IC claims incident for mitigation"},
-    {"source": "mitigating", "destination": "needs_verification", "type": "advance", "label": "IC requests verification (spawns work items on process mitigation)"},
-    {"source": "needs_verification", "destination": "verifying", "type": "claim", "label": "responder claims verification"},
-    {"source": "verifying", "destination": "cause_identified", "type": "advance", "label": "responder reports mitigation failed"},
-    {"source": "verifying", "destination": "stabilized", "type": "advance", "label": "responder confirms production stable (spawns postmortem on process postmortem)"}
+    {
+      "source": "declared",
+      "destination": "triaging",
+      "type": "claim",
+      "label": "IC claims incident"
+    },
+    {
+      "source": "triaging",
+      "destination": "needs_diagnosis",
+      "type": "advance",
+      "label": "IC assigns severity, assigns responder"
+    },
+    {
+      "source": "needs_diagnosis",
+      "destination": "diagnosing",
+      "type": "claim",
+      "label": "responder claims diagnosis"
+    },
+    {
+      "source": "diagnosing",
+      "destination": "cause_identified",
+      "type": "advance",
+      "label": "responder reports root cause"
+    },
+    {
+      "source": "cause_identified",
+      "destination": "mitigating",
+      "type": "claim",
+      "label": "IC claims incident for mitigation"
+    },
+    {
+      "source": "mitigating",
+      "destination": "needs_verification",
+      "type": "advance",
+      "label": "IC requests verification (spawns work items on process mitigation)"
+    },
+    {
+      "source": "needs_verification",
+      "destination": "verifying",
+      "type": "claim",
+      "label": "responder claims verification"
+    },
+    {
+      "source": "verifying",
+      "destination": "cause_identified",
+      "type": "advance",
+      "label": "responder reports mitigation failed"
+    },
+    {
+      "source": "verifying",
+      "destination": "stabilized",
+      "type": "advance",
+      "label": "responder confirms production stable (spawns postmortem on process postmortem)"
+    }
   ]
 }

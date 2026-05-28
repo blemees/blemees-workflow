@@ -1,21 +1,39 @@
-flowchart LR
+stateDiagram-v2
+    direction TB
 
-    backport(backport)
-    experimentation(experimentation)
-    incident_response(incident-response)
-    inner_loop(inner-loop)
-    mitigation(mitigation)
-    postmortem(postmortem)
-    pr(pr)
-    progressive_rollout(progressive-rollout)
-    refinement(refinement)
-    release(release)
+    state "incident-response" as incident_response
+    state "inner-loop" as inner_loop
+    state "progressive-rollout" as progressive_rollout
 
-    incident_response -.->|stabilized→pending| postmortem
-    inner_loop ===|ready_for_hotfix| mitigation
-    inner_loop -.->|implementing_experiment→draft| pr
-    inner_loop -.->|implementing_hotfix→draft| pr
-    inner_loop -.->|implementing→draft| pr
-    inner_loop ===|ready_bounced| refinement
-    inner_loop ===|ready_for_dev| refinement
-    inner_loop ===|ready_for_experiment| refinement
+    [*] --> incident_response: ▶ declared
+    [*] --> refinement: ▶ raw
+    incident_response --> mitigation: ⤴ mitigating→ready_for_rollback
+    incident_response --> postmortem: ⤴ stabilized→pending
+    inner_loop --> pr: ⤴ implementing→draft
+    inner_loop --> refinement: ↺ spike_completed→spike_returned
+    inner_loop --> refinement: ⇄ ready_bounced
+    inner_loop --> release: ⤵ staged→cut [bug,feature,chore,experiment]
+    inner_loop --> release: ⤵ staged→hotfix_cut [hotfix]
+    mitigation --> incident_response: ↺ mitigated→needs_verification
+    mitigation --> inner_loop: ⇄ ready_for_hotfix
+    pr --> inner_loop: ↺ merged→staged
+    refinement --> inner_loop: ⇄ ready_for_dev
+    refinement --> inner_loop: ⤴ spiking→ready_for_spike
+    release --> inner_loop: ↩ abandoned
+    release --> inner_loop: ↩ rolled_back
+    release --> inner_loop: ↺ released→shipped
+    backport --> [*]: ■ backported
+    experimentation --> [*]: ■ aborted
+    experimentation --> [*]: ■ iterated
+    experimentation --> [*]: ■ killed
+    experimentation --> [*]: ■ promoted
+    incident_response --> [*]: ■ stabilized
+    inner_loop --> [*]: ■ shipped
+    postmortem --> [*]: ■ complete
+    progressive_rollout --> [*]: ■ complete
+    progressive_rollout --> [*]: ■ kill_switched
+    refinement --> [*]: ■ duplicate
+    refinement --> [*]: ■ wont_fix
+    release --> [*]: ■ abandoned
+    release --> [*]: ■ released
+    release --> [*]: ■ rolled_back

@@ -1,19 +1,13 @@
 stateDiagram-v2
+    direction TB
     %% Cross-process interfaces:
     %%   Handoff: ready_for_hotfix (shared resting state)
     %%
 
-    ready_for_rollback --> rolling_back: responder claims rollback
-    rolling_back --> rolled_back: responder completes rollback
-    ready_for_flag_toggle --> toggling_flag: responder claims flag toggle
-    toggling_flag --> flag_toggled: responder completes toggle
-    rolled_back --> [*]: terminal (shipped)
-    flag_toggled --> [*]: terminal (shipped)
-
-    note right of ready_for_rollback: reversible-fast
-    note right of ready_for_flag_toggle: reversible-fast
-    note right of ready_for_hotfix: handoff, reversible-fast
-    note right of rolling_back: role=incident-responder, types=incident
-    note right of rolled_back: reversible-slow
-    note right of toggling_flag: role=incident-responder, types=incident
-    note right of flag_toggled: reversible-slow
+    ready_for_rollback --> applying_mitigation: responder claims rollback
+    ready_for_flag_toggle --> applying_mitigation: responder claims flag toggle
+    applying_mitigation --> mitigated: responder completes mitigation
+    mitigated --> [*]: terminal (shipped)
+    [*] --> ready_for_hotfix: handoff
+    ready_for_hotfix --> [*]: handoff
+    [*] --> ready_for_rollback: spawn

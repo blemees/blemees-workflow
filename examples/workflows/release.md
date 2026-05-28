@@ -1,5 +1,7 @@
 # Process: release
 
+Cut, review, and ship a release train. The release manager assembles a candidate from staged work, runs the go/no-go review, then ships or defers.
+
 > Defined in: `release-states.json`
 
 ## Issue types accepted
@@ -10,10 +12,9 @@
 
 ```mermaid
 stateDiagram-v2
-    [*] --> accumulating: new train opens (on cadence, or after previous release closes)
-    accumulating --> cut: cadence timer elapses (time)
-    accumulating --> cut: RM triggers cut script
-    cut --> preparing: RM claims train
+    direction TB
+    cut --> preparing: RM claims release train
+    hotfix_cut --> preparing: IC / RM claims hotfix train
     preparing --> ready_for_release_decision: RM publishes release notes, tags release candidate
     ready_for_release_decision --> reviewing_release: PO claims train
     reviewing_release --> gated_nogo: PO defers with blocking reason
@@ -30,30 +31,16 @@ stateDiagram-v2
     abandoned --> [*]: terminal (abandoned)
     rolled_back --> [*]: terminal (reverted)
     released --> [*]: terminal (shipped)
-
-    note left of accumulating: reversible-fast
-    note right of cut: reversible-slow
-    note right of preparing: role=release-manager, types=release
-    note right of ready_for_release_decision: reversible-slow
-    note right of reviewing_release: role=product-owner, types=release
-    note right of gated_nogo: reversible-fast
-    note right of abandoning: role=product-owner, types=release
-    note right of abandoned: reversible-fast
-    note right of deploying: reversible-slow
-    note right of rolling_out: reversible-slow
-    note right of ready_for_monitoring: reversible-slow
-    note right of monitoring: role=developer, types=release
-    note right of rolling_back: roles=incident-commander, release-manager, types=release
-    note right of rolled_back: reversible-slow
-    note right of released: reversible-slow
+    [*] --> cut: collect
+    [*] --> hotfix_cut: collect
 ```
 
 ## States
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `accumulating` | resting | reversible-fast | — | — | — | — | — |
 | `cut` | resting | reversible-slow | — | — | — | — | — |
+| `hotfix_cut` | resting | reversible-fast | — | — | — | — | — |
 | `preparing` | working | — | release-manager | release | — | — | — |
 | `ready_for_release_decision` | resting | reversible-slow | — | — | — | — | — |
 | `reviewing_release` | working | — | product-owner | release | — | — | — |
@@ -72,10 +59,8 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `[*]` | `accumulating` | event | 'new train opens (on cadence, or after previous release closes)' | — | — |
-| `accumulating` | `cut` | event | 'cadence timer elapses (time)' | — | — |
-| `accumulating` | `cut` | event | 'RM triggers cut script' | — | — |
-| `cut` | `preparing` | claim | 'RM claims train' | — | — |
+| `cut` | `preparing` | claim | 'RM claims release train' | — | — |
+| `hotfix_cut` | `preparing` | claim | 'IC / RM claims hotfix train' | — | — |
 | `preparing` | `ready_for_release_decision` | advance | 'RM publishes release notes, tags release candidate' | — | — |
 | `ready_for_release_decision` | `reviewing_release` | claim | 'PO claims train' | — | — |
 | `reviewing_release` | `gated_nogo` | advance | 'PO defers with blocking reason' | — | — |
@@ -89,3 +74,16 @@ stateDiagram-v2
 | `monitoring` | `released` | advance | 'on-call confirms post-deploy window clean' | — | — |
 | `monitoring` | `rolling_back` | advance | 'on-call triggers rollback' | — | — |
 | `rolling_back` | `rolled_back` | advance | 'rollback completes' | — | — |
+
+## Cross-process handoffs
+
+**Collects** (states that gather contributors from other processes when an issue is created here):
+
+- `cut` ← process `inner-loop` from `staged` (types: `bug`, `feature`, `chore`, `experiment`)
+    - on collector `released` → contributors `shipped`
+    - on collector `abandoned` → contributors released (back to candidacy)
+    - on collector `rolled_back` → contributors released (back to candidacy)
+- `hotfix_cut` ← process `inner-loop` from `staged` (types: `hotfix`)
+    - on collector `released` → contributors `shipped`
+    - on collector `abandoned` → contributors released (back to candidacy)
+    - on collector `rolled_back` → contributors released (back to candidacy)

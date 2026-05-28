@@ -11,6 +11,10 @@
       "type": "string",
       "description": "Optional schema URI for editor support."
     },
+    "description": {
+      "type": "string",
+      "description": "One-paragraph prose summary of what this process is for. Rendered into the per-process `<process>.md` opening section and used as the tail for this process's entry in the workflow `README.md` index. Plain markdown allowed; keep it under ~3 sentences."
+    },
     "states": {
       "type": "object",
       "description": "Map of state-id → state spec.",
@@ -68,6 +72,13 @@
           "type": "boolean",
           "description": "Marks a resting state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Only valid on resting states."
         },
+        "initial": {
+          "oneOf": [
+            {"type": "boolean"},
+            {"type": "string", "minLength": 1}
+          ],
+          "description": "Marks a resting state as an external entry point — new issues materialize here from outside the workflow (manual `create-issue`, webhook, scheduled job). `true` is a bare marker; a string adds a trigger label (e.g., 'issue created', 'alert / report triggers incident'). Only valid on resting states. Mutually exclusive with `collects` and with being a spawn target — issues either arrive from outside, are gathered via collect, or are spawned by an upstream process. Replaces the legacy `{source: '[*]', destination: <state>, type: 'event'}` transition shape."
+        },
         "mark_pr_ready": {
           "type": "boolean",
           "description": "When True, advancing into this state flips the underlying PR from draft to ready-for-review on the tracker (`gh pr ready` on GitHub). No-op when the issue isn't a pull request. Not valid on terminal states."
@@ -90,6 +101,38 @@
               "type": "object",
               "description": "Map {child-terminal-state: parent-next-state}. Selective auto-advance — parent advances only on listed child terminals; unmapped terminals keep the parent put. Forbidden on terminal-state spawns.",
               "additionalProperties": {"type": "string"}
+            }
+          }
+        },
+        "collects": {
+          "type": "object",
+          "description": "Fan-in contract — the inverse of `spawns`. Only valid on RESTING states. When `create-issue --to <this state>` runs, the framework queries the source process for candidate contributor issues currently in `from_states` and not yet collected. Authoring lives on the receiver side (parallel to `handoff`/`spawn` declarative pattern). The framework does NOT auto-create the collector; the human cuts when ready.",
+          "required": ["process", "from_states"],
+          "properties": {
+            "process": {"type": "string", "description": "Source process name. Must resolve via the registry."},
+            "from_states": {
+              "type": "array",
+              "description": "One or more states in the source process whose issues are eligible contributors. Each entry must be a resting or terminal state (collecting from a working state would conflict with that state's claim).",
+              "items": {"type": "string", "minLength": 1},
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "issue_types": {
+              "type": "array",
+              "description": "Optional issue-type filter. When omitted or empty, every issue type accepted by the source process is eligible. When set, candidates must carry one of the listed types. Use this when one process has multiple collector flavors targeting the same `from_states` (e.g., a `cut` release collecting bug/feature/chore PRs and a `hotfix_cut` release collecting only hotfix PRs).",
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true
+            },
+            "advance_on": {
+              "type": "object",
+              "description": "Selective contributor feedback: map {collector-state: contributor-target-state}. When the collector reaches a listed state, every contributor bearing the `collected-by:<collector>` marker auto-advances to the mapped state on the source process. Targets must be resting or terminal on the source process (no auto-enter into working states). Mirrors `spawns.advance_on` but flows the other direction — collector-state drives contributor-state.",
+              "additionalProperties": {"type": "string"}
+            },
+            "release_on": {
+              "type": "array",
+              "description": "Collector states that drop the collection. When the collector reaches a listed state, every contributor's `collected-by:<collector>` marker is cleared — the contributor stays in its current state but becomes eligible for future collectors. Use when the collector outcome (e.g., release abandoned) means 'this collection didn't happen; the items are still candidates.' Cannot overlap with `advance_on` keys (those describe state changes; `release_on` describes label-only changes).",
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true
             }
           }
         },

@@ -1,41 +1,22 @@
 stateDiagram-v2
+    direction TB
     %% Cross-process interfaces:
     %%   Handoff: ready_for_dev (shared resting state)
-    %%   Handoff: ready_for_experiment (shared resting state)
     %%   Handoff: ready_for_hotfix (shared resting state)
     %%   Handoff: ready_bounced (shared resting state)
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
-    %%   Spawn:   implementing_experiment → process pr (issue_type=pr, initial=draft)
-    %%   Spawn:   implementing_hotfix → process pr (issue_type=pr, initial=draft)
     %%
 
     ready_for_dev --> implementing: developer claims issue
-    ready_for_experiment --> implementing_experiment: developer claims experiment
     ready_for_spike --> implementing_spike: developer claims spike
-    ready_for_hotfix --> implementing_hotfix: developer claims hotfix
+    ready_for_hotfix --> implementing: developer claims hotfix
     implementing --> ready_bounced: developer bounces ticket
-    implementing --> pr_review: developer requests PR review
-    implementing_experiment --> pr_review_experiment: developer requests PR review
-    implementing_hotfix --> pr_review_hotfix: developer requests PR review
+    implementing --> staged: PR merged (auto from pr)
+    staged --> shipped: release shipped (auto from release)
     implementing_spike --> spike_completed: developer posts spike findings
-    pr_review --> staged: from process pr-review (PR merged)
-    pr_review_experiment --> staged_experiment: from process pr-review (PR merged)
-    pr_review_hotfix --> staged_hotfix: from process pr-review (PR merged)
+    shipped --> [*]: terminal (shipped)
     spike_completed --> [*]: terminal (resolved)
-
-    note right of ready_for_dev: handoff, reversible-slow
-    note right of ready_for_experiment: handoff, reversible-slow
-    note right of ready_for_spike: reversible-slow
-    note right of ready_for_hotfix: handoff, reversible-fast
-    note right of implementing: role=developer, types=bug, feature, chore
-    note right of implementing_experiment: role=developer, types=experiment
-    note right of implementing_spike: role=developer, types=spike
-    note right of implementing_hotfix: role=developer, types=hotfix
-    note right of pr_review: reversible-fast
-    note right of pr_review_experiment: reversible-fast
-    note right of pr_review_hotfix: reversible-fast
-    note right of staged: reversible-slow
-    note right of staged_experiment: reversible-slow
-    note right of staged_hotfix: reversible-slow
-    note right of spike_completed: reversible-fast
-    note right of ready_bounced: handoff, reversible-fast
+    [*] --> ready_for_dev: handoff
+    [*] --> ready_for_hotfix: handoff
+    ready_bounced --> [*]: handoff
+    [*] --> ready_for_spike: spawn

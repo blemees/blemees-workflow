@@ -44,6 +44,17 @@ class IssueState:
     awaiting_input: bool = False  # generic queue marker for recognized input requests
     human_input: str | None = None  # topic the agent is awaiting input on
     advising: bool = False  # singleton: a human is advising
+    # Fan-in marker — set when this issue has been gathered into a
+    # collector issue on another process via `collects`. Backends populate
+    # this from a `collected-by:<collector-id>` label on GitHub. None
+    # means the issue has not yet been collected and is a candidate for
+    # future collectors that target its state.
+    collected_by: str | None = None
+    # Fan-in inverse — each contributor's id this collector pulled in.
+    # Populated from `collects:<contributor-id>` labels on GitHub. Empty
+    # when this issue isn't a collector or hasn't gathered any
+    # contributors yet.
+    collects_contributors: tuple[str, ...] = ()
     # Misc
     extras: dict[str, str] = field(default_factory=dict)  # backend-specific extras
 
@@ -75,6 +86,14 @@ class MarkerChange:
     set_human_input: str | None = None
     clear_human_input: bool = False
     set_advising: bool | None = None
+    # Fan-in label mutations — applied bidirectionally by `collect` and
+    # by `create-issue` when the destination state declares `collects`.
+    # `set_collected_by` is set on each contributor; `add_collects` lists
+    # the contributors a collector pulled in (additive — labels stack so
+    # additional contributors join later via more `collect` invocations).
+    set_collected_by: str | None = None
+    clear_collected_by: bool = False
+    add_collects: tuple[str, ...] = ()
     # Outcome markers (audit-trace labels in GitHub encoding; signal events elsewhere)
     record_approval: str | None = None  # gate approved (destination is captured via set_state)
     record_rejection: str | None = None  # gate rejected

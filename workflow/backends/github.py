@@ -647,6 +647,8 @@ class GitHubBackend:
         audit_pending: str | None = None
         issue_type: str | None = None
         human_input: str | None = None
+        collected_by: str | None = None
+        collects_contributors: list[str] = []
         reviewing = False
         auditing = False
         advising = False
@@ -666,6 +668,13 @@ class GitHubBackend:
                 continue
             if label.startswith("type:"):
                 issue_type = label[len("type:") :]
+                continue
+            # `collected-by:` is checked before `collects:` because both share a prefix.
+            if label.startswith("collected-by:"):
+                collected_by = label[len("collected-by:") :]
+                continue
+            if label.startswith("collects:"):
+                collects_contributors.append(label[len("collects:") :])
                 continue
             if not label.startswith("hitl:"):
                 continue
@@ -702,6 +711,8 @@ class GitHubBackend:
             awaiting_input=awaiting_input,
             human_input=human_input,
             advising=advising,
+            collected_by=collected_by,
+            collects_contributors=tuple(collects_contributors),
         )
 
     def _marker_change_to_labels(
@@ -787,6 +798,16 @@ class GitHubBackend:
             add.add(f"hitl:revoked-{change.record_revoke}")
         if change.record_response:
             add.add("hitl:resolved")
+
+        # Fan-in (`collects` / `collected-by`).
+        if change.set_collected_by:
+            if current.collected_by and current.collected_by != change.set_collected_by:
+                remove.add(f"collected-by:{current.collected_by}")
+            add.add(f"collected-by:{change.set_collected_by}")
+        if change.clear_collected_by and current.collected_by:
+            remove.add(f"collected-by:{current.collected_by}")
+        for contributor in change.add_collects:
+            add.add(f"collects:{contributor}")
 
         # Sanity: never add and remove the same label.
         overlap = add & remove
