@@ -18,6 +18,10 @@
       ],
       "issue_types": [
         "incident"
+      ],
+      "human_inputs": [
+        "blocked-on-data",
+        "general"
       ]
     },
     "needs_diagnosis": {
@@ -36,6 +40,8 @@
         "incident"
       ],
       "human_inputs": [
+        "needs-arch-review",
+        "needs-security-review",
         "blocked-on-data",
         "general"
       ]
@@ -56,6 +62,8 @@
         "incident"
       ],
       "human_inputs": [
+        "clarify-scope",
+        "needs-arch-review",
         "needs-security-review",
         "blocked-on-data",
         "general"
@@ -83,6 +91,10 @@
       ],
       "issue_types": [
         "incident"
+      ],
+      "human_inputs": [
+        "blocked-on-data",
+        "general"
       ]
     },
     "stabilized": {

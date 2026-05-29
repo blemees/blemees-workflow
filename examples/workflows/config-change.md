@@ -24,7 +24,7 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_config_change` | resting | reversible-fast | — | config-change | — | — | — |
-| `applying_config_change` | working | — | incident-responder | config-change | general | — | — |
+| `applying_config_change` | working | — | incident-responder | config-change | clarify-scope, needs-security-review, blocked-on-data, general | — | — |
 | `config_applied` | terminal | reversible-fast | — | — | — | shipped | completed |
 
 ## Transitions

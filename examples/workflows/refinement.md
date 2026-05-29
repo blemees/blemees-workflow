@@ -1,13 +1,12 @@
 # Process: refinement
 
-Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills.
+Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills. Chores skip this process and are filed directly on `inner-loop.ready_for_dev` — engineering hygiene work doesn't need PM refinement.
 
 > Defined in: `refinement-states.json`
 
 ## Issue types accepted
 
 - `bug` — **Bug**: Defect in shipped behavior — something is broken or wrong. Branch prefix `fix/`. Failing test first; reviewer scrutinizes root cause vs surface symptom.
-- `chore` — **Chore**: Internal cleanup with no user-visible behavior change: refactors, dependency bumps, lint config. Branch prefix `chore/`. QA may be skipped at reviewer discretion.
 - `experiment` — **Experiment**: Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Requires hypothesis, metric, and cohort up-front. Post-merge owned by product-owner; closes at verdict on the experimentation lifecycle.
 - `feature` — **Feature**: New user-facing capability or enhancement to existing behavior. Branch prefix `feat/`. Standard inner-loop flow with no per-step variations.
 
@@ -56,16 +55,16 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `raw` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
-| `refining` | working | — | product-manager | bug, feature, chore, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, general | — | — |
-| `consult_requested` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
-| `consulting` | working | — | architect, designer, security-engineer | bug, feature, chore, experiment | needs-arch-review, needs-security-review, general | — | — |
-| `consult_complete` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
-| `spiking` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
-| `spike_returned` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
-| `ready_for_dev` | resting | reversible-slow | — | bug, feature, chore, experiment | — | — | — |
-| `ready_bounced` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
-| `deprioritized` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
+| `raw` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
+| `refining` | working | — | product-manager | bug, feature, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
+| `consult_requested` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
+| `consulting` | working | — | architect, designer, security-engineer | bug, feature, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
+| `consult_complete` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
+| `spiking` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
+| `spike_returned` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
+| `ready_for_dev` | resting | reversible-slow | — | bug, feature, experiment | — | — | — |
+| `ready_bounced` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
+| `deprioritized` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
 | `duplicate` | terminal | reversible-fast | — | — | — | deduplicated | not planned |
 | `wont_fix` | terminal | reversible-fast | — | — | — | abandoned | not planned |
 

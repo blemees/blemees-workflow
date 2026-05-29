@@ -42,13 +42,13 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `declared` | resting | reversible-fast | — | incident | — | — | — |
-| `triaging` | working | — | incident-commander | incident | — | — | — |
+| `triaging` | working | — | incident-commander | incident | blocked-on-data, general | — | — |
 | `needs_diagnosis` | resting | reversible-fast | — | incident | — | — | — |
-| `diagnosing` | working | — | incident-responder | incident | blocked-on-data, general | — | — |
+| `diagnosing` | working | — | incident-responder | incident | needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
 | `cause_identified` | resting | reversible-fast | — | incident | — | — | — |
-| `mitigating` | working | — | incident-commander | incident | needs-security-review, blocked-on-data, general | — | — |
+| `mitigating` | working | — | incident-commander | incident | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
 | `needs_verification` | resting | reversible-fast | — | incident | — | — | — |
-| `verifying` | working | — | incident-responder | incident | — | — | — |
+| `verifying` | working | — | incident-responder | incident | blocked-on-data, general | — | — |
 | `stabilized` | terminal | reversible-fast | — | — | — | superseded | completed |
 
 ## Transitions

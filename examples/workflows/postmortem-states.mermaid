@@ -2,7 +2,7 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Spawn:   complete → process (derived from initial_state) (issue_type=bug, initial=raw)
-    %%   Spawn:   complete → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   complete → process inner-loop (issue_type=chore, initial=ready_for_dev)
     %%   Spawn:   complete → process (derived from initial_state) (issue_type=feature, initial=raw)
     %%
 

@@ -15,8 +15,8 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Handoff: measuring (shared resting state)
-    %%   Spawn:   promoted → process (derived from initial_state) (issue_type=chore, initial=raw)
-    %%   Spawn:   killed → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   promoted → process inner-loop (issue_type=chore, initial=ready_for_dev)
+    %%   Spawn:   killed → process inner-loop (issue_type=chore, initial=ready_for_dev)
     %%   Spawn:   iterated → process (derived from initial_state) (issue_type=experiment, initial=raw)
     %%
 
@@ -40,8 +40,8 @@ stateDiagram-v2
 |---|---|---|---|---|---|---|---|
 | `measuring` | resting | reversible-slow | — | experiment | — | — | — |
 | `measurement_complete` | resting | reversible-fast | — | experiment | — | — | — |
-| `analyzing` | working | — | product-owner | experiment | — | — | — |
-| `aborting` | working | — | product-owner | experiment | — | — | — |
+| `analyzing` | working | — | product-owner | experiment | blocked-on-data, needs-ux-input, general | — | — |
+| `aborting` | working | — | product-owner | experiment | general | — | — |
 | `promoted` | terminal | reversible-slow | — | — | — | shipped | completed |
 | `killed` | terminal | reversible-slow | — | — | — | abandoned | not planned |
 | `iterated` | terminal | reversible-fast | — | — | — | superseded | not planned |
@@ -68,6 +68,6 @@ stateDiagram-v2
 
 **Spawns** (states that create child issues on other processes):
 
-- `promoted` (independent) → process `(derived from initial_state)` as `chore` issue at `raw`
-- `killed` (independent) → process `(derived from initial_state)` as `chore` issue at `raw`
+- `promoted` (independent) → process `inner-loop` as `chore` issue at `ready_for_dev`
+- `killed` (independent) → process `inner-loop` as `chore` issue at `ready_for_dev`
 - `iterated` (independent) → process `(derived from initial_state)` as `experiment` issue at `raw`

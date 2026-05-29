@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "delivery",
-  "description": "Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills.",
+  "description": "Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills. Chores skip this process and are filed directly on `inner-loop.ready_for_dev` — engineering hygiene work doesn't need PM refinement.",
   "states": {
     "raw": {
       "class": "resting",
@@ -10,7 +10,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ]
     },
@@ -22,7 +21,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ],
       "human_inputs": [
@@ -30,6 +28,7 @@
         "needs-arch-review",
         "needs-security-review",
         "needs-ux-input",
+        "blocked-on-data",
         "general"
       ]
     },
@@ -39,7 +38,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ]
     },
@@ -48,7 +46,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ],
       "roles": [
@@ -57,8 +54,11 @@
         "security-engineer"
       ],
       "human_inputs": [
+        "clarify-scope",
         "needs-arch-review",
         "needs-security-review",
+        "needs-ux-input",
+        "blocked-on-data",
         "general"
       ]
     },
@@ -68,7 +68,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ]
     },
@@ -78,7 +77,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ],
       "spawns": {
@@ -96,7 +94,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ]
     },
@@ -107,7 +104,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ]
     },
@@ -118,7 +114,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ]
     },
@@ -128,7 +123,6 @@
       "issue_types": [
         "bug",
         "feature",
-        "chore",
         "experiment"
       ]
     },

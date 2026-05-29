@@ -7,6 +7,7 @@
       "class": "resting",
       "reversibility": "reversible-slow",
       "handoff": true,
+      "initial": "engineer files chore directly (skips refinement)",
       "issue_types": [
         "bug",
         "feature",
@@ -52,6 +53,7 @@
         "clarify-scope",
         "needs-arch-review",
         "needs-security-review",
+        "needs-ux-input",
         "blocked-on-data",
         "general"
       ]
@@ -67,6 +69,9 @@
       "human_inputs": [
         "clarify-scope",
         "needs-arch-review",
+        "needs-security-review",
+        "needs-ux-input",
+        "blocked-on-data",
         "general"
       ]
     },

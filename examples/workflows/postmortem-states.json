@@ -17,6 +17,11 @@
       ],
       "issue_types": [
         "postmortem"
+      ],
+      "human_inputs": [
+        "blocked-on-data",
+        "needs-security-review",
+        "general"
       ]
     },
     "complete": {
@@ -30,8 +35,9 @@
           "initial_state": "raw"
         },
         {
+          "process": "inner-loop",
           "issue_type": "chore",
-          "initial_state": "raw"
+          "initial_state": "ready_for_dev"
         },
         {
           "issue_type": "feature",

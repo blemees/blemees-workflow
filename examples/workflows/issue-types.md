@@ -1,5 +1,7 @@
 # Issue types
 
+> Defined in: `issue-types.json`
+
 Each process declares which of these it accepts via its `issue_types` field. Type is set at creation and immutable.
 
 ## `bug` — Bug
@@ -40,7 +42,7 @@ Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Re
 
 ## `pr` — Pull Request
 
-A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
+A proposed code change. Spawned by a developer running `workflow spawn-issue` from inner-loop's implementing state (the CLI in turn invokes `gh pr create` against the backend). One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). The framework owns the spawn relationship and the cross-process modelling.
 
 **GitHub entity**: pull request (no native Issue Type)
 

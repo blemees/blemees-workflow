@@ -19,7 +19,10 @@
         "incident-mitigation"
       ],
       "human_inputs": [
+        "clarify-scope",
+        "needs-arch-review",
         "needs-security-review",
+        "blocked-on-data",
         "general"
       ]
     },
@@ -37,6 +40,10 @@
       ],
       "issue_types": [
         "incident-mitigation"
+      ],
+      "human_inputs": [
+        "clarify-scope",
+        "general"
       ],
       "spawns": [
         {

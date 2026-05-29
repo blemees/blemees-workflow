@@ -13,6 +13,12 @@ The developer's day-to-day flow: claim a refined ticket, implement, open a PR. A
 - `hotfix` — **Hotfix**: Compressed inner-loop work for urgent production fixes during active incidents. Branch prefix `hotfix/`. Spawned by mitigation under IC authority; skips refinement; QA may be bypassed.
 - `spike` — **Spike**: Time-boxed investigation. Branch prefix `spike/`. Deliverable is a findings doc, not merged code — the PR is never merged. Follow-ups re-enter refinement.
 
+## External entry points
+
+States where new issues materialize from outside the workflow — manual `create-issue --to <state>`, a webhook, or a scheduled job. Distinct from spawn / collect targets, which are reached via upstream work in another process; the framework enforces the two as mutually exclusive per state.
+
+- `ready_for_dev` — engineer files chore directly (skips refinement)
+
 ## State diagram
 
 ```mermaid
@@ -25,6 +31,7 @@ stateDiagram-v2
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
     %%
 
+    [*] --> ready_for_dev: engineer files chore directly (skips refinement)
     ready_for_dev --> implementing: developer claims issue
     ready_for_spike --> implementing_spike: developer claims spike
     ready_for_hotfix --> implementing: developer claims hotfix
@@ -35,6 +42,7 @@ stateDiagram-v2
     [*] --> ready_for_dev: handoff
     staged --> [*]: handoff
     ready_bounced --> [*]: handoff
+    [*] --> ready_for_dev: spawn
     [*] --> ready_for_hotfix: spawn
     [*] --> ready_for_spike: spawn
 ```
@@ -46,8 +54,8 @@ stateDiagram-v2
 | `ready_for_dev` | resting | reversible-slow | — | bug, feature, chore, experiment | — | — | — |
 | `ready_for_spike` | resting | reversible-slow | — | spike | — | — | — |
 | `ready_for_hotfix` | resting | reversible-fast | — | hotfix | — | — | — |
-| `implementing` | working | — | developer | bug, feature, chore, experiment, hotfix | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
-| `implementing_spike` | working | — | developer | spike | clarify-scope, needs-arch-review, general | — | — |
+| `implementing` | working | — | developer | bug, feature, chore, experiment, hotfix | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
+| `implementing_spike` | working | — | developer | spike | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
 | `staged` | resting | reversible-slow | — | bug, feature, chore, experiment, hotfix | — | — | — |
 | `spike_completed` | terminal | reversible-fast | — | — | — | resolved | completed |
 | `ready_bounced` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |

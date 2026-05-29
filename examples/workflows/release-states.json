@@ -63,6 +63,11 @@
       ],
       "issue_types": [
         "release"
+      ],
+      "human_inputs": [
+        "clarify-scope",
+        "blocked-on-data",
+        "general"
       ]
     },
     "ready_for_release_decision": {
@@ -79,6 +84,11 @@
       ],
       "issue_types": [
         "release"
+      ],
+      "human_inputs": [
+        "needs-security-review",
+        "blocked-on-data",
+        "general"
       ]
     },
     "gated_nogo": {
@@ -95,6 +105,9 @@
       ],
       "issue_types": [
         "release"
+      ],
+      "human_inputs": [
+        "general"
       ]
     },
     "abandoned": {
@@ -131,6 +144,10 @@
       ],
       "issue_types": [
         "release"
+      ],
+      "human_inputs": [
+        "blocked-on-data",
+        "general"
       ]
     },
     "rolling_back": {
@@ -141,6 +158,12 @@
       "roles": [
         "incident-commander",
         "release-manager"
+      ],
+      "human_inputs": [
+        "clarify-scope",
+        "needs-arch-review",
+        "blocked-on-data",
+        "general"
       ]
     },
     "rolled_back": {

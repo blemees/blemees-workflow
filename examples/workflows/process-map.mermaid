@@ -17,12 +17,13 @@ stateDiagram-v2
     }
 
     [*] --> incident_response: ▶ declared
+    [*] --> inner_loop: ▶ ready_for_dev
     [*] --> refinement: ▶ raw
     config_change --> mitigation: ⊡ mitigated
     data_change --> mitigation: ⊡ mitigated
+    experimentation --> inner_loop: ᐉ killed
+    experimentation --> inner_loop: ᐉ promoted
     experimentation --> refinement: ᐉ iterated
-    experimentation --> refinement: ᐉ killed
-    experimentation --> refinement: ᐉ promoted
     incident_response --> mitigation: ᐉ mitigating
     incident_response --> postmortem: ᐉ stabilized
     inner_loop --> pr: ᐉ implementing
@@ -33,6 +34,7 @@ stateDiagram-v2
     mitigation --> data_change: ᐉ execute_mitigation
     mitigation --> incident_response: ⊡ needs_verification
     mitigation --> inner_loop: ᐉ execute_mitigation
+    postmortem --> inner_loop: ᐉ complete
     postmortem --> refinement: ᐉ complete
     pr --> inner_loop: ⊡ staged
     refinement --> inner_loop: ᐉ spiking

@@ -2,8 +2,8 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Handoff: measuring (shared resting state)
-    %%   Spawn:   promoted → process (derived from initial_state) (issue_type=chore, initial=raw)
-    %%   Spawn:   killed → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   promoted → process inner-loop (issue_type=chore, initial=ready_for_dev)
+    %%   Spawn:   killed → process inner-loop (issue_type=chore, initial=ready_for_dev)
     %%   Spawn:   iterated → process (derived from initial_state) (issue_type=experiment, initial=raw)
     %%
 

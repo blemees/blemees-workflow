@@ -15,7 +15,7 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Spawn:   complete → process (derived from initial_state) (issue_type=bug, initial=raw)
-    %%   Spawn:   complete → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   complete → process inner-loop (issue_type=chore, initial=ready_for_dev)
     %%   Spawn:   complete → process (derived from initial_state) (issue_type=feature, initial=raw)
     %%
 
@@ -30,7 +30,7 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `pending` | resting | reversible-slow | — | postmortem | — | — | — |
-| `drafting` | working | — | product-manager | postmortem | — | — | — |
+| `drafting` | working | — | product-manager | postmortem | blocked-on-data, needs-security-review, general | — | — |
 | `complete` | terminal | reversible-slow | — | — | — | resolved | completed |
 
 ## Transitions
@@ -45,5 +45,5 @@ stateDiagram-v2
 **Spawns** (states that create child issues on other processes):
 
 - `complete` (independent) → process `(derived from initial_state)` as `bug` issue at `raw`
-- `complete` (independent) → process `(derived from initial_state)` as `chore` issue at `raw`
+- `complete` (independent) → process `inner-loop` as `chore` issue at `ready_for_dev`
 - `complete` (independent) → process `(derived from initial_state)` as `feature` issue at `raw`

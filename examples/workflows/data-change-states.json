@@ -19,6 +19,7 @@
         "data-change"
       ],
       "human_inputs": [
+        "blocked-on-data",
         "general"
       ]
     },
@@ -38,7 +39,9 @@
         "data-change"
       ],
       "human_inputs": [
+        "clarify-scope",
         "needs-security-review",
+        "blocked-on-data",
         "general"
       ]
     },

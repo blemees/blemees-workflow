@@ -58,17 +58,17 @@ stateDiagram-v2
 | `measuring` | resting | reversible-slow | — | experiment | — | — | — |
 | `cut` | resting | reversible-slow | — | release | — | — | — |
 | `hotfix_cut` | resting | reversible-fast | — | release | — | — | — |
-| `preparing` | working | — | release-manager | release | — | — | — |
+| `preparing` | working | — | release-manager | release | clarify-scope, blocked-on-data, general | — | — |
 | `ready_for_release_decision` | resting | reversible-slow | — | release | — | — | — |
-| `reviewing_release` | working | — | product-owner | release | — | — | — |
+| `reviewing_release` | working | — | product-owner | release | needs-security-review, blocked-on-data, general | — | — |
 | `gated_nogo` | resting | reversible-fast | — | release | — | — | — |
-| `abandoning` | working | — | product-owner | release | — | — | — |
+| `abandoning` | working | — | product-owner | release | general | — | — |
 | `abandoned` | terminal | reversible-fast | — | — | — | abandoned | not planned |
 | `deploying` | resting | reversible-slow | — | release | — | — | — |
 | `rolling_out` | resting | reversible-slow | — | release | — | — | — |
 | `ready_for_monitoring` | resting | reversible-slow | — | release | — | — | — |
-| `monitoring` | working | — | developer | release | — | — | — |
-| `rolling_back` | working | — | incident-commander, release-manager | release | — | — | — |
+| `monitoring` | working | — | developer | release | blocked-on-data, general | — | — |
+| `rolling_back` | working | — | incident-commander, release-manager | release | clarify-scope, needs-arch-review, blocked-on-data, general | — | — |
 | `rolled_back` | terminal | reversible-slow | — | — | — | reverted | completed |
 | `released` | terminal | reversible-slow | — | — | — | shipped | completed |
 | `shipped` | terminal | reversible-slow | — | — | — | shipped | completed |

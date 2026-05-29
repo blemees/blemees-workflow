@@ -7,6 +7,7 @@ stateDiagram-v2
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
     %%
 
+    [*] --> ready_for_dev: engineer files chore directly (skips refinement)
     ready_for_dev --> implementing: developer claims issue
     ready_for_spike --> implementing_spike: developer claims spike
     ready_for_hotfix --> implementing: developer claims hotfix
@@ -17,5 +18,6 @@ stateDiagram-v2
     [*] --> ready_for_dev: handoff
     staged --> [*]: handoff
     ready_bounced --> [*]: handoff
+    [*] --> ready_for_dev: spawn
     [*] --> ready_for_hotfix: spawn
     [*] --> ready_for_spike: spawn

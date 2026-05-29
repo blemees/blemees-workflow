@@ -41,12 +41,13 @@ stateDiagram-v2
     }
 
     [*] --> incident_response: ▶ declared
+    [*] --> inner_loop: ▶ ready_for_dev
     [*] --> refinement: ▶ raw
     config_change --> mitigation: ⊡ mitigated
     data_change --> mitigation: ⊡ mitigated
+    experimentation --> inner_loop: ᐉ killed
+    experimentation --> inner_loop: ᐉ promoted
     experimentation --> refinement: ᐉ iterated
-    experimentation --> refinement: ᐉ killed
-    experimentation --> refinement: ᐉ promoted
     incident_response --> mitigation: ᐉ mitigating
     incident_response --> postmortem: ᐉ stabilized
     inner_loop --> pr: ᐉ implementing
@@ -57,6 +58,7 @@ stateDiagram-v2
     mitigation --> data_change: ᐉ execute_mitigation
     mitigation --> incident_response: ⊡ needs_verification
     mitigation --> inner_loop: ᐉ execute_mitigation
+    postmortem --> inner_loop: ᐉ complete
     postmortem --> refinement: ᐉ complete
     pr --> inner_loop: ⊡ staged
     refinement --> inner_loop: ᐉ spiking
@@ -83,7 +85,7 @@ The raw mermaid source is also available at [`process-map.mermaid`](./process-ma
 - [`mitigation`](./mitigation.md) — Plan and execute a mitigation strategy during an active incident. The responder drafts a plan, then dispatches one or more sub-mitigations — a hotfix, a configuration change, a data change, or any combination — each as a child issue on its own process. `execute_mitigation` declares a multi-spawn rule per mitigation type; the wait-for-all cascade closes this issue at `mitigated` only when every spawned child reaches its respective applied / shipped terminal, which in turn cascades the parent incident to `needs_verification`.
 - [`postmortem`](./postmortem.md) — Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files follow-ups (bug/chore/feature) on refinement via the terminal-state spawn declaration — `workflow spawn-issue --issue-type bug --initial-state raw` (etc.) for each item.
 - [`pr`](./pr.md) — The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state.
-- [`refinement`](./refinement.md) — Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills.
+- [`refinement`](./refinement.md) — Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills. Chores skip this process and are filed directly on `inner-loop.ready_for_dev` — engineering hygiene work doesn't need PM refinement.
 - [`release`](./release.md) — Cut, review, and ship a release train. Dev tickets (bug/feature/chore/experiment/hotfix) are handed off from `inner-loop.staged` and live here as contributors; a release ticket is created at `cut` (or `hotfix_cut`), collects the staged contributors, then runs review → deploy → released. On `released` the contributor tickets cascade to `shipped`; on `abandoned` / `rolled_back` they're returned to the queue for the next train.
 
 ## Shared resources

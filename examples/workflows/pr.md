@@ -6,7 +6,7 @@ The pull-request lifecycle: draft → review → merged. Spawned from inner-loop
 
 ## Issue types accepted
 
-- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
+- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `workflow spawn-issue` from inner-loop's implementing state (the CLI in turn invokes `gh pr create` against the backend). One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). The framework owns the spawn relationship and the cross-process modelling.
 
 ## State diagram
 
@@ -38,17 +38,17 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `draft` | resting | reversible-fast | — | pr | — | — | — |
-| `drafting` | working | — | developer | pr | — | — | — |
+| `drafting` | working | — | developer | pr | clarify-scope, general | — | — |
 | `needs_review` | resting | reversible-fast | — | pr | — | — | — |
-| `reviewing` | working | — | peer-reviewer | pr | needs-security-review, general | — | — |
+| `reviewing` | working | — | peer-reviewer | pr | clarify-scope, needs-arch-review, needs-security-review, general | — | — |
 | `changes_requested` | resting | reversible-fast | — | pr | — | — | — |
-| `fixing_review` | working | — | developer | pr | clarify-scope, general | — | — |
+| `fixing_review` | working | — | developer | pr | clarify-scope, needs-arch-review, needs-security-review, general | — | — |
 | `needs_qa` | resting | reversible-fast | — | pr | — | — | — |
-| `verifying` | working | — | tester | pr | — | — | — |
+| `verifying` | working | — | tester | pr | clarify-scope, blocked-on-data, general | — | — |
 | `qa_passed` | resting | reversible-fast | — | pr | — | — | — |
 | `qa_failed` | resting | reversible-fast | — | pr | — | — | — |
-| `fixing_qa` | working | — | developer | pr | — | — | — |
-| `merging` | working | — | developer | pr | — | — | — |
+| `fixing_qa` | working | — | developer | pr | clarify-scope, blocked-on-data, general | — | — |
+| `merging` | working | — | developer | pr | general | — | — |
 | `merged` | terminal | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions

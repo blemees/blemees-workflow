@@ -26,9 +26,9 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_data_change` | resting | reversible-fast | — | data-change | — | — | — |
-| `creating_backup` | working | — | incident-responder | data-change | general | — | — |
+| `creating_backup` | working | — | incident-responder | data-change | blocked-on-data, general | — | — |
 | `backup_ready` | resting | reversible-slow | — | data-change | — | — | — |
-| `applying_data_change` | working | — | incident-responder | data-change | needs-security-review, general | — | — |
+| `applying_data_change` | working | — | incident-responder | data-change | clarify-scope, needs-security-review, blocked-on-data, general | — | — |
 | `data_change_applied` | terminal | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
