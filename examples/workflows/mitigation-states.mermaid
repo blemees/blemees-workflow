@@ -4,10 +4,9 @@ stateDiagram-v2
     %%   Handoff: ready_for_hotfix (shared resting state)
     %%
 
-    ready_for_rollback --> applying_mitigation: responder claims rollback
-    ready_for_flag_toggle --> applying_mitigation: responder claims flag toggle
+    ready_for_mitigation --> applying_mitigation: responder claims mitigation (rollback or flag-toggle)
     applying_mitigation --> mitigated: responder completes mitigation
     mitigated --> [*]: terminal (shipped)
     [*] --> ready_for_hotfix: handoff
     ready_for_hotfix --> [*]: handoff
-    [*] --> ready_for_rollback: spawn
+    [*] --> ready_for_mitigation: spawn

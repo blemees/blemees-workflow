@@ -285,6 +285,30 @@ def test_initial_forbidden_on_terminal() -> None:
         parse_state_machine(json.dumps(spec))
 
 
+def test_transition_label_with_colon_rejected() -> None:
+    """stateDiagram-v2 treats the first `:` as the label separator and
+    would choke on a second one. Parser rejects so the emitter can't
+    produce malformed mermaid."""
+    spec = _minimal()
+    spec["transitions"][0]["label"] = "claim (priority: high)"
+    with pytest.raises(ParseError, match="stateDiagram-v2 parser rejects"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_transition_label_with_semicolon_rejected() -> None:
+    spec = _minimal()
+    spec["transitions"][0]["label"] = "claim; then notify"
+    with pytest.raises(ParseError, match="stateDiagram-v2 parser rejects"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_initial_label_with_colon_rejected() -> None:
+    spec = _minimal()
+    spec["states"]["a"]["initial"] = "issue created (source: webhook)"
+    with pytest.raises(ParseError, match="stateDiagram-v2"):
+        parse_state_machine(json.dumps(spec))
+
+
 def test_initial_empty_string_rejected() -> None:
     spec = _minimal()
     spec["states"]["a"]["initial"] = ""

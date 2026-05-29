@@ -53,7 +53,7 @@
       "spawns": {
         "process": "mitigation",
         "issue_type": "incident",
-        "initial_state": "ready_for_rollback",
+        "initial_state": "ready_for_mitigation",
         "advance_on": {
           "mitigated": "needs_verification"
         }

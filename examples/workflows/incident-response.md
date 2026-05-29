@@ -20,7 +20,7 @@ States where new issues materialize from outside the workflow — manual `create
 stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
-    %%   Spawn:   mitigating → process mitigation (issue_type=incident, initial=ready_for_rollback)
+    %%   Spawn:   mitigating → process mitigation (issue_type=incident, initial=ready_for_mitigation)
     %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
     %%
 
@@ -69,6 +69,6 @@ stateDiagram-v2
 
 **Spawns** (states that create child issues on other processes):
 
-- `mitigating` (subprocess) → process `mitigation` as `incident` issue at `ready_for_rollback`
+- `mitigating` (subprocess) → process `mitigation` as `incident` issue at `ready_for_mitigation`
     - on child `mitigated` → parent `needs_verification`
 - `stabilized` (independent) → process `postmortem` as `postmortem` issue at `pending`

@@ -13,17 +13,17 @@ Edge labels carry a symbol prefix indicating the relationship kind:
 
 - **`▶ <state>`** — entry: a new external issue materializes at the labelled state.
 - **`■ <state>`** — exit: an issue closes at the labelled terminal **and** no parent process has it listed as a spawn feedback target. Terminals named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.
-- **`⇄ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.
-- **`⤴ <src>→<dst>`** — spawn: the source process creates a child issue on the destination at the labelled initial state.
-- **`⤵ <src>→<dst>`** — collect: the destination process (authored via `collects`) gathers contributors from the source process's labelled state.
-- **`↺ <child>→<parent>`** — feedback: the inverse of a spawn's `advance_on` (child terminates → parent auto-advances) **or** a collect's `advance_on` (collector reaches a state → contributors advance). Pairs with the originating `⤴`/`⤵` edge to show the round-trip.
-- **`↩ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.
+- **`⊙ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.
+- **`ᐉ <parent_state>`** — spawn: the source process creates a child issue on the destination process. The label names only the parent state where the spawn fires; check the destination's own diagram for the child's initial state.
+- **`ꘜ <collector_state>`** — collect: the destination process (authored via `collects`) gathers contributors from another process. The label names only the collector state; the source's `from_states` are visible on the source process's own diagram.
+- **`⊡ <state>`** — feedback: for a spawn's `advance_on`, the parent's next state after the child terminates. For a collect's `advance_on`, the collector's state that triggers contributor movement. Pairs with the originating `ᐉ`/`ꘜ` edge to show the round-trip; the trigger / target counterpart is visible on the relevant process's own diagram.
+- **`⧄ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.
 
 Edge labels name the state involved — the shared resting state for handoffs, or the originating → destination state pair for spawns.
 
 ```mermaid
 stateDiagram-v2
-    direction TB
+    direction LR
 
     state "incident-response" as incident_response
     state "inner-loop" as inner_loop
@@ -31,21 +31,21 @@ stateDiagram-v2
 
     [*] --> incident_response: ▶ declared
     [*] --> refinement: ▶ raw
-    incident_response --> mitigation: ⤴ mitigating→ready_for_rollback
-    incident_response --> postmortem: ⤴ stabilized→pending
-    inner_loop --> pr: ⤴ implementing→draft
-    inner_loop --> refinement: ↺ spike_completed→spike_returned
-    inner_loop --> refinement: ⇄ ready_bounced
-    inner_loop --> release: ⤵ staged→cut [bug,feature,chore,experiment]
-    inner_loop --> release: ⤵ staged→hotfix_cut [hotfix]
-    mitigation --> incident_response: ↺ mitigated→needs_verification
-    mitigation --> inner_loop: ⇄ ready_for_hotfix
-    pr --> inner_loop: ↺ merged→staged
-    refinement --> inner_loop: ⇄ ready_for_dev
-    refinement --> inner_loop: ⤴ spiking→ready_for_spike
-    release --> inner_loop: ↩ abandoned
-    release --> inner_loop: ↩ rolled_back
-    release --> inner_loop: ↺ released→shipped
+    incident_response --> mitigation: ᐉ mitigating
+    incident_response --> postmortem: ᐉ stabilized
+    inner_loop --> pr: ᐉ implementing
+    inner_loop --> refinement: ⊙ ready_bounced
+    inner_loop --> refinement: ⊡ spike_returned
+    inner_loop --> release: ꘜ cut [bug,feature,chore,experiment]
+    inner_loop --> release: ꘜ hotfix_cut [hotfix]
+    mitigation --> incident_response: ⊡ needs_verification
+    mitigation --> inner_loop: ⊙ ready_for_hotfix
+    pr --> inner_loop: ⊡ staged
+    refinement --> inner_loop: ᐉ spiking
+    refinement --> inner_loop: ⊙ ready_for_dev
+    release --> inner_loop: ⊡ released
+    release --> inner_loop: ⧄ abandoned
+    release --> inner_loop: ⧄ rolled_back
     backport --> [*]: ■ backported
     experimentation --> [*]: ■ aborted
     experimentation --> [*]: ■ iterated

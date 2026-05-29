@@ -751,6 +751,17 @@ def _parse_initial(
                 f"State {state_id!r}: `initial` is only valid on resting "
                 f"states (state class is {state_class.value!r})."
             )
+        # `initial` becomes part of the mermaid `[*] --> state: <label>`
+        # description; the v2 parser rejects a second `:` and bare `;` /
+        # newlines inside.
+        bad_chars = [c for c in (":", ";", "\n") if c in cleaned]
+        if bad_chars:
+            raise ParseError(
+                f"State {state_id!r}: `initial` label {cleaned!r} contains a "
+                f"character ({bad_chars!r}) that mermaid's stateDiagram-v2 "
+                f"parser rejects. Rephrase — use parentheses or an em-dash "
+                f"instead of `:`; comma or new sentence instead of `;`."
+            )
         return True, cleaned
     raise ParseError(
         f"State {state_id!r}: `initial` must be a boolean or non-empty "
@@ -819,6 +830,20 @@ def _parse_transition(
     if label_raw is not None and not isinstance(label_raw, str):
         raise ParseError(f"transitions[{idx}]: `label` must be a string if present.")
     label = label_raw.strip() if isinstance(label_raw, str) else ""
+    # stateDiagram-v2 treats the first `:` after the arrow as the label
+    # separator and rejects a second one inside the description. The
+    # same applies to `;` (statement terminator) and newlines. Reject
+    # these characters at parse time so the emitter can't produce
+    # malformed mermaid that fails to render.
+    bad_chars = [c for c in (":", ";", "\n") if c in label]
+    if bad_chars:
+        raise ParseError(
+            f"transitions[{idx}]: label {label!r} contains a character "
+            f"({bad_chars!r}) that mermaid's stateDiagram-v2 parser rejects "
+            f"inside transition descriptions. Rephrase the label — use "
+            f"parentheses or an em-dash instead of `:`; use a comma or new "
+            f"sentence instead of `;`."
+        )
 
     # The standalone `hitl` flag was merged into `human_gate`: presence of
     # `human_gate` IS the HITL marker. Reject `hitl` outright so authors

@@ -62,10 +62,10 @@ def test_process_map_lists_all_processes_and_handoffs(
     processes = [registry.get_process(name) for name in registry.discovered_processes()]
     text = emit_process_map(processes)
 
-    # Diagram is stateDiagram-v2, top-to-bottom — same family as the
-    # per-process state diagrams.
+    # Diagram is stateDiagram-v2, left-to-right (process map reads as a
+    # flow across processes, distinct from per-process diagrams' TB).
     assert text.startswith("stateDiagram-v2\n")
-    assert "direction TB" in text
+    assert "direction LR" in text
 
     # Hyphenated process names get an alias so the v2 parser accepts a
     # clean id while preserving the display name.
@@ -79,21 +79,21 @@ def test_process_map_lists_all_processes_and_handoffs(
     # transitions (mitigation produces the hotfix ticket); inner-loop
     # claims out of it — so the implicit direction is mitigation →
     # inner-loop.
-    assert "refinement --> inner_loop: ⇄ ready_for_dev" in text
-    assert "inner_loop --> refinement: ⇄ ready_bounced" in text
-    assert "mitigation --> inner_loop: ⇄ ready_for_hotfix" in text
+    assert "refinement --> inner_loop: ⊙ ready_for_dev" in text
+    assert "inner_loop --> refinement: ⊙ ready_bounced" in text
+    assert "mitigation --> inner_loop: ⊙ ready_for_hotfix" in text
 
     # Subprocess spawn: inner-loop.implementing → pr (one consolidated
     # implementing serves bug/feature/chore/experiment/hotfix).
-    assert "inner_loop --> pr: ⤴ implementing→draft" in text
+    assert "inner_loop --> pr: ᐉ implementing" in text
     # Independent spawn: incident-response.stabilized → postmortem.
-    assert "incident_response --> postmortem: ⤴ stabilized→pending" in text
+    assert "incident_response --> postmortem: ᐉ stabilized" in text
     # Collect (inverse of spawn): release has two collector states. `cut`
     # gathers bug/feature/chore/experiment work; `hotfix_cut` gathers
     # only hotfixes. Both pull from inner-loop.staged. The label
     # surfaces the issue-type filter in brackets.
-    assert "inner_loop --> release: ⤵ staged→cut [bug,feature,chore,experiment]" in text
-    assert "inner_loop --> release: ⤵ staged→hotfix_cut [hotfix]" in text
+    assert "inner_loop --> release: ꘜ cut [bug,feature,chore,experiment]" in text
+    assert "inner_loop --> release: ꘜ hotfix_cut [hotfix]" in text
 
     # External entry: processes that declare an `is_initial` state
     # contribute an edge from the built-in `[*]` sentinel. `release` is
@@ -123,7 +123,8 @@ def test_process_map_lists_all_processes_and_handoffs(
     assert "mitigation --> [*]: ■ mitigated" not in text
 
     # Feedback edges — the round-trip of the spawn relationships above.
-    # Each `advance_on` mapping renders as `child --> parent: ↺ ...`.
-    assert "inner_loop --> refinement: ↺ spike_completed→spike_returned" in text
-    assert "pr --> inner_loop: ↺ merged→staged" in text
-    assert "mitigation --> incident_response: ↺ mitigated→needs_verification" in text
+    # Spawn-feedback labels show only the parent's next state; collect-
+    # feedback labels show only the collector's trigger state.
+    assert "inner_loop --> refinement: ⊡ spike_returned" in text
+    assert "pr --> inner_loop: ⊡ staged" in text
+    assert "mitigation --> incident_response: ⊡ needs_verification" in text

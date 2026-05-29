@@ -1,5 +1,5 @@
 stateDiagram-v2
-    direction TB
+    direction LR
 
     state "incident-response" as incident_response
     state "inner-loop" as inner_loop
@@ -7,21 +7,21 @@ stateDiagram-v2
 
     [*] --> incident_response: ▶ declared
     [*] --> refinement: ▶ raw
-    incident_response --> mitigation: ⤴ mitigating→ready_for_rollback
-    incident_response --> postmortem: ⤴ stabilized→pending
-    inner_loop --> pr: ⤴ implementing→draft
-    inner_loop --> refinement: ↺ spike_completed→spike_returned
-    inner_loop --> refinement: ⇄ ready_bounced
-    inner_loop --> release: ⤵ staged→cut [bug,feature,chore,experiment]
-    inner_loop --> release: ⤵ staged→hotfix_cut [hotfix]
-    mitigation --> incident_response: ↺ mitigated→needs_verification
-    mitigation --> inner_loop: ⇄ ready_for_hotfix
-    pr --> inner_loop: ↺ merged→staged
-    refinement --> inner_loop: ⇄ ready_for_dev
-    refinement --> inner_loop: ⤴ spiking→ready_for_spike
-    release --> inner_loop: ↩ abandoned
-    release --> inner_loop: ↩ rolled_back
-    release --> inner_loop: ↺ released→shipped
+    incident_response --> mitigation: ᐉ mitigating
+    incident_response --> postmortem: ᐉ stabilized
+    inner_loop --> pr: ᐉ implementing
+    inner_loop --> refinement: ⊙ ready_bounced
+    inner_loop --> refinement: ⊡ spike_returned
+    inner_loop --> release: ꘜ cut [bug,feature,chore,experiment]
+    inner_loop --> release: ꘜ hotfix_cut [hotfix]
+    mitigation --> incident_response: ⊡ needs_verification
+    mitigation --> inner_loop: ⊙ ready_for_hotfix
+    pr --> inner_loop: ⊡ staged
+    refinement --> inner_loop: ᐉ spiking
+    refinement --> inner_loop: ⊙ ready_for_dev
+    release --> inner_loop: ⊡ released
+    release --> inner_loop: ⧄ abandoned
+    release --> inner_loop: ⧄ rolled_back
     backport --> [*]: ■ backported
     experimentation --> [*]: ■ aborted
     experimentation --> [*]: ■ iterated

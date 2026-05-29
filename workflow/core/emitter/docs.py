@@ -203,22 +203,26 @@ def emit_process_map(processes: list[Any]) -> str:
     - `▶ <state>`           — entry: `[*] --> process` (where new issues land)
     - `■ <state>`           — exit: `process --> [*]` (where issues close;
       excludes feedback terminals — those are drawn separately).
-    - `⇄ <state>`           — handoff: process → process, shared resting
+    - `⊙ <state>`           — handoff: process → process, shared resting
       state. Bidirectional handoffs (each side both sends and receives)
       emit two edges in opposite directions.
-    - `⤴ <src>→<dst>`        — spawn: process creates a child issue on
-      another process.
-    - `⤵ <src>→<dst>`        — collect: receiver gathers contributors from
-      another process.
-    - `↺ <child>→<parent>`   — feedback: the inverse of a spawn's
-      `advance_on` mapping. When the child terminates at the labelled
-      state, the parent auto-advances. Pairs with the `⤴` edge to show
-      the round-trip.
+    - `ᐉ <parent_state>`     — spawn: process creates a child issue on
+      another process. Label names only the parent state; the child's
+      initial state is shown on the child's own diagram.
+    - `ꘜ <collector_state>`   — collect: receiver gathers contributors
+      from another process. Label names only the collector state; the
+      source's `from_states` are visible on the source process's own
+      diagram.
+    - `⊡ <state>`            — feedback: for a spawn's `advance_on`,
+      the parent's next state after the child terminates; for a
+      collect's `advance_on`, the collector's state that triggers
+      contributor movement. The triggering / receiving counterpart is
+      visible on the relevant process's own diagram.
 
     Processes with hyphenated names get an `as` alias so the v2 parser
     accepts a clean id while preserving the human label.
     """
-    lines: list[str] = ["stateDiagram-v2", "    direction TB", ""]
+    lines: list[str] = ["stateDiagram-v2", "    direction LR", ""]
     sorted_processes = sorted(processes, key=lambda p: p.process_name)
 
     # Emit process nodes. Hyphenated names need the `state "label" as id`
@@ -297,7 +301,7 @@ def emit_process_map(processes: list[Any]) -> str:
                 if a_silent and b_silent:
                     flow_ab = flow_ba = False
 
-                label = f"⇄ {state_name}"
+                label = f"⊙ {state_name}"
                 if flow_ab and flow_ba:
                     # Bidirectional — emit both directions as separate edges.
                     cross_edges.add((a, b, label))
@@ -311,15 +315,22 @@ def emit_process_map(processes: list[Any]) -> str:
                     # the edge still appears in the map for visibility.
                     cross_edges.add((a, b, label))
 
-    # Spawns.
+    # Spawns. Label shows only the parent state (where the spawn fires);
+    # the child's initial state is visible on the child process's own
+    # diagram via its `[*] --> <initial>: spawn` arrow.
     for p in processes:
         for s in p.state_machine.states.values():
             if s.spawns is None:
                 continue
-            label = f"⤴ {s.name}→{s.spawns.initial_state}"
+            label = f"ᐉ {s.name}"
             cross_edges.add((p.process_name, s.spawns.process, label))
 
     # Collects.
+    # Collect label shows only the collector (target) state; the source's
+    # from_states are visible on the source process's own diagram. When
+    # multiple from_states are declared, we still emit one edge per
+    # from_state for the source-side render — but the label is the same
+    # collector state across them, so we dedupe via the set.
     for p in processes:
         for s in p.state_machine.states.values():
             if s.collects is None:
@@ -329,37 +340,36 @@ def emit_process_map(processes: list[Any]) -> str:
                 if s.collects.issue_types
                 else ""
             )
-            for from_state in s.collects.from_states:
-                label = f"⤵ {from_state}→{s.name}{type_suffix}"
-                cross_edges.add((s.collects.process, p.process_name, label))
+            label = f"ꘜ {s.name}{type_suffix}"
+            cross_edges.add((s.collects.process, p.process_name, label))
 
     # Feedback edges — the inverse of a spawn. When the child terminates
     # at a state listed in the spawn's `advance_on`, the parent
-    # auto-advances. Drawing this lets readers see the full round-trip:
-    # parent spawns child; child returns findings; parent moves on.
+    # auto-advances. Label shows only the parent's new state; check the
+    # child process's own diagram for the triggering terminal.
     for p in processes:
         for s in p.state_machine.states.values():
             if s.spawns is None:
                 continue
-            for child_terminal, parent_next in s.spawns.advance_on:
-                label = f"↺ {child_terminal}→{parent_next}"
+            for _child_terminal, parent_next in s.spawns.advance_on:
+                label = f"⊡ {parent_next}"
                 cross_edges.add((s.spawns.process, p.process_name, label))
 
     # Collector → contributor feedback. The inverse of collect's data
     # flow: when the collector enters a listed state, contributors
     # either auto-advance (advance_on) or are released back to
-    # candidacy without moving (release_on). Drawn collector_process →
-    # source_process to mirror "this is where contributors are
-    # affected next".
+    # candidacy without moving (release_on). Label shows only the
+    # collector's triggering state; check the source process's own
+    # diagram for the contributor's target.
     for p in processes:
         for s in p.state_machine.states.values():
             if s.collects is None:
                 continue
-            for collector_state, contributor_target in s.collects.advance_on:
-                label = f"↺ {collector_state}→{contributor_target}"
+            for collector_state, _contributor_target in s.collects.advance_on:
+                label = f"⊡ {collector_state}"
                 cross_edges.add((p.process_name, s.collects.process, label))
             for collector_state in s.collects.release_on:
-                label = f"↩ {collector_state}"
+                label = f"⧄ {collector_state}"
                 cross_edges.add((p.process_name, s.collects.process, label))
 
     if entry_edges or cross_edges or exit_edges:
@@ -429,11 +439,11 @@ def emit_index_doc(
             "",
             "- **`▶ <state>`** — entry: a new external issue materializes at the labelled state.",
             "- **`■ <state>`** — exit: an issue closes at the labelled terminal **and** no parent process has it listed as a spawn feedback target. Terminals named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.",
-            "- **`⇄ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.",
-            "- **`⤴ <src>→<dst>`** — spawn: the source process creates a child issue on the destination at the labelled initial state.",
-            "- **`⤵ <src>→<dst>`** — collect: the destination process (authored via `collects`) gathers contributors from the source process's labelled state.",
-            "- **`↺ <child>→<parent>`** — feedback: the inverse of a spawn's `advance_on` (child terminates → parent auto-advances) **or** a collect's `advance_on` (collector reaches a state → contributors advance). Pairs with the originating `⤴`/`⤵` edge to show the round-trip.",
-            "- **`↩ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.",
+            "- **`⊙ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.",
+            "- **`ᐉ <parent_state>`** — spawn: the source process creates a child issue on the destination process. The label names only the parent state where the spawn fires; check the destination's own diagram for the child's initial state.",
+            "- **`ꘜ <collector_state>`** — collect: the destination process (authored via `collects`) gathers contributors from another process. The label names only the collector state; the source's `from_states` are visible on the source process's own diagram.",
+            "- **`⊡ <state>`** — feedback: for a spawn's `advance_on`, the parent's next state after the child terminates. For a collect's `advance_on`, the collector's state that triggers contributor movement. Pairs with the originating `ᐉ`/`ꘜ` edge to show the round-trip; the trigger / target counterpart is visible on the relevant process's own diagram.",
+            "- **`⧄ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.",
             "",
             "Edge labels name the state involved — the shared resting state for "
             "handoffs, or the originating → destination state pair for spawns.",

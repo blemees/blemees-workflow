@@ -17,21 +17,19 @@ stateDiagram-v2
     %%   Handoff: ready_for_hotfix (shared resting state)
     %%
 
-    ready_for_rollback --> applying_mitigation: responder claims rollback
-    ready_for_flag_toggle --> applying_mitigation: responder claims flag toggle
+    ready_for_mitigation --> applying_mitigation: responder claims mitigation (rollback or flag-toggle)
     applying_mitigation --> mitigated: responder completes mitigation
     mitigated --> [*]: terminal (shipped)
     [*] --> ready_for_hotfix: handoff
     ready_for_hotfix --> [*]: handoff
-    [*] --> ready_for_rollback: spawn
+    [*] --> ready_for_mitigation: spawn
 ```
 
 ## States
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `ready_for_rollback` | resting | reversible-fast | — | — | — | — | — |
-| `ready_for_flag_toggle` | resting | reversible-fast | — | — | — | — | — |
+| `ready_for_mitigation` | resting | reversible-fast | — | — | — | — | — |
 | `ready_for_hotfix` | resting | reversible-fast | — | — | — | — | — |
 | `applying_mitigation` | working | — | incident-responder | incident | — | — | — |
 | `mitigated` | terminal | reversible-slow | — | — | — | shipped | completed |
@@ -40,8 +38,7 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `ready_for_rollback` | `applying_mitigation` | claim | 'responder claims rollback' | — | — |
-| `ready_for_flag_toggle` | `applying_mitigation` | claim | 'responder claims flag toggle' | — | — |
+| `ready_for_mitigation` | `applying_mitigation` | claim | 'responder claims mitigation (rollback or flag-toggle)' | — | — |
 | `applying_mitigation` | `mitigated` | advance | 'responder completes mitigation' | — | — |
 
 ## Cross-process handoffs

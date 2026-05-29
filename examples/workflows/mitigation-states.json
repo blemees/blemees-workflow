@@ -2,11 +2,7 @@
   "$schema": "../../docs/schemas/states.schema.json",
   "description": "Roll back or feature-flag-off shipped behavior to stop bleeding during an active incident. Branches off incident-response when a revert is the right call.",
   "states": {
-    "ready_for_rollback": {
-      "class": "resting",
-      "reversibility": "reversible-fast"
-    },
-    "ready_for_flag_toggle": {
+    "ready_for_mitigation": {
       "class": "resting",
       "reversibility": "reversible-fast"
     },
@@ -33,16 +29,10 @@
   },
   "transitions": [
     {
-      "source": "ready_for_rollback",
+      "source": "ready_for_mitigation",
       "destination": "applying_mitigation",
       "type": "claim",
-      "label": "responder claims rollback"
-    },
-    {
-      "source": "ready_for_flag_toggle",
-      "destination": "applying_mitigation",
-      "type": "claim",
-      "label": "responder claims flag toggle"
+      "label": "responder claims mitigation (rollback or flag-toggle)"
     },
     {
       "source": "applying_mitigation",
