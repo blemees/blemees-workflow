@@ -72,16 +72,16 @@ def test_process_map_lists_all_processes_and_handoffs(
     assert 'state "incident-response" as incident_response' in text
     assert 'state "inner-loop" as inner_loop' in text
 
-    # Known handoffs — `ready_for_dev` and `ready_for_experiment`
-    # originate in refinement (PM advances into the state); inner-loop
-    # claims out of them. `ready_bounced` flows the other way.
-    # `ready_for_hotfix` is declared in mitigation without local
-    # transitions (mitigation produces the hotfix ticket); inner-loop
-    # claims out of it — so the implicit direction is mitigation →
-    # inner-loop.
+    # Known handoffs — `ready_for_dev` originates in refinement (PM
+    # advances into the state); inner-loop claims out of it.
+    # `ready_bounced` flows the other way (inner-loop bounces back to
+    # refinement). `ready_for_hotfix` is now a spawn target (mitigation
+    # spawns hotfix work into inner-loop), so it appears as a spawn
+    # edge rather than a handoff edge.
     assert "refinement --> inner_loop: ⊙ ready_for_dev" in text
     assert "inner_loop --> refinement: ⊙ ready_bounced" in text
-    assert "mitigation --> inner_loop: ⊙ ready_for_hotfix" in text
+    assert "mitigation --> inner_loop: ⊙ ready_for_hotfix" not in text
+    assert "mitigation --> inner_loop: ᐉ execute_mitigation" in text
 
     # Subprocess spawn: inner-loop.implementing → pr (one consolidated
     # implementing serves bug/feature/chore/experiment/hotfix).
@@ -105,12 +105,24 @@ def test_process_map_lists_all_processes_and_handoffs(
     assert "[*] --> release: ▶ cut" not in text
     assert "[*] --> release: ▶ hotfix_cut" not in text
 
-    # External exit: terminal states render as exit edges UNLESS the
-    # terminal is named in some sibling's `spawn.advance_on` (those are
-    # feedback terminals — the work continues in the parent process).
+    # External exit: terminal states render as exit edges UNLESS:
+    # (a) the terminal is named in some sibling's `spawn.advance_on`
+    #     (feedback terminal — work continues in the parent process),
+    # (b) the terminal itself spawns a follow-up issue (superseded —
+    #     work continues as a new child item, and the spawn edge
+    #     already shows the continuation), or
+    # (c) the terminal is named in a `collects.advance_on` /
+    #     `release_on` on the same process (collector terminal —
+    #     reaching it fans the contributors out, the cascade carries
+    #     the work back into the contributor process).
     assert "refinement --> [*]: ■ wont_fix" in text
-    assert "release --> [*]: ■ released" in text
-    assert "incident_response --> [*]: ■ stabilized" in text
+    # incident-response.stabilized spawns postmortem — suppress sink.
+    assert "incident_response --> [*]: ■ stabilized" not in text
+    # release.{released,abandoned,rolled_back} are all collector
+    # terminals on cut / hotfix_cut — suppress sinks.
+    assert "release --> [*]: ■ released" not in text
+    assert "release --> [*]: ■ abandoned" not in text
+    assert "release --> [*]: ■ rolled_back" not in text
 
     # Feedback terminals — these close the child issue but the parent
     # process auto-advances on them, so they're not real workflow exits.

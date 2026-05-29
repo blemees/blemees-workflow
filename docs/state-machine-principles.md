@@ -43,7 +43,7 @@ This also applies to negative decisions that might feel like "just a judgment": 
 - **Claims** use the verb "claims": `PM claims raw`, `developer claims issue`, `QA claims PR`.
 - **Role actions** use active verbs: `PM marks ready`, `developer marks PR ready for review`, `reviewer approves`.
 - **External events** are annotated: `PR merged (external)`, `production deploy (external)`, `measurement window closes (time)`. Cross-process handoffs use `to process X` / `from process X` per principle 9.
-- **Ready states** are named `ready_for_{purpose}`: `ready_for_dev`, `ready_for_experiment`, `ready_for_spike`, `ready_for_rollback`, `ready_for_flag_toggle`, `ready_for_hotfix`, `ready_for_backport`, `ready_for_release_decision`, `ready_for_followups`. Queue semantics (urgency, claim role, SLA) differ across ready variants — the suffix makes that visible.
+- **Ready states** are named `ready_for_{purpose}`: `ready_for_dev`, `ready_for_spike`, `ready_for_hotfix`, `ready_for_mitigation`, `ready_for_config_change`, `ready_for_data_change`, `ready_for_release_decision`, `ready_for_followups`. Queue semantics (urgency, claim role, SLA) differ across ready variants — the suffix makes that visible.
 
 Labels always start with the role performing the action, except external events which describe the system event or inter-process handoff.
 
@@ -59,12 +59,10 @@ The canonical unit of a state machine is a **process**, not an issue type. Proce
 - Inner loop → `inner-loop-states.mermaid`
 - Pull request review → `pr-states.mermaid`
 - Release → `release-states.mermaid`
-- Progressive rollout → `progressive-rollout-states.mermaid`
 - Experimentation → `experimentation-states.mermaid`
 - Incident response → `incident-response-states.mermaid`
 - Mitigation → `mitigation-states.mermaid`
 - Postmortem → `postmortem-states.mermaid`
-- Backport → `backport-states.mermaid`
 
 An issue (issue, PR, release, incident) may pass through multiple processes over its lifetime. At any given moment, it is tracked by exactly one process's state machine. Handoffs between processes use the **shared-state interface pattern** (see principle 9).
 
@@ -86,7 +84,7 @@ Not all terminals are equivalent. Every terminal state must be tagged with one o
 
 | Tag | Meaning | Examples |
 |---|---|---|
-| **shipped** | Work reached users | `released`, `promoted` (exp), `hotfix_applied`, `complete` (rollout), `backported` |
+| **shipped** | Work reached users | `released`, `promoted` (exp), `mitigated`, `config_applied`, `data_change_applied` |
 | **resolved** | Process-complete terminal with no user-facing output (meta-work) | `complete` (postmortem, ADR, retro) |
 | **reverted** | Work reached users then was withdrawn | `rolled_back`, `kill_switched` |
 | **abandoned** | Work was not shipped — stopped on purpose (whether at intake or in flight) | `wont_fix`, `killed` (exp), `aborted` (exp), `abandoned` (release train) |
@@ -127,7 +125,6 @@ Cross-process transitions come in two flavors:
 - Refinement → Inner loop (spike): consultant creates a spike sub-issue; the new issue enters inner-loop as `ready_for_spike`. Refinement does not render `ready_for_spike`.
 - Incident response → Mitigation: IC opens mitigation issues (rollback, flag toggle, hotfix). Those are new issues that start on mitigation.
 - Incident response → Postmortem: postmortem is a new issue spawned when the incident stabilizes.
-- Mitigation → Backport: backport is a new issue spawned when a hotfix needs a backport.
 - Release → Experimentation: `measuring` starts when an experiment issue releases to production. The experiment issue was released as part of a train; after release, experimentation picks it up.
 
 ### Legend requirement
@@ -151,7 +148,7 @@ Concretely:
 - The skill's "Read first" section names the workflow file by filename, with a one-line reason ("the diagram the scripts in this bundle enforce").
 - The same workflow file may be bundled in multiple skills when multiple roles operate on the same process — that is expected, not duplication. The single source of truth is the canonical copy in the project's shared resources; skill bundles are mechanical copies kept in sync by the assemble script.
 
-Skills that operate across multiple processes (multi-mode skills per `skill-authoring-principles.md` principle 6) bundle every workflow their modes touch. A release-manager skill that runs release, progressive-rollout, and backport modes bundles all three diagrams.
+Skills that operate across multiple processes (multi-mode skills per `skill-authoring-principles.md` principle 6) bundle every workflow their modes touch. A release-manager skill that runs release and experimentation modes bundles both diagrams.
 
 A skill whose scripts transition states on a workflow the skill does not bundle is a bug in two directions: the agent has no canonical reference for the contract their scripts enforce, and the skill is silently coupled to a file outside its own bundle.
 

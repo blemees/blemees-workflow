@@ -140,7 +140,7 @@ def emit_mermaid(
 
 def _emit_cross_process_legend(state_machine: StateMachine) -> list[str]:
     handoffs = [s for s in state_machine.states.values() if s.handoff]
-    spawners = [s for s in state_machine.states.values() if s.spawns is not None]
+    spawners = [s for s in state_machine.states.values() if s.spawns]
     if not handoffs and not spawners:
         return []
 
@@ -148,12 +148,12 @@ def _emit_cross_process_legend(state_machine: StateMachine) -> list[str]:
     for s in handoffs:
         lines.append(f"    %%   Handoff: {s.name} (shared resting state)")
     for s in spawners:
-        sp = s.spawns
-        assert sp is not None
-        lines.append(
-            f"    %%   Spawn:   {s.name} → process {sp.process} "
-            f"(issue_type={sp.issue_type}, initial={sp.initial_state})"
-        )
+        for sp in s.spawns:
+            process_label = sp.process or "(derived from initial_state)"
+            lines.append(
+                f"    %%   Spawn:   {s.name} → process {process_label} "
+                f"(issue_type={sp.issue_type}, initial={sp.initial_state})"
+            )
     lines.append("    %%")
     return lines
 

@@ -98,9 +98,14 @@ class Spawn:
     Typical use: postmortem opens when an incident closes.
     """
 
-    process: str            # target process name
-    issue_type: str         # issue type to create on the target
-    initial_state: str      # initial state to create the child at
+    # Target process name. Optional in the authored JSON — when omitted,
+    # the validator resolves it from `initial_state` via the
+    # state-name-uniqueness invariant (every state belongs to exactly
+    # one process, so the initial_state determines the process). When
+    # authored, the validator cross-checks the resolved process matches.
+    process: str | None = None
+    issue_type: str = ""     # issue type to create on the target
+    initial_state: str = ""  # initial state to create the child at
     advance_on: tuple[tuple[str, str], ...] = ()  # (child_terminal, parent_next_state)
 
     def parent_next_state(self, child_terminal: str) -> str | None:
@@ -176,11 +181,17 @@ class State:
     CLAIM transitions to find resting states whose downstream working
     state(s) include role X in `roles`.
 
-    `issue_types` narrows which issue types may occupy this working state.
-    Only valid on working states. Empty = accepts any of the process-level
-    `issue_types` (the umbrella). Each entry must be present in the
-    process-level set (cross-checked by the validator). Runtime: claiming
-    an issue into this state requires the issue's type to be in the set.
+    `issue_types` declares which issue types may occupy this state.
+    Required on working AND resting; forbidden on terminal.
+    - Working: types this state will do work on (claim semantics). The
+      process's umbrella accepted-types set is derived as the union
+      across all working states.
+    - Resting: types that may sit waiting in this state (queue
+      semantics). Must be a subset of the umbrella. Spawn-target resting
+      states typically declare a single type; shared handoff states
+      declare the full set that crosses the interface. The validator
+      checks that any spawn's `issue_type` is in the target resting
+      state's set.
     """
 
     name: str
@@ -204,9 +215,13 @@ class State:
     # arrive from outside, are gathered via collect, or are spawned.
     is_initial: bool = False
     initial_label: str | None = None
-    # Subprocess / spawn contract. Only valid on working or terminal states.
-    # See Spawn docstring for the working-vs-terminal distinction.
-    spawns: Spawn | None = None
+    # Subprocess / spawn contract. Only valid on working / resting /
+    # terminal states. See Spawn docstring for per-class semantics. A
+    # state can declare multiple spawn rules — different kinds of work
+    # to dispatch from the same state, fired ad-hoc by the agent. The
+    # cascade's wait-for-all rule advances the parent only when every
+    # active child issue is in its rule's `advance_on` trigger state.
+    spawns: tuple[Spawn, ...] = ()
     # Fan-in contract — only valid on resting states. See Collects docstring.
     # When set, `create-issue --to <this state>` consults this to compute
     # candidate contributor issues from another process.

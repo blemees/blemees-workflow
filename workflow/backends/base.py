@@ -55,6 +55,16 @@ class IssueState:
     # when this issue isn't a collector or hasn't gathered any
     # contributors yet.
     collects_contributors: tuple[str, ...] = ()
+    # Spawn parent — when this issue was created by another issue via
+    # `spawns`, the parent's id is recorded here (read from a
+    # `parent-of:<parent-id>` label on GitHub). None means this issue
+    # was not spawned by anyone. Used by the cascade-advance logic to
+    # walk back up the spawn chain when a child terminates.
+    parent_of: str | None = None
+    # Spawn children — every issue this issue spawned (one per spawned
+    # child). Populated from `subprocess:<child-id>` labels on GitHub.
+    # Empty when this issue isn't a spawn parent.
+    subprocess_children: tuple[str, ...] = ()
     # Misc
     extras: dict[str, str] = field(default_factory=dict)  # backend-specific extras
 

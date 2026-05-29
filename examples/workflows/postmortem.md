@@ -25,9 +25,9 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `pending` | resting | reversible-slow | — | — | — | — | — |
+| `pending` | resting | reversible-slow | — | postmortem | — | — | — |
 | `drafting` | working | — | product-manager | postmortem | — | — | — |
-| `ready_for_followups` | resting | reversible-fast | — | — | — | — | — |
+| `ready_for_followups` | resting | reversible-fast | — | postmortem | — | — | — |
 | `creating_followups` | working | — | product-manager | postmortem | — | — | — |
 | `complete` | terminal | reversible-slow | — | — | — | resolved | completed |
 

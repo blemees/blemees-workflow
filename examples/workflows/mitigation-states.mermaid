@@ -1,12 +1,14 @@
 stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
-    %%   Handoff: ready_for_hotfix (shared resting state)
+    %%   Spawn:   execute_mitigation → process (derived from initial_state) (issue_type=hotfix, initial=ready_for_hotfix)
+    %%   Spawn:   execute_mitigation → process (derived from initial_state) (issue_type=config-change, initial=ready_for_config_change)
+    %%   Spawn:   execute_mitigation → process (derived from initial_state) (issue_type=data-change, initial=ready_for_data_change)
     %%
 
-    ready_for_mitigation --> applying_mitigation: responder claims mitigation (rollback or flag-toggle)
-    applying_mitigation --> mitigated: responder completes mitigation
+    ready_for_mitigation --> plan_mitigation: responder claims to plan mitigation
+    plan_mitigation --> mitigation_planned: responder finalizes mitigation plan
+    mitigation_planned --> execute_mitigation: responder claims to execute mitigation
+    execute_mitigation --> mitigated: all spawned mitigations complete (auto via wait-for-all cascade)
     mitigated --> [*]: terminal (shipped)
-    [*] --> ready_for_hotfix: handoff
-    ready_for_hotfix --> [*]: handoff
     [*] --> ready_for_mitigation: spawn

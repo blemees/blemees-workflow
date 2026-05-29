@@ -24,6 +24,7 @@ def _minimal() -> dict:
                 "class": "resting",
                 "reversibility": "reversible-fast",
                 "initial": "in",
+                "issue_types": ["bug"],
             },
             "b": {
                 "class": "working",
@@ -204,8 +205,25 @@ def test_spawns_on_working_advance_on_optional() -> None:
         "initial_state": "queue",
     }
     workflow = parse_state_machine(json.dumps(spec))
-    assert workflow.states["b"].spawns is not None
-    assert workflow.states["b"].spawns.advance_on == ()
+    assert workflow.states["b"].spawns
+    assert workflow.states["b"].spawns[0].advance_on == ()
+
+
+def test_spawns_accepts_array_of_rules() -> None:
+    """A state can declare multiple spawn rules. The parser yields a
+    tuple of Spawn objects in authoring order; `process` is optional."""
+    spec = _minimal()
+    spec["states"]["b"]["spawns"] = [
+        {"process": "other", "issue_type": "bug", "initial_state": "queue"},
+        {"issue_type": "feature", "initial_state": "queue2"},
+    ]
+    workflow = parse_state_machine(json.dumps(spec))
+    rules = workflow.states["b"].spawns
+    assert len(rules) == 2
+    assert rules[0].process == "other"
+    assert rules[0].issue_type == "bug"
+    assert rules[1].process is None  # derived later by the validator
+    assert rules[1].issue_type == "feature"
 
 
 def test_legacy_on_terminal_rejected() -> None:
@@ -243,8 +261,8 @@ def test_spawns_allowed_on_resting() -> None:
         "initial_state": "queue",
     }
     workflow = parse_state_machine(json.dumps(spec))
-    assert workflow.states["a"].spawns is not None
-    assert workflow.states["a"].spawns.process == "other"
+    assert workflow.states["a"].spawns
+    assert workflow.states["a"].spawns[0].process == "other"
 
 
 def test_initial_bool_true_marks_state() -> None:
@@ -508,11 +526,11 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     impl = workflow.states["implementing"]
     assert set(impl.issue_types) >= {"bug", "feature", "chore", "experiment", "hotfix"}
     # `implementing` declares a subprocess spawn into the pr process.
-    assert impl.spawns is not None
-    assert impl.spawns.process == "pr"
-    assert impl.spawns.issue_type == "pr"
-    assert impl.spawns.initial_state == "draft"
+    assert impl.spawns
+    assert impl.spawns[0].process == "pr"
+    assert impl.spawns[0].issue_type == "pr"
+    assert impl.spawns[0].initial_state == "draft"
     # PR terminal `merged` → parent inner-loop resting state `staged`.
     # (PR's terminal was renamed from `staged` to `merged` so state names
     # don't collide across processes.)
-    assert impl.spawns.advance_on == (("merged", "staged"),)
+    assert impl.spawns[0].advance_on == (("merged", "staged"),)

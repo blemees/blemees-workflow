@@ -6,7 +6,7 @@ Cut, review, and ship a release train. The release manager assembles a candidate
 
 ## Issue types accepted
 
-- `release` — **Release**: A release-train work item. Tracks one cut through prep → deploy → monitor; experimentation and progressive-rollout are phases that operate on the same release ticket.
+- `release` — **Release**: A release-train work item. Tracks one cut through prep → deploy → monitor; experimentation is a phase that operates on the same release ticket.
 
 ## State diagram
 
@@ -22,8 +22,8 @@ stateDiagram-v2
     gated_nogo --> reviewing_release: PO re-claims deferred train
     gated_nogo --> abandoning: PO claims to abandon train
     abandoning --> abandoned: PO closes train, issues revert to inner-loop.staged for next train
-    deploying --> rolling_out: production deploy completes (external — progressive rollout starts)
-    rolling_out --> ready_for_monitoring: rollout reaches 100% (from process progressive-rollout)
+    deploying --> rolling_out: production deploy completes (external — rollout starts)
+    rolling_out --> ready_for_monitoring: rollout reaches 100% (external monitoring signal)
     ready_for_monitoring --> monitoring: on-call claims post-deploy watch
     monitoring --> released: on-call confirms post-deploy window clean
     monitoring --> rolling_back: on-call triggers rollback
@@ -39,17 +39,17 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `cut` | resting | reversible-slow | — | — | — | — | — |
-| `hotfix_cut` | resting | reversible-fast | — | — | — | — | — |
+| `cut` | resting | reversible-slow | — | release | — | — | — |
+| `hotfix_cut` | resting | reversible-fast | — | release | — | — | — |
 | `preparing` | working | — | release-manager | release | — | — | — |
-| `ready_for_release_decision` | resting | reversible-slow | — | — | — | — | — |
+| `ready_for_release_decision` | resting | reversible-slow | — | release | — | — | — |
 | `reviewing_release` | working | — | product-owner | release | — | — | — |
-| `gated_nogo` | resting | reversible-fast | — | — | — | — | — |
+| `gated_nogo` | resting | reversible-fast | — | release | — | — | — |
 | `abandoning` | working | — | product-owner | release | — | — | — |
 | `abandoned` | terminal | reversible-fast | — | — | — | abandoned | not planned |
-| `deploying` | resting | reversible-slow | — | — | — | — | — |
-| `rolling_out` | resting | reversible-slow | — | — | — | — | — |
-| `ready_for_monitoring` | resting | reversible-slow | — | — | — | — | — |
+| `deploying` | resting | reversible-slow | — | release | — | — | — |
+| `rolling_out` | resting | reversible-slow | — | release | — | — | — |
+| `ready_for_monitoring` | resting | reversible-slow | — | release | — | — | — |
 | `monitoring` | working | — | developer | release | — | — | — |
 | `rolling_back` | working | — | incident-commander, release-manager | release | — | — | — |
 | `rolled_back` | terminal | reversible-slow | — | — | — | reverted | completed |
@@ -68,8 +68,8 @@ stateDiagram-v2
 | `gated_nogo` | `reviewing_release` | claim | 'PO re-claims deferred train' | — | — |
 | `gated_nogo` | `abandoning` | claim | 'PO claims to abandon train' | — | — |
 | `abandoning` | `abandoned` | advance | 'PO closes train, issues revert to inner-loop.staged for next train' | — | — |
-| `deploying` | `rolling_out` | event | 'production deploy completes (external — progressive rollout starts)' | — | — |
-| `rolling_out` | `ready_for_monitoring` | event | 'rollout reaches 100% (from process progressive-rollout)' | — | — |
+| `deploying` | `rolling_out` | event | 'production deploy completes (external — rollout starts)' | — | — |
+| `rolling_out` | `ready_for_monitoring` | event | 'rollout reaches 100% (external monitoring signal)' | — | — |
 | `ready_for_monitoring` | `monitoring` | claim | 'on-call claims post-deploy watch' | — | — |
 | `monitoring` | `released` | advance | 'on-call confirms post-deploy window clean' | — | — |
 | `monitoring` | `rolling_back` | advance | 'on-call triggers rollback' | — | — |

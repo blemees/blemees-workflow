@@ -1,23 +1,64 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "description": "Roll back or feature-flag-off shipped behavior to stop bleeding during an active incident. Branches off incident-response when a revert is the right call.",
+  "description": "Plan and execute a mitigation strategy during an active incident. The responder drafts a plan, then dispatches one or more sub-mitigations — a hotfix, a configuration change, a data change, or any combination — each as a child issue on its own process. `execute_mitigation` declares a multi-spawn rule per mitigation type; the wait-for-all cascade closes this issue at `mitigated` only when every spawned child reaches its respective applied / shipped terminal, which in turn cascades the parent incident to `needs_verification`.",
   "states": {
     "ready_for_mitigation": {
       "class": "resting",
-      "reversibility": "reversible-fast"
-    },
-    "ready_for_hotfix": {
-      "class": "resting",
       "reversibility": "reversible-fast",
-      "handoff": true
+      "issue_types": [
+        "incident-mitigation"
+      ]
     },
-    "applying_mitigation": {
+    "plan_mitigation": {
       "class": "working",
       "roles": [
         "incident-responder"
       ],
       "issue_types": [
-        "incident"
+        "incident-mitigation"
+      ],
+      "human_inputs": [
+        "needs-security-review",
+        "general"
+      ]
+    },
+    "mitigation_planned": {
+      "class": "resting",
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "incident-mitigation"
+      ]
+    },
+    "execute_mitigation": {
+      "class": "working",
+      "roles": [
+        "incident-responder"
+      ],
+      "issue_types": [
+        "incident-mitigation"
+      ],
+      "spawns": [
+        {
+          "issue_type": "hotfix",
+          "initial_state": "ready_for_hotfix",
+          "advance_on": {
+            "shipped": "mitigated"
+          }
+        },
+        {
+          "issue_type": "config-change",
+          "initial_state": "ready_for_config_change",
+          "advance_on": {
+            "config_applied": "mitigated"
+          }
+        },
+        {
+          "issue_type": "data-change",
+          "initial_state": "ready_for_data_change",
+          "advance_on": {
+            "data_change_applied": "mitigated"
+          }
+        }
       ]
     },
     "mitigated": {
@@ -30,15 +71,27 @@
   "transitions": [
     {
       "source": "ready_for_mitigation",
-      "destination": "applying_mitigation",
+      "destination": "plan_mitigation",
       "type": "claim",
-      "label": "responder claims mitigation (rollback or flag-toggle)"
+      "label": "responder claims to plan mitigation"
     },
     {
-      "source": "applying_mitigation",
+      "source": "plan_mitigation",
+      "destination": "mitigation_planned",
+      "type": "advance",
+      "label": "responder finalizes mitigation plan"
+    },
+    {
+      "source": "mitigation_planned",
+      "destination": "execute_mitigation",
+      "type": "claim",
+      "label": "responder claims to execute mitigation"
+    },
+    {
+      "source": "execute_mitigation",
       "destination": "mitigated",
       "type": "advance",
-      "label": "responder completes mitigation"
+      "label": "all spawned mitigations complete (auto via wait-for-all cascade)"
     }
   ]
 }

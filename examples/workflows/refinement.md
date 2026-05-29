@@ -55,16 +55,16 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `raw` | resting | reversible-fast | — | — | — | — | — |
+| `raw` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
 | `refining` | working | — | product-manager | bug, feature, chore, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, general | — | — |
-| `consult_requested` | resting | reversible-fast | — | — | — | — | — |
+| `consult_requested` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
 | `consulting` | working | — | architect, designer, security-engineer | bug, feature, chore, experiment | needs-arch-review, needs-security-review, general | — | — |
-| `consult_complete` | resting | reversible-fast | — | — | — | — | — |
-| `spiking` | resting | reversible-fast | — | — | — | — | — |
-| `spike_returned` | resting | reversible-fast | — | — | — | — | — |
-| `ready_for_dev` | resting | reversible-slow | — | — | — | — | — |
-| `ready_bounced` | resting | reversible-fast | — | — | — | — | — |
-| `deprioritized` | resting | reversible-fast | — | — | — | — | — |
+| `consult_complete` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
+| `spiking` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
+| `spike_returned` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
+| `ready_for_dev` | resting | reversible-slow | — | bug, feature, chore, experiment | — | — | — |
+| `ready_bounced` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
+| `deprioritized` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
 | `duplicate` | terminal | reversible-fast | — | — | — | deduplicated | not planned |
 | `wont_fix` | terminal | reversible-fast | — | — | — | abandoned | not planned |
 

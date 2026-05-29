@@ -1,0 +1,8 @@
+stateDiagram-v2
+    direction TB
+    ready_for_data_change --> creating_backup: responder claims backup creation
+    creating_backup --> backup_ready: responder confirms backup captured and restorable
+    backup_ready --> applying_data_change: responder claims to apply data change
+    applying_data_change --> data_change_applied: responder applies and verifies data change
+    data_change_applied --> [*]: terminal (shipped)
+    [*] --> ready_for_data_change: spawn

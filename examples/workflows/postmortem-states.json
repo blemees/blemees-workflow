@@ -4,7 +4,10 @@
   "states": {
     "pending": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "postmortem"
+      ]
     },
     "drafting": {
       "class": "working",
@@ -17,7 +20,10 @@
     },
     "ready_for_followups": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "postmortem"
+      ]
     },
     "creating_followups": {
       "class": "working",

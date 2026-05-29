@@ -5,6 +5,9 @@
     "cut": {
       "class": "resting",
       "reversibility": "reversible-slow",
+      "issue_types": [
+        "release"
+      ],
       "collects": {
         "process": "inner-loop",
         "from_states": ["staged"],
@@ -18,6 +21,9 @@
     "hotfix_cut": {
       "class": "resting",
       "reversibility": "reversible-fast",
+      "issue_types": [
+        "release"
+      ],
       "collects": {
         "process": "inner-loop",
         "from_states": ["staged"],
@@ -39,7 +45,10 @@
     },
     "ready_for_release_decision": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "release"
+      ]
     },
     "reviewing_release": {
       "class": "working",
@@ -52,7 +61,10 @@
     },
     "gated_nogo": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "release"
+      ]
     },
     "abandoning": {
       "class": "working",
@@ -71,15 +83,24 @@
     },
     "deploying": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "release"
+      ]
     },
     "rolling_out": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "release"
+      ]
     },
     "ready_for_monitoring": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "release"
+      ]
     },
     "monitoring": {
       "class": "working",
@@ -172,13 +193,13 @@
       "source": "deploying",
       "destination": "rolling_out",
       "type": "event",
-      "label": "production deploy completes (external — progressive rollout starts)"
+      "label": "production deploy completes (external — rollout starts)"
     },
     {
       "source": "rolling_out",
       "destination": "ready_for_monitoring",
       "type": "event",
-      "label": "rollout reaches 100% (from process progressive-rollout)"
+      "label": "rollout reaches 100% (external monitoring signal)"
     },
     {
       "source": "ready_for_monitoring",

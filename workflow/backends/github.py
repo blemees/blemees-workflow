@@ -649,6 +649,8 @@ class GitHubBackend:
         human_input: str | None = None
         collected_by: str | None = None
         collects_contributors: list[str] = []
+        parent_of: str | None = None
+        subprocess_children: list[str] = []
         reviewing = False
         auditing = False
         advising = False
@@ -675,6 +677,12 @@ class GitHubBackend:
                 continue
             if label.startswith("collects:"):
                 collects_contributors.append(label[len("collects:") :])
+                continue
+            if label.startswith("parent-of:"):
+                parent_of = label[len("parent-of:") :]
+                continue
+            if label.startswith("subprocess:"):
+                subprocess_children.append(label[len("subprocess:") :])
                 continue
             if not label.startswith("hitl:"):
                 continue
@@ -713,6 +721,8 @@ class GitHubBackend:
             advising=advising,
             collected_by=collected_by,
             collects_contributors=tuple(collects_contributors),
+            parent_of=parent_of,
+            subprocess_children=tuple(subprocess_children),
         )
 
     def _marker_change_to_labels(

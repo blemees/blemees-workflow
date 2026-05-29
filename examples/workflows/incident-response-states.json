@@ -5,7 +5,10 @@
     "declared": {
       "class": "resting",
       "reversibility": "reversible-fast",
-      "initial": "alert / report triggers incident (external)"
+      "initial": "alert / report triggers incident (external)",
+      "issue_types": [
+        "incident"
+      ]
     },
     "triaging": {
       "class": "working",
@@ -18,7 +21,10 @@
     },
     "needs_diagnosis": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "incident"
+      ]
     },
     "diagnosing": {
       "class": "working",
@@ -35,7 +41,10 @@
     },
     "cause_identified": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "incident"
+      ]
     },
     "mitigating": {
       "class": "working",
@@ -52,7 +61,7 @@
       ],
       "spawns": {
         "process": "mitigation",
-        "issue_type": "incident",
+        "issue_type": "incident-mitigation",
         "initial_state": "ready_for_mitigation",
         "advance_on": {
           "mitigated": "needs_verification"
@@ -61,7 +70,10 @@
     },
     "needs_verification": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "incident"
+      ]
     },
     "verifying": {
       "class": "working",

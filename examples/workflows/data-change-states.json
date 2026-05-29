@@ -1,0 +1,77 @@
+{
+  "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Apply a data change as an incident mitigation: corruption repair, manual update, backfill, replay. Backup is mandatory before any mutation — the process serializes `creating_backup` → `backup_ready` → `applying_data_change` so the responder cannot skip the safety net. Spawned from `mitigation.execute_mitigation`, closes at `data_change_applied` to release the parent.",
+  "states": {
+    "ready_for_data_change": {
+      "class": "resting",
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "data-change"
+      ]
+    },
+    "creating_backup": {
+      "class": "working",
+      "roles": [
+        "incident-responder"
+      ],
+      "issue_types": [
+        "data-change"
+      ],
+      "human_inputs": [
+        "general"
+      ]
+    },
+    "backup_ready": {
+      "class": "resting",
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "data-change"
+      ]
+    },
+    "applying_data_change": {
+      "class": "working",
+      "roles": [
+        "incident-responder"
+      ],
+      "issue_types": [
+        "data-change"
+      ],
+      "human_inputs": [
+        "needs-security-review",
+        "general"
+      ]
+    },
+    "data_change_applied": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    }
+  },
+  "transitions": [
+    {
+      "source": "ready_for_data_change",
+      "destination": "creating_backup",
+      "type": "claim",
+      "label": "responder claims backup creation"
+    },
+    {
+      "source": "creating_backup",
+      "destination": "backup_ready",
+      "type": "advance",
+      "label": "responder confirms backup captured and restorable"
+    },
+    {
+      "source": "backup_ready",
+      "destination": "applying_data_change",
+      "type": "claim",
+      "label": "responder claims to apply data change"
+    },
+    {
+      "source": "applying_data_change",
+      "destination": "data_change_applied",
+      "type": "advance",
+      "label": "responder applies and verifies data change"
+    }
+  ]
+}

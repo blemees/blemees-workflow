@@ -31,8 +31,8 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `measuring` | resting | reversible-slow | — | — | — | — | — |
-| `measurement_complete` | resting | reversible-fast | — | — | — | — | — |
+| `measuring` | resting | reversible-slow | — | experiment | — | — | — |
+| `measurement_complete` | resting | reversible-fast | — | experiment | — | — | — |
 | `analyzing` | working | — | product-owner | experiment | — | — | — |
 | `aborting` | working | — | product-owner | experiment | — | — | — |
 | `promoted` | terminal | reversible-slow | — | — | — | shipped | completed |

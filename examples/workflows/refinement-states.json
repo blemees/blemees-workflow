@@ -5,7 +5,13 @@
     "raw": {
       "class": "resting",
       "reversibility": "reversible-fast",
-      "initial": "issue created (external)"
+      "initial": "issue created (external)",
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "refining": {
       "class": "working",
@@ -28,7 +34,13 @@
     },
     "consult_requested": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "consulting": {
       "class": "working",
@@ -51,11 +63,23 @@
     },
     "consult_complete": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "spiking": {
       "class": "resting",
       "reversibility": "reversible-fast",
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ],
       "spawns": {
         "process": "inner-loop",
         "issue_type": "spike",
@@ -67,21 +91,45 @@
     },
     "spike_returned": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "ready_for_dev": {
       "class": "resting",
       "reversibility": "reversible-slow",
-      "handoff": true
+      "handoff": true,
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "ready_bounced": {
       "class": "resting",
       "reversibility": "reversible-fast",
-      "handoff": true
+      "handoff": true,
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "deprioritized": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "duplicate": {
       "class": "terminal",

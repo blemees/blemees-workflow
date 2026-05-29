@@ -4,11 +4,17 @@
   "states": {
     "measuring": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "experiment"
+      ]
     },
     "measurement_complete": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "experiment"
+      ]
     },
     "analyzing": {
       "class": "working",

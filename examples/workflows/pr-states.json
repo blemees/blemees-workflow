@@ -1,10 +1,13 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "description": "The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state; the same workflow handles independent PRs (e.g., backports).",
+  "description": "The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state.",
   "states": {
     "draft": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "pr"
+      ]
     },
     "drafting": {
       "class": "working",
@@ -18,7 +21,10 @@
     "needs_review": {
       "class": "resting",
       "reversibility": "reversible-fast",
-      "mark_pr_ready": true
+      "mark_pr_ready": true,
+      "issue_types": [
+        "pr"
+      ]
     },
     "reviewing": {
       "class": "working",
@@ -35,7 +41,10 @@
     },
     "changes_requested": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "pr"
+      ]
     },
     "fixing_review": {
       "class": "working",
@@ -52,7 +61,10 @@
     },
     "needs_qa": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "pr"
+      ]
     },
     "verifying": {
       "class": "working",
@@ -65,11 +77,17 @@
     },
     "qa_passed": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "pr"
+      ]
     },
     "qa_failed": {
       "class": "resting",
-      "reversibility": "reversible-fast"
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "pr"
+      ]
     },
     "fixing_qa": {
       "class": "working",

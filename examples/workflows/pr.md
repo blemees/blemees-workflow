@@ -1,12 +1,12 @@
 # Process: pr
 
-The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state; the same workflow handles independent PRs (e.g., backports).
+The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state.
 
 > Defined in: `pr-states.json`
 
 ## Issue types accepted
 
-- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
+- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
 
 ## State diagram
 
@@ -37,16 +37,16 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `draft` | resting | reversible-fast | — | — | — | — | — |
+| `draft` | resting | reversible-fast | — | pr | — | — | — |
 | `drafting` | working | — | developer | pr | — | — | — |
-| `needs_review` | resting | reversible-fast | — | — | — | — | — |
+| `needs_review` | resting | reversible-fast | — | pr | — | — | — |
 | `reviewing` | working | — | peer-reviewer | pr | needs-security-review, general | — | — |
-| `changes_requested` | resting | reversible-fast | — | — | — | — | — |
+| `changes_requested` | resting | reversible-fast | — | pr | — | — | — |
 | `fixing_review` | working | — | developer | pr | clarify-scope, general | — | — |
-| `needs_qa` | resting | reversible-fast | — | — | — | — | — |
+| `needs_qa` | resting | reversible-fast | — | pr | — | — | — |
 | `verifying` | working | — | tester | pr | — | — | — |
-| `qa_passed` | resting | reversible-fast | — | — | — | — | — |
-| `qa_failed` | resting | reversible-fast | — | — | — | — | — |
+| `qa_passed` | resting | reversible-fast | — | pr | — | — | — |
+| `qa_failed` | resting | reversible-fast | — | pr | — | — | — |
 | `fixing_qa` | working | — | developer | pr | — | — | — |
 | `merging` | working | — | developer | pr | — | — | — |
 | `merged` | terminal | reversible-slow | — | — | — | shipped | completed |

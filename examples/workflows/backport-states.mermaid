@@ -1,8 +1,0 @@
-stateDiagram-v2
-    direction TB
-    ready_for_backport --> cherry_picking: developer claims backport
-    cherry_picking --> backport_pr_review: developer opens backport PR (spawns PR on process pr-review)
-    backport_pr_review --> backport_merged: from process pr-review (backport PR merged to release branch)
-    backport_merged --> patch_releasing: patch release triggered (spawns patch train on process release, IC bypass of release gate)
-    patch_releasing --> backported: from process release (patch deployed to production)
-    backported --> [*]: terminal (shipped)

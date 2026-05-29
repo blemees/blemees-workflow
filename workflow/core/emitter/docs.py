@@ -236,21 +236,53 @@ def emit_process_map(processes: list[Any]) -> str:
     if not sorted_processes:
         return "\n".join(lines) + "\n"
 
+    # Build a state-name → process-name map so spawns omitting `process`
+    # still resolve. Used throughout the rest of this function.
+    state_to_process: dict[str, str] = {}
+    for p in sorted_processes:
+        for state_name in p.state_machine.states:
+            state_to_process[state_name] = p.process_name
+
+    def _spawn_process(sp: Any) -> str | None:
+        return sp.process or state_to_process.get(sp.initial_state)
+
     # A terminal that's named as a `spawn.advance_on` key on some other
     # process is a "feedback terminal" — the spawn child closes here,
     # then the parent process advances. From the workflow flow's
     # perspective the work continues in the parent; that's a feedback
     # signal, not a true workflow exit. Build the set so we can skip
     # exit edges for these.
+    #
+    # Same logic applies to a collector's own terminals: a `collects`
+    # declaration names `advance_on` keys (collector terminals that fan
+    # contributors forward) and `release_on` entries (collector
+    # terminals that release contributors back to candidacy). Both kinds
+    # cascade work into the contributor process — they aren't "the
+    # workflow ends here," they're "the collection now propagates."
     feedback_terminals_by_process: dict[str, set[str]] = {}
     for p in sorted_processes:
         for s in p.state_machine.states.values():
-            if s.spawns is None:
-                continue
-            for child_terminal, _parent_next in s.spawns.advance_on:
-                feedback_terminals_by_process.setdefault(
-                    s.spawns.process, set()
-                ).add(child_terminal)
+            for sp in s.spawns:
+                target_proc = _spawn_process(sp)
+                if target_proc is None:
+                    continue
+                for child_terminal, _parent_next in sp.advance_on:
+                    feedback_terminals_by_process.setdefault(
+                        target_proc, set()
+                    ).add(child_terminal)
+            if s.collects is not None:
+                # Collector lives on THIS process; its advance_on /
+                # release_on keys are this process's own states (the
+                # collector's terminals/restings that trigger fan-out
+                # to the contributor process).
+                for collector_state, _ in s.collects.advance_on:
+                    feedback_terminals_by_process.setdefault(
+                        p.process_name, set()
+                    ).add(collector_state)
+                for collector_state in s.collects.release_on:
+                    feedback_terminals_by_process.setdefault(
+                        p.process_name, set()
+                    ).add(collector_state)
 
     # Identify external entry / exit.
     entry_edges: list[tuple[str, str]] = []  # (process_name, destination_state)
@@ -261,6 +293,14 @@ def emit_process_map(processes: list[Any]) -> str:
             if s.is_initial:
                 entry_edges.append((p.process_name, s.name))
             if s.state_class is StateClass.TERMINAL and s.name not in feedback_terminals:
+                # A terminal that spawns a follow-up issue isn't really an
+                # exit — the work is superseded by the child item, not
+                # closed off. The spawn edge (drawn elsewhere as
+                # `process → target: ᐉ <state>`) already communicates the
+                # continuation, so suppress the `[*]` sink to avoid the
+                # misleading "this just ends" reading.
+                if s.spawns:
+                    continue
                 exit_edges.append((p.process_name, s.name))
     entry_edges.sort()
     exit_edges.sort()
@@ -317,13 +357,17 @@ def emit_process_map(processes: list[Any]) -> str:
 
     # Spawns. Label shows only the parent state (where the spawn fires);
     # the child's initial state is visible on the child process's own
-    # diagram via its `[*] --> <initial>: spawn` arrow.
-    for p in processes:
+    # diagram via its `[*] --> <initial>: spawn` arrow. A state may
+    # declare multiple spawn rules — emit one edge per (parent_state,
+    # target_process) pair; ties are deduped via the set.
+    for p in sorted_processes:
         for s in p.state_machine.states.values():
-            if s.spawns is None:
-                continue
-            label = f"ᐉ {s.name}"
-            cross_edges.add((p.process_name, s.spawns.process, label))
+            for sp in s.spawns:
+                target_proc = _spawn_process(sp)
+                if target_proc is None:
+                    continue
+                label = f"ᐉ {s.name}"
+                cross_edges.add((p.process_name, target_proc, label))
 
     # Collects.
     # Collect label shows only the collector (target) state; the source's
@@ -347,13 +391,15 @@ def emit_process_map(processes: list[Any]) -> str:
     # at a state listed in the spawn's `advance_on`, the parent
     # auto-advances. Label shows only the parent's new state; check the
     # child process's own diagram for the triggering terminal.
-    for p in processes:
+    for p in sorted_processes:
         for s in p.state_machine.states.values():
-            if s.spawns is None:
-                continue
-            for _child_terminal, parent_next in s.spawns.advance_on:
-                label = f"⊡ {parent_next}"
-                cross_edges.add((s.spawns.process, p.process_name, label))
+            for sp in s.spawns:
+                target_proc = _spawn_process(sp)
+                if target_proc is None:
+                    continue
+                for _child_terminal, parent_next in sp.advance_on:
+                    label = f"⊡ {parent_next}"
+                    cross_edges.add((target_proc, p.process_name, label))
 
     # Collector → contributor feedback. The inverse of collect's data
     # flow: when the collector enters a listed state, contributors
@@ -654,7 +700,7 @@ def _section_human_gates(
 
 def _section_cross_process(sm: StateMachine) -> list[str]:
     handoffs = [s for s in sm.states.values() if s.handoff]
-    spawners = [s for s in sm.states.values() if s.spawns is not None]
+    spawners = [s for s in sm.states.values() if s.spawns]
     collectors = [s for s in sm.states.values() if s.collects is not None]
     if not handoffs and not spawners and not collectors:
         return []
@@ -669,18 +715,18 @@ def _section_cross_process(sm: StateMachine) -> list[str]:
         out.append("**Spawns** (states that create child issues on other processes):")
         out.append("")
         for s in spawners:
-            sp = s.spawns
-            assert sp is not None
             kind = "subprocess" if s.state_class is StateClass.WORKING else "independent"
-            head = (
-                f"- `{s.name}` ({kind}) → process `{sp.process}` "
-                f"as `{sp.issue_type}` issue at `{sp.initial_state}`"
-            )
-            out.append(head)
-            for child_term, parent_next in sp.advance_on:
-                out.append(
-                    f"    - on child `{child_term}` → parent `{parent_next}`"
+            for sp in s.spawns:
+                process_label = sp.process or "(derived from initial_state)"
+                head = (
+                    f"- `{s.name}` ({kind}) → process `{process_label}` "
+                    f"as `{sp.issue_type}` issue at `{sp.initial_state}`"
                 )
+                out.append(head)
+                for child_term, parent_next in sp.advance_on:
+                    out.append(
+                        f"    - on child `{child_term}` → parent `{parent_next}`"
+                    )
         out.append("")
     if collectors:
         out.append(

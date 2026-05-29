@@ -409,6 +409,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="(PR-typed spawns only) Target branch.",
     )
+    p_spawn_issue.add_argument(
+        "--issue-type",
+        dest="spawn_issue_type",
+        default=None,
+        help="Disambiguator when the parent state declares multiple spawn "
+        "rules. Picks the rule whose `issue_type` matches. Required when "
+        "multiple rules exist and `--initial-state` doesn't uniquely "
+        "identify one.",
+    )
+    p_spawn_issue.add_argument(
+        "--initial-state",
+        dest="spawn_initial_state",
+        default=None,
+        help="Further disambiguator when multiple spawn rules share the "
+        "same `issue_type` but target different `initial_state`s on the "
+        "destination process.",
+    )
     _add_body_args(p_spawn_issue, required=False)
     p_spawn_issue.set_defaults(func=_do_spawn_issue)
 
@@ -1080,12 +1097,23 @@ def _build_context_for_issue(
 def _build_controller(context: Process, dry_run: bool) -> Controller:
     if context.backend is None:
         raise ConfigError("No backend configured for controller execution.")
+    # The cascade pass needs the full registry to look up sibling-process
+    # spawn / collect definitions. Discover it the same way we discover
+    # the per-process context.
+    from workflow.config import build_registry
+    registry = build_registry(
+        agent_home=context.agent_home,
+        workflow_dir=context.workflow_dir,
+        backend=context.backend,
+        grants_dir=None,
+    )
     return Controller(
         backend=context.backend,
         state_machine=context.state_machine,
         catalog=context.catalog,
         grants=context.grants,
         dry_run=dry_run,
+        registry=registry,
     )
 
 
@@ -1434,9 +1462,13 @@ def _propagate_to_parent_on_terminal(
             return
         parent_ctx = registry.get_process(parent_process)
         parent_state_decl = parent_ctx.state_machine.states.get(parent_now.state)
-        if parent_state_decl is None or parent_state_decl.spawns is None:
+        if parent_state_decl is None or not parent_state_decl.spawns:
             return
-        parent_next = parent_state_decl.spawns.parent_next_state(child_destination)
+        parent_next: str | None = None
+        for sp in parent_state_decl.spawns:
+            parent_next = sp.parent_next_state(child_destination)
+            if parent_next is not None:
+                break
         if parent_next is None:
             print(
                 f"  (parent #{parent_id} not auto-advanced: child terminal "
@@ -1576,15 +1608,58 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
             )
         parent_ctx = registry.get_process(parent_process)
         sm_state = parent_ctx.state_machine.states.get(parent_state.state)
-        if sm_state is None or sm_state.spawns is None:
+        if sm_state is None or not sm_state.spawns:
             raise ConfigError(
                 f"State {parent_state.state!r} has no `spawns` config; "
                 f"nothing to spawn from here."
             )
-        spawn = sm_state.spawns
+        # Pick the spawn rule. With one rule it's unambiguous. With
+        # multiple, the author must disambiguate via --issue-type and,
+        # if still tied (same type, different initial_state),
+        # --initial-state.
+        candidates = list(sm_state.spawns)
+        if args.spawn_issue_type is not None:
+            candidates = [c for c in candidates if c.issue_type == args.spawn_issue_type]
+        if args.spawn_initial_state is not None:
+            candidates = [c for c in candidates if c.initial_state == args.spawn_initial_state]
+        if not candidates:
+            available = [
+                f"(issue_type={sp.issue_type!r}, initial_state={sp.initial_state!r})"
+                for sp in sm_state.spawns
+            ]
+            raise ConfigError(
+                f"State {parent_state.state!r} has no spawn rule matching "
+                f"--issue-type={args.spawn_issue_type!r} "
+                f"--initial-state={args.spawn_initial_state!r}. Available: "
+                f"{', '.join(available)}"
+            )
+        if len(candidates) > 1:
+            available = [
+                f"(issue_type={sp.issue_type!r}, initial_state={sp.initial_state!r})"
+                for sp in candidates
+            ]
+            raise ConfigError(
+                f"State {parent_state.state!r} has {len(candidates)} spawn "
+                f"rules matching the filter. Disambiguate with --issue-type "
+                f"and/or --initial-state. Candidates: {', '.join(available)}"
+            )
+        spawn = candidates[0]
+
+        # Resolve process — author may have omitted it. Derive from
+        # initial_state via registry (every state belongs to exactly
+        # one process).
+        spawn_process_name = spawn.process or registry.find_process_for_state(
+            spawn.initial_state
+        )
+        if spawn_process_name is None:
+            raise ConfigError(
+                f"State {parent_state.state!r}: spawn's `initial_state` "
+                f"{spawn.initial_state!r} does not resolve to any known "
+                f"process. Check the workflows directory."
+            )
 
         # Resolve child issue type to determine entity (issue vs PR).
-        target_ctx = registry.get_process(spawn.process)
+        target_ctx = registry.get_process(spawn_process_name)
         type_entry = None
         if target_ctx.issue_type_directory is not None:
             try:
@@ -1610,7 +1685,7 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
         body = user_body.rstrip() + footer
 
         if ctx["dry_run"]:
-            print(f"[dry-run] would spawn child on process {spawn.process!r}:")
+            print(f"[dry-run] would spawn child on process {spawn_process_name!r}:")
             print(f"  parent:        #{args.issue} (state {parent_state.state!r})")
             print(f"  issue_type:    {spawn.issue_type}")
             print(f"  initial_state: {spawn.initial_state}")
@@ -1661,13 +1736,13 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
             print(_json.dumps({
                 "parent": args.issue,
                 "child": child_id,
-                "process": spawn.process,
+                "process": spawn_process_name,
                 "issue_type": spawn.issue_type,
                 "initial_state": spawn.initial_state,
             }, indent=2))
         else:
             print(
-                f"Spawned child #{child_id} on process {spawn.process!r} "
+                f"Spawned child #{child_id} on process {spawn_process_name!r} "
                 f"(issue_type={spawn.issue_type}, state={spawn.initial_state}) "
                 f"from parent #{args.issue}."
             )
@@ -3000,15 +3075,23 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
 
     # Compute spawn-targets per process: for each sibling's `spawns`,
     # record the destination process's `initial_state` so its diagram
-    # gets a `[*] --> state: spawn` arrow.
+    # gets a `[*] --> state: spawn` arrow. Resolve the target process
+    # via the state-name-uniqueness invariant when the author omits
+    # `process`.
+    state_to_process: dict[str, str] = {}
+    for p in processes_loaded:
+        for state_name in p.state_machine.states:
+            state_to_process[state_name] = p.process_name
     spawn_targets_by_process: dict[str, set[str]] = {}
     for p in processes_loaded:
         for s in p.state_machine.states.values():
-            if s.spawns is None:
-                continue
-            spawn_targets_by_process.setdefault(s.spawns.process, set()).add(
-                s.spawns.initial_state
-            )
+            for sp in s.spawns:
+                target_proc = sp.process or state_to_process.get(sp.initial_state)
+                if target_proc is None:
+                    continue
+                spawn_targets_by_process.setdefault(target_proc, set()).add(
+                    sp.initial_state
+                )
 
     # Second pass: emit mermaid + markdown per process now that
     # cross-process info is available.

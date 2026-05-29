@@ -6,7 +6,7 @@ Entries agents may invoke `request-input` on. Working states opt-in by listing i
 
 Catch-all for off-catalog questions. Use when none of the specialised topics fits — but prefer a specialised topic when one applies, so the human operator can read the queue at a glance.
 
-- **Declared on**: `incident-response.diagnosing`, `incident-response.mitigating`, `inner-loop.implementing`, `inner-loop.implementing_spike`, `pr.fixing_review`, `pr.reviewing`, `refinement.consulting`, `refinement.refining` _(derived)_
+- **Declared on**: `config-change.applying_config_change`, `data-change.applying_data_change`, `data-change.creating_backup`, `incident-response.diagnosing`, `incident-response.mitigating`, `inner-loop.implementing`, `inner-loop.implementing_spike`, `mitigation.plan_mitigation`, `pr.fixing_review`, `pr.reviewing`, `refinement.consulting`, `refinement.refining` _(derived)_
 
 ## `clarify-scope` — Clarify scope
 
@@ -24,7 +24,7 @@ A cross-module impact or non-trivial design choice the agent isn't comfortable m
 
 Auth, secrets, PII, threat-model, or supply-chain implications. Operator escalates to the security engineer.
 
-- **Declared on**: `incident-response.mitigating`, `inner-loop.implementing`, `pr.reviewing`, `refinement.consulting`, `refinement.refining` _(derived)_
+- **Declared on**: `data-change.applying_data_change`, `incident-response.mitigating`, `inner-loop.implementing`, `mitigation.plan_mitigation`, `pr.reviewing`, `refinement.consulting`, `refinement.refining` _(derived)_
 
 ## `needs-ux-input` — Needs UX input
 

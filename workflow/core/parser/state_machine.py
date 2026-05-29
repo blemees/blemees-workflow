@@ -69,10 +69,15 @@ same convention: `<process>-human-gates.json`.
   lives on the working state, not on the resting queue it's claimed from.
   Resting states are open queues; downstream working states declare who
   may pick items up.
-- `issue_types` (list of strings, optional): subset of the process-level
-  `issue_types` this working state accepts. Only valid on working states.
-  Empty / absent = accepts any process-level type. The validator
-  cross-checks that every entry is in the process-level set.
+- `issue_types` (list of strings): the issue types that may occupy this
+  state. Required on working AND resting states; forbidden on terminal.
+  - Working: types this state will actually do work on (claim semantics).
+    The process's umbrella accepted-types set is derived as the union
+    across all working states.
+  - Resting: types that may sit waiting in this state (queue semantics).
+    Must be a subset of the process's umbrella. Spawn-target resting
+    states typically declare a single type; shared handoff states
+    declare the full set that crosses the interface.
 - `notes` (list of strings, optional): free prose for the emitter to render
   alongside the state. Not parsed for semantics — structured metadata goes
   in the typed fields above.
@@ -374,15 +379,22 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
                 f"State {state_id!r}: duplicate type {cleaned!r} in `issue_types`."
             )
         state_issue_types_parsed.append(cleaned)
-    if state_issue_types_parsed and state_class is not StateClass.WORKING:
+    if state_issue_types_parsed and state_class is StateClass.TERMINAL:
         raise ParseError(
-            f"State {state_id!r}: `issue_types` is only valid on working "
-            f"states (state class is {state_class.value!r})."
+            f"State {state_id!r}: `issue_types` is not valid on terminal "
+            f"states (a closed issue is no longer 'occupying' the state)."
         )
     if state_class is StateClass.WORKING and not state_issue_types_parsed:
         raise ParseError(
             f"State {state_id!r}: `issue_types` is required on working "
             f"states (declare which issue types this state accepts)."
+        )
+    if state_class is StateClass.RESTING and not state_issue_types_parsed:
+        raise ParseError(
+            f"State {state_id!r}: `issue_types` is required on resting "
+            f"states (declare which issue types may sit in this state). "
+            f"Use the subset of the process's working-state types that "
+            f"can pass through here."
         )
     state_issue_types = tuple(state_issue_types_parsed)
 
@@ -499,8 +511,13 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
 
 def _parse_spawns(
     state_id: str, state_class: StateClass, raw: Any
-) -> Spawn | None:
+) -> tuple[Spawn, ...]:
     """Parse the optional `spawns` field on any non-`[*]` state.
+
+    Accepts either:
+    - A single spawn object (the historical shape).
+    - An array of spawn objects (multi-spawn — one rule per kind of
+      work the agent can dispatch from this state).
 
     Working and resting states may declare `advance_on` (selective auto-
     advance on the listed child terminals; everything else keeps the
@@ -508,37 +525,68 @@ def _parse_spawns(
     states (event-style transition; no claim). Terminal states forbid
     `advance_on` (the parent is already closed). Cross-state-class
     validation of `advance_on` targets lives in the validator.
+
+    `process` is optional now — when omitted, the validator resolves it
+    from `initial_state` via the registry's state-name uniqueness
+    invariant. When supplied, the validator cross-checks the resolved
+    process matches.
     """
     if raw is None:
-        return None
+        return ()
+    if isinstance(raw, dict):
+        return (_parse_one_spawn(state_id, state_class, raw, 0),)
+    if not isinstance(raw, list):
+        raise ParseError(
+            f"State {state_id!r}: `spawns` must be an object or a list of "
+            f"objects (got {type(raw).__name__})."
+        )
+    if not raw:
+        raise ParseError(
+            f"State {state_id!r}: `spawns` list is empty. Use omitted/null "
+            f"to declare no spawns; an empty list is ambiguous."
+        )
+    return tuple(
+        _parse_one_spawn(state_id, state_class, item, idx)
+        for idx, item in enumerate(raw)
+    )
+
+
+def _parse_one_spawn(
+    state_id: str, state_class: StateClass, raw: Any, idx: int
+) -> Spawn:
     if not isinstance(raw, dict):
         raise ParseError(
-            f"State {state_id!r}: `spawns` must be an object "
+            f"State {state_id!r}: `spawns[{idx}]` must be an object "
             f"(got {type(raw).__name__})."
         )
     # Reject the legacy field outright so authors don't carry the field
     # forward with the now-different semantic.
     if "on_terminal" in raw:
         raise ParseError(
-            f"State {state_id!r}: `spawns.on_terminal` was renamed to "
+            f"State {state_id!r}: `spawns[{idx}].on_terminal` was renamed to "
             f"`spawns.advance_on`, and the semantic changed: the map is "
             f"now SELECTIVE (advance parent only on these child terminals; "
             f"others keep the parent put), not exhaustive."
         )
-    process = raw.get("process")
-    if not isinstance(process, str) or not process.strip():
-        raise ParseError(
-            f"State {state_id!r}: `spawns.process` is required (target process name)."
-        )
+    process_raw = raw.get("process")
+    process: str | None = None
+    if process_raw is not None:
+        if not isinstance(process_raw, str) or not process_raw.strip():
+            raise ParseError(
+                f"State {state_id!r}: `spawns[{idx}].process` must be a "
+                f"non-empty string if present."
+            )
+        process = process_raw.strip()
     issue_type = raw.get("issue_type")
     if not isinstance(issue_type, str) or not issue_type.strip():
         raise ParseError(
-            f"State {state_id!r}: `spawns.issue_type` is required (child issue type)."
+            f"State {state_id!r}: `spawns[{idx}].issue_type` is required "
+            f"(child issue type)."
         )
     initial_state = raw.get("initial_state")
     if not isinstance(initial_state, str) or not initial_state.strip():
         raise ParseError(
-            f"State {state_id!r}: `spawns.initial_state` is required "
+            f"State {state_id!r}: `spawns[{idx}].initial_state` is required "
             f"(child's starting state)."
         )
 
@@ -547,33 +595,33 @@ def _parse_spawns(
     if state_class is StateClass.TERMINAL:
         if advance_on_raw is not None:
             raise ParseError(
-                f"State {state_id!r}: `spawns.advance_on` is not valid on "
-                f"terminal-state spawns (the parent is already closed). "
+                f"State {state_id!r}: `spawns[{idx}].advance_on` is not valid "
+                f"on terminal-state spawns (the parent is already closed). "
                 f"Remove the field for an independent spawn."
             )
     else:
         if advance_on_raw is not None:
             if not isinstance(advance_on_raw, dict):
                 raise ParseError(
-                    f"State {state_id!r}: `spawns.advance_on` must be an "
-                    f"object mapping {{child-terminal: parent-next-state}} "
+                    f"State {state_id!r}: `spawns[{idx}].advance_on` must be "
+                    f"an object mapping {{child-terminal: parent-next-state}} "
                     f"if present."
                 )
             for k, v in advance_on_raw.items():
                 if not isinstance(k, str) or not k.strip():
                     raise ParseError(
-                        f"State {state_id!r}: `spawns.advance_on` keys must "
-                        f"be child terminal state names (got {k!r})."
+                        f"State {state_id!r}: `spawns[{idx}].advance_on` keys "
+                        f"must be child terminal state names (got {k!r})."
                     )
                 if not isinstance(v, str) or not v.strip():
                     raise ParseError(
-                        f"State {state_id!r}: `spawns.advance_on[{k!r}]` must "
-                        f"be a parent state name (got {v!r})."
+                        f"State {state_id!r}: `spawns[{idx}].advance_on[{k!r}]"
+                        f"` must be a parent state name (got {v!r})."
                     )
                 advance_on.append((k.strip(), v.strip()))
 
     return Spawn(
-        process=process.strip(),
+        process=process,
         issue_type=issue_type.strip(),
         initial_state=initial_state.strip(),
         advance_on=tuple(advance_on),

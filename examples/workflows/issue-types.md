@@ -40,15 +40,33 @@ Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Re
 
 ## `pr` — Pull Request
 
-A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, hotfix + backports, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
+A proposed code change. Spawned by a developer running `gh pr create` from inner-loop's implementing state. One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). Not created via `workflow create-issue`; the framework recognises it for cross-process modelling and documentation.
 
 **GitHub entity**: pull request (no native Issue Type)
 
 ## `incident` — Incident
 
-Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
+Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident-mitigation`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
 
 **GitHub Issue Type**: `Incident` · **Color**: `red`
+
+## `incident-mitigation` — Incident mitigation
+
+A mitigation work item spawned from an incident. The responder drafts a plan in `plan_mitigation` and then in `execute_mitigation` dispatches one or more sub-mitigations (any combination of `hotfix`, `config-change`, `data-change`) as child issues on their respective processes. Tied to the parent incident via `parent-of:<incident>`. Closes at `mitigated` only when every spawned child reaches its applied / shipped terminal — wait-for-all — at which point the parent incident cascades to `needs_verification`.
+
+**GitHub Issue Type**: `Incident mitigation` · **Color**: `orange`
+
+## `config-change` — Config change
+
+A runtime configuration change applied as part of an incident mitigation: feature-flag toggle, kill switch, config-value tweak, rate-limit adjustment. No code change, no PR. Tied to the parent incident-mitigation via `parent-of:<incident-mitigation>`. Closes at `config_applied`, cascading the parent mitigation toward `mitigated`.
+
+**GitHub Issue Type**: `Config change` · **Color**: `yellow`
+
+## `data-change` — Data change
+
+A data mutation applied as part of an incident mitigation: corruption repair, manual update, backfill, event replay. Always preceded by a backup step (`creating_backup` → `backup_ready`) — the workflow enforces the safety net. Tied to the parent incident-mitigation via `parent-of:<incident-mitigation>`. Closes at `data_change_applied`, cascading the parent mitigation toward `mitigated`.
+
+**GitHub Issue Type**: `Data change` · **Color**: `purple`
 
 ## `postmortem` — Postmortem
 
@@ -58,12 +76,6 @@ Post-incident review work. Spawned at `incident.stabilized`; owns the narrative,
 
 ## `release` — Release
 
-A release-train work item. Tracks one cut through prep → deploy → monitor; experimentation and progressive-rollout are phases that operate on the same release ticket.
+A release-train work item. Tracks one cut through prep → deploy → monitor; experimentation is a phase that operates on the same release ticket.
 
 **GitHub Issue Type**: `Release` · **Color**: `blue`
-
-## `backport` — Backport
-
-Port of an already-merged change onto a release/patch branch. Distinct from a regular bug/hotfix because the work is mechanical (cherry-pick + verify), not net-new.
-
-**GitHub Issue Type**: `Backport` · **Color**: `yellow`

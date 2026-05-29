@@ -20,7 +20,6 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Handoff: ready_for_dev (shared resting state)
-    %%   Handoff: ready_for_hotfix (shared resting state)
     %%   Handoff: ready_bounced (shared resting state)
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
     %%
@@ -35,8 +34,8 @@ stateDiagram-v2
     shipped --> [*]: terminal (shipped)
     spike_completed --> [*]: terminal (resolved)
     [*] --> ready_for_dev: handoff
-    [*] --> ready_for_hotfix: handoff
     ready_bounced --> [*]: handoff
+    [*] --> ready_for_hotfix: spawn
     [*] --> ready_for_spike: spawn
 ```
 
@@ -44,15 +43,15 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `ready_for_dev` | resting | reversible-slow | — | — | — | — | — |
-| `ready_for_spike` | resting | reversible-slow | — | — | — | — | — |
-| `ready_for_hotfix` | resting | reversible-fast | — | — | — | — | — |
+| `ready_for_dev` | resting | reversible-slow | — | bug, feature, chore, experiment | — | — | — |
+| `ready_for_spike` | resting | reversible-slow | — | spike | — | — | — |
+| `ready_for_hotfix` | resting | reversible-fast | — | hotfix | — | — | — |
 | `implementing` | working | — | developer | bug, feature, chore, experiment, hotfix | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
 | `implementing_spike` | working | — | developer | spike | clarify-scope, needs-arch-review, general | — | — |
-| `staged` | resting | reversible-slow | — | — | — | — | — |
+| `staged` | resting | reversible-slow | — | bug, feature, chore, experiment, hotfix | — | — | — |
 | `shipped` | terminal | reversible-slow | — | — | — | shipped | completed |
 | `spike_completed` | terminal | reversible-fast | — | — | — | resolved | completed |
-| `ready_bounced` | resting | reversible-fast | — | — | — | — | — |
+| `ready_bounced` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
 
 ## Transitions
 
@@ -71,7 +70,6 @@ stateDiagram-v2
 **Handoff states** (shared resting states declared in ≥2 processes):
 
 - `ready_for_dev` — interface state, also declared by the partner process(es).
-- `ready_for_hotfix` — interface state, also declared by the partner process(es).
 - `ready_bounced` — interface state, also declared by the partner process(es).
 
 **Spawns** (states that create child issues on other processes):

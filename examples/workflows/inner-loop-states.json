@@ -5,16 +5,27 @@
     "ready_for_dev": {
       "class": "resting",
       "reversibility": "reversible-slow",
-      "handoff": true
+      "handoff": true,
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     },
     "ready_for_spike": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "spike"
+      ]
     },
     "ready_for_hotfix": {
       "class": "resting",
       "reversibility": "reversible-fast",
-      "handoff": true
+      "issue_types": [
+        "hotfix"
+      ]
     },
     "implementing": {
       "class": "working",
@@ -60,7 +71,14 @@
     },
     "staged": {
       "class": "resting",
-      "reversibility": "reversible-slow"
+      "reversibility": "reversible-slow",
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment",
+        "hotfix"
+      ]
     },
     "shipped": {
       "class": "terminal",
@@ -77,7 +95,13 @@
     "ready_bounced": {
       "class": "resting",
       "reversibility": "reversible-fast",
-      "handoff": true
+      "handoff": true,
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment"
+      ]
     }
   },
   "transitions": [

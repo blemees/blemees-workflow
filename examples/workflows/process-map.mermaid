@@ -1,39 +1,37 @@
 stateDiagram-v2
     direction LR
 
+    state "config-change" as config_change
+    state "data-change" as data_change
     state "incident-response" as incident_response
     state "inner-loop" as inner_loop
-    state "progressive-rollout" as progressive_rollout
 
     [*] --> incident_response: ▶ declared
     [*] --> refinement: ▶ raw
+    config_change --> mitigation: ⊡ mitigated
+    data_change --> mitigation: ⊡ mitigated
     incident_response --> mitigation: ᐉ mitigating
     incident_response --> postmortem: ᐉ stabilized
+    inner_loop --> mitigation: ⊡ mitigated
     inner_loop --> pr: ᐉ implementing
     inner_loop --> refinement: ⊙ ready_bounced
     inner_loop --> refinement: ⊡ spike_returned
     inner_loop --> release: ꘜ cut [bug,feature,chore,experiment]
     inner_loop --> release: ꘜ hotfix_cut [hotfix]
+    mitigation --> config_change: ᐉ execute_mitigation
+    mitigation --> data_change: ᐉ execute_mitigation
     mitigation --> incident_response: ⊡ needs_verification
-    mitigation --> inner_loop: ⊙ ready_for_hotfix
+    mitigation --> inner_loop: ᐉ execute_mitigation
     pr --> inner_loop: ⊡ staged
     refinement --> inner_loop: ᐉ spiking
     refinement --> inner_loop: ⊙ ready_for_dev
     release --> inner_loop: ⊡ released
     release --> inner_loop: ⧄ abandoned
     release --> inner_loop: ⧄ rolled_back
-    backport --> [*]: ■ backported
     experimentation --> [*]: ■ aborted
     experimentation --> [*]: ■ iterated
     experimentation --> [*]: ■ killed
     experimentation --> [*]: ■ promoted
-    incident_response --> [*]: ■ stabilized
-    inner_loop --> [*]: ■ shipped
     postmortem --> [*]: ■ complete
-    progressive_rollout --> [*]: ■ complete
-    progressive_rollout --> [*]: ■ kill_switched
     refinement --> [*]: ■ duplicate
     refinement --> [*]: ■ wont_fix
-    release --> [*]: ■ abandoned
-    release --> [*]: ■ released
-    release --> [*]: ■ rolled_back

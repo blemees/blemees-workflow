@@ -409,11 +409,11 @@ def test_entry_with_inbound_spawn_target_errors() -> None:
         state_class=StateClass.WORKING,
         roles=("worker",),
         issue_types=("bug",),
-        spawns=Spawn(
+        spawns=(Spawn(
             process="target",
             issue_type="bug",
             initial_state="queue",
-        ),
+        ),),
     )
     findings = validate_state_machine(
         target,
@@ -478,11 +478,11 @@ def test_process_reached_via_spawn_does_not_warn() -> None:
         state_class=StateClass.WORKING,
         roles=("worker",),
         issue_types=("bug",),
-        spawns=Spawn(
+        spawns=(Spawn(
             process="child_proc",
             issue_type="bug",
             initial_state="queue",
-        ),
+        ),),
     )
     parent.states["entry"] = State(
         name="entry",
@@ -523,12 +523,12 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
         "waiting": State(
             name="waiting",
             state_class=StateClass.RESTING,
-            spawns=Spawn(
+            spawns=(Spawn(
                 process="child",
                 issue_type="bug",
                 initial_state="queue",
                 advance_on=(("done", "doing"),),
-            ),
+            ),),
         ),
         "doing": State(
             name="doing",
@@ -567,5 +567,102 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
     assert any(
         f.principle_cite == "state-machine-principles.md#3"
         and "bypassing the claim-before-working invariant" in f.message
+        for f in findings
+    )
+
+
+def test_multi_spawn_duplicate_issue_type_initial_state_errors() -> None:
+    """Two rules on the same state may not share both issue_type AND
+    initial_state — the CLI would have no way to disambiguate them."""
+    from workflow.core.model.state_machine import Spawn
+
+    parent = StateMachine(name="parent")
+    parent.states["working_state"] = State(
+        name="working_state",
+        state_class=StateClass.WORKING,
+        roles=("worker",),
+        issue_types=("bug",),
+        spawns=(
+            Spawn(process="target", issue_type="bug", initial_state="queue"),
+            Spawn(process="target", issue_type="bug", initial_state="queue"),
+        ),
+    )
+    target = StateMachine(name="target")
+    target.states["queue"] = State(
+        name="queue",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    findings = validate_state_machine(
+        parent,
+        catalog=None,
+        sibling_machines={"parent": parent, "target": target},
+    )
+    assert any(
+        f.severity is Severity.ERROR
+        and "two `spawns` entries share" in f.message
+        for f in findings
+    )
+
+
+def test_multi_spawn_advance_on_targets_must_agree() -> None:
+    """Across all spawn rules on one state, every advance_on value must
+    point at the SAME parent-next-state — the wait-for-all cascade
+    cannot pick between alternatives."""
+    from workflow.core.model.state_machine import Spawn
+
+    parent = StateMachine(name="parent")
+    parent.states["working_state"] = State(
+        name="working_state",
+        state_class=StateClass.WORKING,
+        roles=("worker",),
+        issue_types=("bug", "feat"),
+        spawns=(
+            Spawn(
+                process="target",
+                issue_type="bug",
+                initial_state="queue_a",
+                advance_on=(("done", "next_a"),),
+            ),
+            Spawn(
+                process="target",
+                issue_type="feat",
+                initial_state="queue_b",
+                advance_on=(("done", "next_b"),),  # disagrees
+            ),
+        ),
+    )
+    parent.states["next_a"] = State(
+        name="next_a",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    parent.states["next_b"] = State(
+        name="next_b",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    target = StateMachine(name="target")
+    target.states = {
+        "queue_a": State(
+            name="queue_a",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        ),
+        "queue_b": State(
+            name="queue_b",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        ),
+    }
+    findings = validate_state_machine(
+        parent,
+        catalog=None,
+        sibling_machines={"parent": parent, "target": target},
+    )
+    assert any(
+        f.severity is Severity.ERROR
+        and "advance_on" in f.message
+        and "disagree" in f.message.lower()
         for f in findings
     )

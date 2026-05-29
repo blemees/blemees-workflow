@@ -1,0 +1,45 @@
+{
+  "$schema": "../../docs/schemas/states.schema.json",
+  "description": "Apply a configuration change as an incident mitigation: feature-flag toggle, kill switch, runtime config value, rate-limit adjustment. Linear claim/advance flow — spawned from `mitigation.execute_mitigation`, closes at `config_applied` to release the parent. Out of scope: schema changes that require migrations (use `data-change`).",
+  "states": {
+    "ready_for_config_change": {
+      "class": "resting",
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "config-change"
+      ]
+    },
+    "applying_config_change": {
+      "class": "working",
+      "roles": [
+        "incident-responder"
+      ],
+      "issue_types": [
+        "config-change"
+      ],
+      "human_inputs": [
+        "general"
+      ]
+    },
+    "config_applied": {
+      "class": "terminal",
+      "reversibility": "reversible-fast",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    }
+  },
+  "transitions": [
+    {
+      "source": "ready_for_config_change",
+      "destination": "applying_config_change",
+      "type": "claim",
+      "label": "responder claims config change"
+    },
+    {
+      "source": "applying_config_change",
+      "destination": "config_applied",
+      "type": "advance",
+      "label": "responder applies and confirms config change is live"
+    }
+  ]
+}

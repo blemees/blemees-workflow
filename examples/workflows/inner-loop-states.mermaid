@@ -2,7 +2,6 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Handoff: ready_for_dev (shared resting state)
-    %%   Handoff: ready_for_hotfix (shared resting state)
     %%   Handoff: ready_bounced (shared resting state)
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
     %%
@@ -17,6 +16,6 @@ stateDiagram-v2
     shipped --> [*]: terminal (shipped)
     spike_completed --> [*]: terminal (resolved)
     [*] --> ready_for_dev: handoff
-    [*] --> ready_for_hotfix: handoff
     ready_bounced --> [*]: handoff
+    [*] --> ready_for_hotfix: spawn
     [*] --> ready_for_spike: spawn

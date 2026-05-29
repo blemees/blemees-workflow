@@ -6,7 +6,7 @@ Coordinate the live response to a production incident: declare, mitigate, stabil
 
 ## Issue types accepted
 
-- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
+- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident-mitigation`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
 
 ## External entry points
 
@@ -20,7 +20,7 @@ States where new issues materialize from outside the workflow — manual `create
 stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
-    %%   Spawn:   mitigating → process mitigation (issue_type=incident, initial=ready_for_mitigation)
+    %%   Spawn:   mitigating → process mitigation (issue_type=incident-mitigation, initial=ready_for_mitigation)
     %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
     %%
 
@@ -41,13 +41,13 @@ stateDiagram-v2
 
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
-| `declared` | resting | reversible-fast | — | — | — | — | — |
+| `declared` | resting | reversible-fast | — | incident | — | — | — |
 | `triaging` | working | — | incident-commander | incident | — | — | — |
-| `needs_diagnosis` | resting | reversible-fast | — | — | — | — | — |
+| `needs_diagnosis` | resting | reversible-fast | — | incident | — | — | — |
 | `diagnosing` | working | — | incident-responder | incident | blocked-on-data, general | — | — |
-| `cause_identified` | resting | reversible-fast | — | — | — | — | — |
+| `cause_identified` | resting | reversible-fast | — | incident | — | — | — |
 | `mitigating` | working | — | incident-commander | incident | needs-security-review, blocked-on-data, general | — | — |
-| `needs_verification` | resting | reversible-fast | — | — | — | — | — |
+| `needs_verification` | resting | reversible-fast | — | incident | — | — | — |
 | `verifying` | working | — | incident-responder | incident | — | — | — |
 | `stabilized` | terminal | reversible-fast | — | — | — | superseded | completed |
 
@@ -69,6 +69,6 @@ stateDiagram-v2
 
 **Spawns** (states that create child issues on other processes):
 
-- `mitigating` (subprocess) → process `mitigation` as `incident` issue at `ready_for_mitigation`
+- `mitigating` (subprocess) → process `mitigation` as `incident-mitigation` issue at `ready_for_mitigation`
     - on child `mitigated` → parent `needs_verification`
 - `stabilized` (independent) → process `postmortem` as `postmortem` issue at `pending`

@@ -1,0 +1,6 @@
+stateDiagram-v2
+    direction TB
+    ready_for_config_change --> applying_config_change: responder claims config change
+    applying_config_change --> config_applied: responder applies and confirms config change is live
+    config_applied --> [*]: terminal (shipped)
+    [*] --> ready_for_config_change: spawn

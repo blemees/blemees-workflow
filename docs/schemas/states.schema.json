@@ -27,6 +27,30 @@
     }
   },
   "$defs": {
+    "spawn_rule": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["issue_type", "initial_state"],
+      "properties": {
+        "process": {
+          "type": "string",
+          "description": "Target process name. Optional — when omitted, the validator resolves it from `initial_state` via the state-name-uniqueness invariant. Authored values must match the resolved value."
+        },
+        "issue_type": {
+          "type": "string",
+          "description": "Child issue type (must be in target process's accepted types). Also the CLI disambiguator at spawn time when a state has multiple rules."
+        },
+        "initial_state": {
+          "type": "string",
+          "description": "Child's starting state on the target process (must be resting). Doubles as the secondary CLI disambiguator when multiple rules share an issue_type."
+        },
+        "advance_on": {
+          "type": "object",
+          "description": "Map {child-terminal-state: parent-next-state}. Selective auto-advance — parent advances only on listed child terminals; unmapped terminals keep the parent put. Forbidden on terminal-state spawns. Across all spawn rules on a single state, every parent-next-state value must be the same (the cascade's wait-for-all rule needs a single target).",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
     "state": {
       "type": "object",
       "additionalProperties": true,
@@ -45,7 +69,7 @@
         },
         "issue_types": {
           "type": "array",
-          "description": "Issue type ids this working state accepts. REQUIRED on working states; FORBIDDEN on resting / terminal states. The process's overall accepted set is derived as the union of every working state's `issue_types`.",
+          "description": "Issue type ids that may occupy this state. REQUIRED on working AND resting states; FORBIDDEN on terminal. Working: types this state will do work on. Resting: types that may sit waiting here — must be a subset of the process's working-state umbrella; spawn-target resting states typically declare a single type, shared handoff states declare the full set crossing the interface. The process's overall accepted set is derived as the union of every working state's `issue_types`.",
           "items": {"type": "string", "minLength": 1},
           "uniqueItems": true
         },
@@ -90,19 +114,15 @@
           "uniqueItems": true
         },
         "spawns": {
-          "type": "object",
-          "description": "Subprocess / spawn contract. Valid on working, resting, or terminal states. Working AND resting states optionally declare `advance_on` to auto-advance the parent on selected child terminals; unmapped terminals keep the parent put. Resting-state `advance_on` targets must be non-working (event-style transition). Terminal states spawn an independent follow-up (no `advance_on`).",
-          "required": ["process", "issue_type", "initial_state"],
-          "properties": {
-            "process": {"type": "string", "description": "Target process name."},
-            "issue_type": {"type": "string", "description": "Child issue type (must be in target process's accepted types)."},
-            "initial_state": {"type": "string", "description": "Child's starting state on the target process (must be resting)."},
-            "advance_on": {
-              "type": "object",
-              "description": "Map {child-terminal-state: parent-next-state}. Selective auto-advance — parent advances only on listed child terminals; unmapped terminals keep the parent put. Forbidden on terminal-state spawns.",
-              "additionalProperties": {"type": "string"}
+          "oneOf": [
+            {"$ref": "#/$defs/spawn_rule"},
+            {
+              "type": "array",
+              "items": {"$ref": "#/$defs/spawn_rule"},
+              "minItems": 1
             }
-          }
+          ],
+          "description": "Subprocess / spawn contract. Valid on working, resting, or terminal states. May be a single rule (legacy shape) or a list of rules — a state can declare multiple kinds of work it dispatches. At spawn time, the CLI picks a rule by `--issue-type` (and `--initial-state` if needed). The cascade's wait-for-all rule advances the parent only when every active child satisfies its rule's `advance_on`. The validator enforces (a) no two rules share `(issue_type, initial_state)` on a state and (b) the set of `advance_on` targets across all rules on a state is a singleton."
         },
         "collects": {
           "type": "object",

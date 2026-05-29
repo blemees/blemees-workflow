@@ -577,17 +577,40 @@ def _check_issue_types_resolved(
     state_machine: StateMachine,
     issue_type_directory: IssueTypeDirectory | None,
 ) -> list[ValidationFinding]:
-    """Every issue type referenced by any working state must resolve in the
-    issue-types directory.
+    """Every issue type referenced by any state must resolve in the
+    issue-types directory; resting-state types must be a subset of the
+    process's working-state umbrella.
 
     Severities:
     - Any state declares `issue_types` but no directory loaded: WARNING.
     - State references an unknown type id: ERROR.
+    - Resting state declares a type not in the working umbrella: ERROR.
     """
     findings: list[ValidationFinding] = []
     state_types: set[str] = set()
     for st in state_machine.states.values():
         state_types.update(st.issue_types)
+
+    umbrella = set(state_machine.accepted_issue_types)
+    for st in state_machine.states.values():
+        if st.state_class is not StateClass.RESTING:
+            continue
+        extras = set(st.issue_types) - umbrella
+        if extras:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#1",
+                    message=(
+                        f"Resting state {st.name!r}: `issue_types` "
+                        f"{sorted(extras)} not in the process's working-state "
+                        f"umbrella ({sorted(umbrella)}). Resting states "
+                        f"queue work that some working state will then claim — "
+                        f"declare any new type on its working state first."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
 
     if not state_types:
         return findings
@@ -658,143 +681,259 @@ def _check_spawns(
     state_machine: StateMachine,
     sibling_machines: dict[str, StateMachine],
 ) -> list[ValidationFinding]:
-    """Validate every state's `spawns` declaration against the target process.
+    """Validate every state's `spawns` declarations against target processes.
 
-    - Target process must exist in the sibling machines map.
-    - issue_type must be in the target's accepted_issue_types (derived
-      union of its working-state issue_types).
+    A state can declare one or many spawn rules. For each:
+
+    - `process` may be authored or omitted; if omitted, it is resolved
+      from `initial_state` (every state belongs to exactly one process).
+      If authored and the resolution disagrees, ERROR.
+    - issue_type must be in the target's accepted_issue_types.
     - initial_state must exist on the target and be RESTING.
-    - Working-state spawns: every key in `advance_on` must be a terminal
-      on the target process; every value must be a state on this process.
-      Coverage is NOT required — the map is selective ("advance only on
-      these terminals; everything else keeps the parent put").
+    - Working / resting-state spawns: each advance_on key must be a
+      terminal on the target; each value must be a state on this
+      process. Resting-state advance_on values must be non-working.
+    - Within a single state, no two spawns may share
+      (issue_type, initial_state) — that pair is the runtime
+      disambiguator the CLI uses at spawn time.
+    - Across all spawns on a single state, the set of advance_on
+      target states must be a singleton (every rule that fires
+      advances the parent to the same target). The cascade's
+      wait-for-all rule depends on this.
+
+    The validator now mutates each `Spawn` in place to fill in the
+    resolved process — no, frozen dataclass, can't mutate. Instead the
+    validator updates the state machine's state to replace the spawn
+    tuple with resolved-process copies. (Run before any code that
+    relies on `spawn.process` being populated.)
     """
     findings: list[ValidationFinding] = []
-    for state in state_machine.states.values():
-        spawn = state.spawns
-        if spawn is None:
-            continue
-        target = sibling_machines.get(spawn.process)
-        if target is None:
-            findings.append(
-                ValidationFinding(
-                    severity=Severity.ERROR,
-                    principle_cite="state-machine-principles.md#9",
-                    message=(
-                        f"State {state.name!r}: `spawns.process` "
-                        f"{spawn.process!r} is not a known process."
-                    ),
-                    location=state_machine.source_path,
-                )
-            )
-            continue
-        if spawn.issue_type not in target.accepted_issue_types:
-            findings.append(
-                ValidationFinding(
-                    severity=Severity.ERROR,
-                    principle_cite="state-machine-principles.md#9",
-                    message=(
-                        f"State {state.name!r}: `spawns.issue_type` "
-                        f"{spawn.issue_type!r} is not accepted by process "
-                        f"{spawn.process!r} (accepts: "
-                        f"{target.accepted_issue_types})."
-                    ),
-                    location=state_machine.source_path,
-                )
-            )
-        target_initial = target.states.get(spawn.initial_state)
-        if target_initial is None:
-            findings.append(
-                ValidationFinding(
-                    severity=Severity.ERROR,
-                    principle_cite="state-machine-principles.md#9",
-                    message=(
-                        f"State {state.name!r}: `spawns.initial_state` "
-                        f"{spawn.initial_state!r} is not declared on "
-                        f"process {spawn.process!r}."
-                    ),
-                    location=state_machine.source_path,
-                )
-            )
-        elif target_initial.state_class is not StateClass.RESTING:
-            findings.append(
-                ValidationFinding(
-                    severity=Severity.ERROR,
-                    principle_cite="state-machine-principles.md#9",
-                    message=(
-                        f"State {state.name!r}: `spawns.initial_state` "
-                        f"{spawn.initial_state!r} on process "
-                        f"{spawn.process!r} must be resting, not "
-                        f"{target_initial.state_class.value}."
-                    ),
-                    location=state_machine.source_path,
-                )
-            )
+    # Build a state-name → process-name index once.
+    state_to_process: dict[str, str] = {}
+    for proc_name, machine in sibling_machines.items():
+        for state_name in machine.states:
+            state_to_process[state_name] = proc_name
 
-        # Working- AND resting-state spawns: keys must be terminals of
-        # the child; values must be states on the parent process. No
-        # exhaustive coverage required — `advance_on` is selective.
-        # Additionally, resting-state spawn targets must be non-working
-        # (the auto-advance is event-style; can't enter a working state
-        # without a claim).
-        if state.state_class is not StateClass.TERMINAL and spawn.advance_on:
-            target_terminals = {
-                s.name for s in target.states.values()
-                if s.state_class is StateClass.TERMINAL
-            }
-            declared_terminals = {k for k, _ in spawn.advance_on}
-            unknown = declared_terminals - target_terminals
-            if unknown:
+    for state in state_machine.states.values():
+        if not state.spawns:
+            continue
+        # Within-state uniqueness on (issue_type, initial_state).
+        seen_keys: set[tuple[str, str]] = set()
+        for sp in state.spawns:
+            key = (sp.issue_type, sp.initial_state)
+            if key in seen_keys:
                 findings.append(
                     ValidationFinding(
                         severity=Severity.ERROR,
                         principle_cite="state-machine-principles.md#9",
                         message=(
-                            f"State {state.name!r}: `spawns.advance_on` "
-                            f"references state(s) {sorted(unknown)} that "
-                            f"aren't terminals on process {spawn.process!r}."
+                            f"State {state.name!r}: two `spawns` entries share "
+                            f"(issue_type={sp.issue_type!r}, "
+                            f"initial_state={sp.initial_state!r}) — the CLI "
+                            f"disambiguator can't distinguish them at spawn time."
                         ),
                         location=state_machine.source_path,
                     )
                 )
-            for child_term, parent_next in spawn.advance_on:
-                parent_next_state = state_machine.states.get(parent_next)
-                if parent_next_state is None:
+            seen_keys.add(key)
+
+        # Cross-spawn advance_on targets must be a singleton.
+        targets_seen: set[str] = set()
+        for sp in state.spawns:
+            for _term, parent_next in sp.advance_on:
+                targets_seen.add(parent_next)
+        if len(targets_seen) > 1:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#9",
+                    message=(
+                        f"State {state.name!r}: spawn rules disagree on the "
+                        f"advance_on target — found {sorted(targets_seen)}. "
+                        f"The cascade's wait-for-all advance can only fire "
+                        f"if every rule's advance_on value points at the same "
+                        f"parent state."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+
+        for sp in state.spawns:
+            # Resolve process if omitted.
+            resolved_process: str | None = sp.process
+            if resolved_process is None:
+                resolved_process = state_to_process.get(sp.initial_state)
+                if resolved_process is None:
                     findings.append(
                         ValidationFinding(
                             severity=Severity.ERROR,
                             principle_cite="state-machine-principles.md#9",
                             message=(
-                                f"State {state.name!r}: `spawns.advance_on"
-                                f"[{child_term!r}]` → {parent_next!r} is "
-                                f"not a state on this process."
+                                f"State {state.name!r}: `spawns.initial_state` "
+                                f"{sp.initial_state!r} does not exist on any "
+                                f"known process. Author `process` explicitly or "
+                                f"check the state name."
                             ),
                             location=state_machine.source_path,
                         )
                     )
                     continue
-                # Resting-state spawns: auto-advance is event-driven; the
-                # target must not be working (no claim opportunity).
+            elif sp.process is not None:
+                # Authored process must match resolution.
+                resolved_from_initial = state_to_process.get(sp.initial_state)
                 if (
-                    state.state_class is StateClass.RESTING
-                    and parent_next_state.state_class is StateClass.WORKING
+                    resolved_from_initial is not None
+                    and resolved_from_initial != sp.process
                 ):
                     findings.append(
                         ValidationFinding(
                             severity=Severity.ERROR,
-                            principle_cite="state-machine-principles.md#3",
+                            principle_cite="state-machine-principles.md#9",
                             message=(
-                                f"State {state.name!r}: resting-state "
-                                f"`spawns.advance_on[{child_term!r}]` → "
-                                f"{parent_next!r} would auto-advance into a "
-                                f"working state, bypassing the "
-                                f"claim-before-working invariant. "
-                                f"Auto-advance must land on a resting or "
-                                f"terminal state."
+                                f"State {state.name!r}: `spawns.process` "
+                                f"{sp.process!r} disagrees with the process "
+                                f"that owns `initial_state` "
+                                f"{sp.initial_state!r} ({resolved_from_initial!r}). "
+                                f"Drop `process` (it's derived) or fix the mismatch."
                             ),
                             location=state_machine.source_path,
                         )
                     )
+
+            target = sibling_machines.get(resolved_process)
+            if target is None:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: spawns target process "
+                            f"{resolved_process!r} which is not a known process."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+                continue
+            if sp.issue_type not in target.accepted_issue_types:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `spawns.issue_type` "
+                            f"{sp.issue_type!r} is not accepted by process "
+                            f"{resolved_process!r} (accepts: "
+                            f"{target.accepted_issue_types})."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            target_initial = target.states.get(sp.initial_state)
+            if target_initial is None:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `spawns.initial_state` "
+                            f"{sp.initial_state!r} is not declared on process "
+                            f"{resolved_process!r}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            elif target_initial.state_class is not StateClass.RESTING:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `spawns.initial_state` "
+                            f"{sp.initial_state!r} on process "
+                            f"{resolved_process!r} must be resting, not "
+                            f"{target_initial.state_class.value}."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+            elif (
+                target_initial.issue_types
+                and sp.issue_type not in target_initial.issue_types
+            ):
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `spawns.issue_type` "
+                            f"{sp.issue_type!r} is not in the target resting "
+                            f"state's `issue_types` "
+                            f"({list(target_initial.issue_types)} on "
+                            f"{resolved_process!r}.{sp.initial_state!r}). "
+                            f"Update one side so the spawn lands in a state "
+                            f"that accepts this type."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+
+            # advance_on checks per rule.
+            if state.state_class is not StateClass.TERMINAL and sp.advance_on:
+                target_terminals = {
+                    s.name for s in target.states.values()
+                    if s.state_class is StateClass.TERMINAL
+                }
+                declared_terminals = {k for k, _ in sp.advance_on}
+                unknown = declared_terminals - target_terminals
+                if unknown:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#9",
+                            message=(
+                                f"State {state.name!r}: `spawns.advance_on` "
+                                f"references state(s) {sorted(unknown)} that "
+                                f"aren't terminals on process {resolved_process!r}."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
+                for child_term, parent_next in sp.advance_on:
+                    parent_next_state = state_machine.states.get(parent_next)
+                    if parent_next_state is None:
+                        findings.append(
+                            ValidationFinding(
+                                severity=Severity.ERROR,
+                                principle_cite="state-machine-principles.md#9",
+                                message=(
+                                    f"State {state.name!r}: `spawns.advance_on"
+                                    f"[{child_term!r}]` → {parent_next!r} is "
+                                    f"not a state on this process."
+                                ),
+                                location=state_machine.source_path,
+                            )
+                        )
+                        continue
+                    if (
+                        state.state_class is StateClass.RESTING
+                        and parent_next_state.state_class is StateClass.WORKING
+                    ):
+                        findings.append(
+                            ValidationFinding(
+                                severity=Severity.ERROR,
+                                principle_cite="state-machine-principles.md#3",
+                                message=(
+                                    f"State {state.name!r}: resting-state "
+                                    f"`spawns.advance_on[{child_term!r}]` → "
+                                    f"{parent_next!r} would auto-advance into a "
+                                    f"working state, bypassing the "
+                                    f"claim-before-working invariant. "
+                                    f"Auto-advance must land on a resting or "
+                                    f"terminal state."
+                                ),
+                                location=state_machine.source_path,
+                            )
+                        )
     return findings
 
 
@@ -1009,12 +1148,20 @@ def _check_entry_not_also_target(
 
     # The state is the initial_state of a spawn from any sibling.
     inbound_spawn_targets: set[str] = set()
+    # Build the state-to-process map once to resolve spawn.process when
+    # the author omits it.
+    state_to_process: dict[str, str] = {}
+    for proc_name, machine in sibling_machines.items():
+        for state_name in machine.states:
+            state_to_process[state_name] = proc_name
     for other in sibling_machines.values():
         if other.name == state_machine.name:
             continue
         for s in other.states.values():
-            if s.spawns is not None and s.spawns.process == state_machine.name:
-                inbound_spawn_targets.add(s.spawns.initial_state)
+            for sp in s.spawns:
+                resolved = sp.process or state_to_process.get(sp.initial_state)
+                if resolved == state_machine.name:
+                    inbound_spawn_targets.add(sp.initial_state)
     for state_name in entry_states & inbound_spawn_targets:
         findings.append(
             ValidationFinding(
@@ -1064,12 +1211,26 @@ def _check_process_reachable(
         return findings
 
     # Is some other process spawning into us?
-    has_inbound_spawn = any(
-        s.spawns is not None and s.spawns.process == state_machine.name
-        for other in sibling_machines.values()
-        if other.name != state_machine.name
-        for s in other.states.values()
-    )
+    # Build the state-to-process map once so spawns omitting `process`
+    # can still resolve to a target.
+    state_to_process: dict[str, str] = {}
+    for proc_name, machine in sibling_machines.items():
+        for state_name in machine.states:
+            state_to_process[state_name] = proc_name
+    has_inbound_spawn = False
+    for other in sibling_machines.values():
+        if other.name == state_machine.name:
+            continue
+        for s in other.states.values():
+            for sp in s.spawns:
+                resolved = sp.process or state_to_process.get(sp.initial_state)
+                if resolved == state_machine.name:
+                    has_inbound_spawn = True
+                    break
+            if has_inbound_spawn:
+                break
+        if has_inbound_spawn:
+            break
     if has_inbound_spawn:
         return findings
 
