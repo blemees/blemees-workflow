@@ -578,39 +578,21 @@ def _check_issue_types_resolved(
     issue_type_directory: IssueTypeDirectory | None,
 ) -> list[ValidationFinding]:
     """Every issue type referenced by any state must resolve in the
-    issue-types directory; resting-state types must be a subset of the
-    process's working-state umbrella.
+    issue-types directory.
 
     Severities:
     - Any state declares `issue_types` but no directory loaded: WARNING.
     - State references an unknown type id: ERROR.
-    - Resting state declares a type not in the working umbrella: ERROR.
+
+    There is intentionally no "resting must be a subset of working"
+    rule: a process can legitimately accept a type via handoff or
+    collect without ever claiming it into a working state (e.g. release
+    carrying dev tickets in `staged` until the train ships).
     """
     findings: list[ValidationFinding] = []
     state_types: set[str] = set()
     for st in state_machine.states.values():
         state_types.update(st.issue_types)
-
-    umbrella = set(state_machine.accepted_issue_types)
-    for st in state_machine.states.values():
-        if st.state_class is not StateClass.RESTING:
-            continue
-        extras = set(st.issue_types) - umbrella
-        if extras:
-            findings.append(
-                ValidationFinding(
-                    severity=Severity.ERROR,
-                    principle_cite="state-machine-principles.md#1",
-                    message=(
-                        f"Resting state {st.name!r}: `issue_types` "
-                        f"{sorted(extras)} not in the process's working-state "
-                        f"umbrella ({sorted(umbrella)}). Resting states "
-                        f"queue work that some working state will then claim — "
-                        f"declare any new type on its working state first."
-                    ),
-                    location=state_machine.source_path,
-                )
-            )
 
     if not state_types:
         return findings
@@ -877,14 +859,20 @@ def _check_spawns(
                     )
                 )
 
-            # advance_on checks per rule.
+            # advance_on checks per rule. A spawned child's lifecycle
+            # can cross processes via handoff, so the terminal can live
+            # on any sibling process — not necessarily the spawn target.
+            # Example: mitigation spawns a hotfix into inner-loop, but
+            # the hotfix's terminal (`shipped`) is in release because
+            # `inner-loop.staged` is a handoff to release.
             if state.state_class is not StateClass.TERMINAL and sp.advance_on:
-                target_terminals = {
-                    s.name for s in target.states.values()
-                    if s.state_class is StateClass.TERMINAL
-                }
+                global_terminals: set[str] = set()
+                for sibling in sibling_machines.values():
+                    for s in sibling.states.values():
+                        if s.state_class is StateClass.TERMINAL:
+                            global_terminals.add(s.name)
                 declared_terminals = {k for k, _ in sp.advance_on}
-                unknown = declared_terminals - target_terminals
+                unknown = declared_terminals - global_terminals
                 if unknown:
                     findings.append(
                         ValidationFinding(
@@ -893,7 +881,7 @@ def _check_spawns(
                             message=(
                                 f"State {state.name!r}: `spawns.advance_on` "
                                 f"references state(s) {sorted(unknown)} that "
-                                f"aren't terminals on process {resolved_process!r}."
+                                f"aren't terminals on any known process."
                             ),
                             location=state_machine.source_path,
                         )
@@ -951,6 +939,14 @@ def _check_collects(
       with that state's claim).
     """
     findings: list[ValidationFinding] = []
+    # Build a state-name → process-name index so we can resolve omitted
+    # `collects.process` from `from_states[0]` (state names are unique
+    # across the workflow).
+    state_to_process: dict[str, str] = {}
+    for proc_name, machine in sibling_machines.items():
+        for st_name in machine.states:
+            state_to_process[st_name] = proc_name
+
     for state in state_machine.states.values():
         collects = state.collects
         if collects is None:
@@ -969,7 +965,48 @@ def _check_collects(
                 )
             )
             continue
-        target = sibling_machines.get(collects.process)
+
+        # Resolve the source process: derive from from_states[0] when
+        # not authored; cross-check authored values against derivation.
+        resolved_process: str | None = collects.process
+        if resolved_process is None:
+            if collects.from_states:
+                resolved_process = state_to_process.get(collects.from_states[0])
+            if resolved_process is None:
+                findings.append(
+                    ValidationFinding(
+                        severity=Severity.ERROR,
+                        principle_cite="state-machine-principles.md#9",
+                        message=(
+                            f"State {state.name!r}: `collects.from_states` "
+                            f"references state(s) not declared on any known "
+                            f"process; cannot derive `collects.process`."
+                        ),
+                        location=state_machine.source_path,
+                    )
+                )
+                continue
+        else:
+            for fs in collects.from_states:
+                derived = state_to_process.get(fs)
+                if derived is not None and derived != resolved_process:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#9",
+                            message=(
+                                f"State {state.name!r}: authored "
+                                f"`collects.process` {resolved_process!r} "
+                                f"disagrees with the process that owns "
+                                f"`from_states` entry {fs!r} ({derived!r}). "
+                                f"Drop `process` (it's derived) or fix the "
+                                f"mismatch."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
+
+        target = sibling_machines.get(resolved_process)
         if target is None:
             findings.append(
                 ValidationFinding(
@@ -977,7 +1014,7 @@ def _check_collects(
                     principle_cite="state-machine-principles.md#9",
                     message=(
                         f"State {state.name!r}: `collects.process` "
-                        f"{collects.process!r} is not a known process."
+                        f"{resolved_process!r} is not a known process."
                     ),
                     location=state_machine.source_path,
                 )
@@ -993,7 +1030,7 @@ def _check_collects(
                         message=(
                             f"State {state.name!r}: `collects.from_states` "
                             f"entry {from_state_name!r} is not declared on "
-                            f"process {collects.process!r}."
+                            f"process {resolved_process!r}."
                         ),
                         location=state_machine.source_path,
                     )
@@ -1007,7 +1044,7 @@ def _check_collects(
                         message=(
                             f"State {state.name!r}: `collects.from_states` "
                             f"entry {from_state_name!r} is a working state "
-                            f"on {collects.process!r}. Collect only from "
+                            f"on {resolved_process!r}. Collect only from "
                             f"resting or terminal states (working-state "
                             f"items are already claimed)."
                         ),
@@ -1028,7 +1065,7 @@ def _check_collects(
                         message=(
                             f"State {state.name!r}: `collects.issue_types` "
                             f"contains {sorted(unknown)} which are not "
-                            f"accepted by process {collects.process!r} "
+                            f"accepted by process {resolved_process!r} "
                             f"(accepts: {sorted(source_types)})."
                         ),
                         location=state_machine.source_path,
@@ -1038,52 +1075,80 @@ def _check_collects(
         # `advance_on` keys must be declared states on THIS process (the
         # collector); values must be declared resting or terminal states
         # on the source process (no auto-enter into working).
-        for collector_state, contributor_target in collects.advance_on:
-            if collector_state not in state_machine.states:
+        for rule in collects.advance_on:
+            if rule.collector_state not in state_machine.states:
                 findings.append(
                     ValidationFinding(
                         severity=Severity.ERROR,
                         principle_cite="state-machine-principles.md#9",
                         message=(
                             f"State {state.name!r}: `collects.advance_on` key "
-                            f"{collector_state!r} is not a declared state on "
-                            f"this process."
+                            f"{rule.collector_state!r} is not a declared state "
+                            f"on this process."
                         ),
                         location=state_machine.source_path,
                     )
                 )
-            contributor_state = target.states.get(contributor_target)
-            if contributor_state is None:
-                findings.append(
-                    ValidationFinding(
-                        severity=Severity.ERROR,
-                        principle_cite="state-machine-principles.md#9",
-                        message=(
-                            f"State {state.name!r}: `collects.advance_on"
-                            f"[{collector_state!r}]` → {contributor_target!r} "
-                            f"is not a declared state on process "
-                            f"{collects.process!r}."
-                        ),
-                        location=state_machine.source_path,
+            # Validate every target (default + per-type) — each must
+            # exist on the source process and be resting/terminal. Also
+            # validate per-type keys are real issue types accepted by
+            # the source process.
+            targets: list[tuple[str, str]] = []  # (label, target_state)
+            if rule.default_target is not None:
+                targets.append(("*", rule.default_target))
+            for type_key, target_state in rule.by_type:
+                targets.append((type_key, target_state))
+                if type_key not in target.accepted_issue_types:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#9",
+                            message=(
+                                f"State {state.name!r}: "
+                                f"`collects.advance_on[{rule.collector_state!r}]"
+                                f"[{type_key!r}]` references contributor type "
+                                f"{type_key!r} which is not accepted by "
+                                f"process {resolved_process!r} (accepts: "
+                                f"{target.accepted_issue_types})."
+                            ),
+                            location=state_machine.source_path,
+                        )
                     )
-                )
-                continue
-            if contributor_state.state_class is StateClass.WORKING:
-                findings.append(
-                    ValidationFinding(
-                        severity=Severity.ERROR,
-                        principle_cite="state-machine-principles.md#3",
-                        message=(
-                            f"State {state.name!r}: `collects.advance_on"
-                            f"[{collector_state!r}]` → {contributor_target!r} "
-                            f"on {collects.process!r} must be resting or "
-                            f"terminal — auto-advancing contributors into a "
-                            f"working state would bypass the "
-                            f"claim-before-working invariant."
-                        ),
-                        location=state_machine.source_path,
+            for label, target_state in targets:
+                contributor_state = target.states.get(target_state)
+                if contributor_state is None:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#9",
+                            message=(
+                                f"State {state.name!r}: `collects.advance_on"
+                                f"[{rule.collector_state!r}]"
+                                f"[{label!r}]` → {target_state!r} is not a "
+                                f"declared state on process "
+                                f"{resolved_process!r}."
+                            ),
+                            location=state_machine.source_path,
+                        )
                     )
-                )
+                    continue
+                if contributor_state.state_class is StateClass.WORKING:
+                    findings.append(
+                        ValidationFinding(
+                            severity=Severity.ERROR,
+                            principle_cite="state-machine-principles.md#3",
+                            message=(
+                                f"State {state.name!r}: `collects.advance_on"
+                                f"[{rule.collector_state!r}]"
+                                f"[{label!r}]` → {target_state!r} on "
+                                f"{resolved_process!r} must be resting or "
+                                f"terminal — auto-advancing contributors into "
+                                f"a working state would bypass the "
+                                f"claim-before-working invariant."
+                            ),
+                            location=state_machine.source_path,
+                        )
+                    )
 
         # `release_on` entries must be declared states on THIS process.
         # The label-clearing applies regardless of where the contributor

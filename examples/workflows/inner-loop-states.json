@@ -1,6 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "description": "The developer's day-to-day flow: claim a refined ticket, implement, open a PR, ship. Spawns a PR child issue and tracks staged/shipped state.",
+  "group": "delivery",
+  "description": "The developer's day-to-day flow: claim a refined ticket, implement, open a PR. After merge, the ticket lands in `staged`, which is a shared handoff with `release` — from there the release process owns the lifecycle through to shipped. Spawns a PR child issue during implementing.",
   "states": {
     "ready_for_dev": {
       "class": "resting",
@@ -72,6 +73,7 @@
     "staged": {
       "class": "resting",
       "reversibility": "reversible-slow",
+      "handoff": true,
       "issue_types": [
         "bug",
         "feature",
@@ -79,12 +81,6 @@
         "experiment",
         "hotfix"
       ]
-    },
-    "shipped": {
-      "class": "terminal",
-      "reversibility": "reversible-slow",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
     },
     "spike_completed": {
       "class": "terminal",
@@ -134,12 +130,6 @@
       "destination": "staged",
       "type": "advance",
       "label": "PR merged (auto from pr)"
-    },
-    {
-      "source": "staged",
-      "destination": "shipped",
-      "type": "event",
-      "label": "release shipped (auto from release)"
     },
     {
       "source": "implementing_spike",

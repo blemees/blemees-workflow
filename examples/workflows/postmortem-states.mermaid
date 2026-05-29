@@ -1,8 +1,12 @@
 stateDiagram-v2
     direction TB
+    %% Cross-process interfaces:
+    %%   Spawn:   complete → process (derived from initial_state) (issue_type=bug, initial=raw)
+    %%   Spawn:   complete → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   complete → process (derived from initial_state) (issue_type=feature, initial=raw)
+    %%
+
     pending --> drafting: PM claims postmortem
-    drafting --> ready_for_followups: PM completes postmortem narrative
-    ready_for_followups --> creating_followups: PM claims for follow-up filing
-    creating_followups --> complete: PM files compensating issues (spawn events to process refinement)
+    drafting --> complete: PM closes postmortem (then files follow-ups on refinement)
     complete --> [*]: terminal (resolved)
     [*] --> pending: spawn

@@ -221,13 +221,47 @@ def emit_process_map(processes: list[Any]) -> str:
 
     Processes with hyphenated names get an `as` alias so the v2 parser
     accepts a clean id while preserving the human label.
+
+    Processes sharing a `group` value render inside a Mermaid composite
+    state block — a bordered region clustering related processes. Pure
+    layout sugar; cross-group edges still draw as normal.
     """
     lines: list[str] = ["stateDiagram-v2", "    direction LR", ""]
     sorted_processes = sorted(processes, key=lambda p: p.process_name)
 
-    # Emit process nodes. Hyphenated names need the `state "label" as id`
-    # alias because stateDiagram-v2 identifiers can't include hyphens.
+    # Partition processes by their declared `group` so we can emit
+    # grouped processes inside composite blocks. Insertion-ordered
+    # so groups appear in the order their first member is encountered;
+    # ungrouped processes render at top level.
+    grouped: dict[str, list[Any]] = {}
+    ungrouped: list[Any] = []
     for p in sorted_processes:
+        g = getattr(p.state_machine, "group", None)
+        if g:
+            grouped.setdefault(g, []).append(p)
+        else:
+            ungrouped.append(p)
+
+    def _emit_alias(p: Any, indent: str) -> None:
+        # Hyphenated names need the `state "label" as id` alias. Names
+        # without a hyphen are valid stateDiagram-v2 identifiers on
+        # their own — but inside a composite we still need an explicit
+        # declaration so Mermaid scopes the node into the block.
+        if "-" in p.process_name:
+            lines.append(
+                f"{indent}state \"{p.process_name}\" as {_node_id(p.process_name)}"
+            )
+        else:
+            lines.append(f"{indent}{_node_id(p.process_name)}")
+
+    for group_name, members in grouped.items():
+        lines.append(f"    state \"{group_name}\" as {_node_id(group_name)} {{")
+        for p in members:
+            _emit_alias(p, "        ")
+        lines.append("    }")
+    for p in ungrouped:
+        # Preserve the previous behaviour for ungrouped processes: only
+        # emit an explicit declaration when the name needs an alias.
         if "-" in p.process_name:
             lines.append(
                 f"    state \"{p.process_name}\" as {_node_id(p.process_name)}"
@@ -245,6 +279,13 @@ def emit_process_map(processes: list[Any]) -> str:
 
     def _spawn_process(sp: Any) -> str | None:
         return sp.process or state_to_process.get(sp.initial_state)
+
+    def _collects_source_process(c: Any) -> str | None:
+        if c.process:
+            return c.process
+        if c.from_states:
+            return state_to_process.get(c.from_states[0])
+        return None
 
     # A terminal that's named as a `spawn.advance_on` key on some other
     # process is a "feedback terminal" — the spawn child closes here,
@@ -275,10 +316,10 @@ def emit_process_map(processes: list[Any]) -> str:
                 # release_on keys are this process's own states (the
                 # collector's terminals/restings that trigger fan-out
                 # to the contributor process).
-                for collector_state, _ in s.collects.advance_on:
+                for rule in s.collects.advance_on:
                     feedback_terminals_by_process.setdefault(
                         p.process_name, set()
-                    ).add(collector_state)
+                    ).add(rule.collector_state)
                 for collector_state in s.collects.release_on:
                     feedback_terminals_by_process.setdefault(
                         p.process_name, set()
@@ -316,6 +357,20 @@ def emit_process_map(processes: list[Any]) -> str:
                 is_sender = True
             if t.source == state_name and t.destination != state_name:
                 is_receiver = True
+        # Cascade-driven send: a collects.advance_on rule on this
+        # process whose target lands at this state means the cascade
+        # pushes work INTO it — a send signal even without a
+        # transition declaration. (Example: release.cut.collects
+        # advances experiment contributors to `measuring`, which is a
+        # handoff with experimentation; release is the sender.)
+        for s in p.state_machine.states.values():
+            if s.collects is None:
+                continue
+            for rule in s.collects.advance_on:
+                for target in rule.all_targets():
+                    if target == state_name:
+                        is_sender = True
+                        break
         return is_sender, is_receiver
 
     # Edges: (src, dst, label). stateDiagram-v2 uses one arrow style so
@@ -385,21 +440,37 @@ def emit_process_map(processes: list[Any]) -> str:
                 else ""
             )
             label = f"ꘜ {s.name}{type_suffix}"
-            cross_edges.add((s.collects.process, p.process_name, label))
+            source_proc = s.collects.process or _collects_source_process(s.collects)
+            if source_proc is None or source_proc == p.process_name:
+                # Intra-process collect — no cross-process edge to draw.
+                continue
+            cross_edges.add((source_proc, p.process_name, label))
 
     # Feedback edges — the inverse of a spawn. When the child terminates
     # at a state listed in the spawn's `advance_on`, the parent
-    # auto-advances. Label shows only the parent's new state; check the
-    # child process's own diagram for the triggering terminal.
+    # auto-advances. The feedback edge is sourced from the process that
+    # actually owns the triggering child terminal — which can differ
+    # from the spawn target when the child's lifecycle crosses
+    # processes via handoff (e.g., mitigation spawns a hotfix into
+    # inner-loop, but the hotfix is shipped via release, so the
+    # feedback arrow originates at release). Label shows only the
+    # parent's new state.
     for p in sorted_processes:
         for s in p.state_machine.states.values():
             for sp in s.spawns:
-                target_proc = _spawn_process(sp)
-                if target_proc is None:
+                spawn_target_proc = _spawn_process(sp)
+                if spawn_target_proc is None:
                     continue
-                for _child_terminal, parent_next in sp.advance_on:
+                for child_terminal, parent_next in sp.advance_on:
+                    feedback_source = state_to_process.get(
+                        child_terminal, spawn_target_proc
+                    )
+                    if feedback_source == p.process_name:
+                        # Self-feedback would be a no-op cross-process
+                        # edge; skip.
+                        continue
                     label = f"⊡ {parent_next}"
-                    cross_edges.add((target_proc, p.process_name, label))
+                    cross_edges.add((feedback_source, p.process_name, label))
 
     # Collector → contributor feedback. The inverse of collect's data
     # flow: when the collector enters a listed state, contributors
@@ -411,12 +482,16 @@ def emit_process_map(processes: list[Any]) -> str:
         for s in p.state_machine.states.values():
             if s.collects is None:
                 continue
-            for collector_state, _contributor_target in s.collects.advance_on:
-                label = f"⊡ {collector_state}"
-                cross_edges.add((p.process_name, s.collects.process, label))
+            source_proc = s.collects.process or _collects_source_process(s.collects)
+            if source_proc is None or source_proc == p.process_name:
+                # Intra-process collect — no cross-process feedback edge.
+                continue
+            for rule in s.collects.advance_on:
+                label = f"⊡ {rule.collector_state}"
+                cross_edges.add((p.process_name, source_proc, label))
             for collector_state in s.collects.release_on:
                 label = f"⧄ {collector_state}"
-                cross_edges.add((p.process_name, s.collects.process, label))
+                cross_edges.add((p.process_name, source_proc, label))
 
     if entry_edges or cross_edges or exit_edges:
         lines.append("")
@@ -746,9 +821,21 @@ def _section_cross_process(sm: StateMachine) -> list[str]:
             out.append(
                 f"- `{s.name}` ← process `{c.process}` from {sources}{type_suffix}"
             )
-            for collector_state, contributor_target in c.advance_on:
+            for rule in c.advance_on:
+                if not rule.by_type:
+                    out.append(
+                        f"    - on collector `{rule.collector_state}` → "
+                        f"contributors `{rule.default_target}`"
+                    )
+                    continue
+                pieces: list[str] = []
+                if rule.default_target is not None:
+                    pieces.append(f"`*`→`{rule.default_target}`")
+                for tk, tgt in rule.by_type:
+                    pieces.append(f"`{tk}`→`{tgt}`")
                 out.append(
-                    f"    - on collector `{collector_state}` → contributors `{contributor_target}`"
+                    f"    - on collector `{rule.collector_state}` → "
+                    f"per-contributor-type: {', '.join(pieces)}"
                 )
             for collector_state in c.release_on:
                 out.append(

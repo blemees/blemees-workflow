@@ -280,16 +280,16 @@ def _apply_collector_cascade(
     collects = state_def.collects
 
     # Determine which contributor action applies, if any.
-    contributor_target: str | None = None
+    matching_rule = None
     is_release = False
-    for collector_state_key, target in collects.advance_on:
-        if collector_state_key == collector_state.state:
-            contributor_target = target
+    for rule in collects.advance_on:
+        if rule.collector_state == collector_state.state:
+            matching_rule = rule
             break
-    if contributor_target is None and collector_state.state in collects.release_on:
+    if matching_rule is None and collector_state.state in collects.release_on:
         is_release = True
 
-    if contributor_target is None and not is_release:
+    if matching_rule is None and not is_release:
         return []
 
     contributors = list(collector_state.collects_contributors)
@@ -310,6 +310,11 @@ def _apply_collector_cascade(
             continue
         if contributor.state is None:
             continue
+        # Resolve the contributor's target — depends on its issue_type
+        # when the rule declares per-type targets.
+        contributor_target: str | None = None
+        if matching_rule is not None:
+            contributor_target = matching_rule.target_for(contributor.issue_type)
         if contributor_target is not None:
             change = MarkerChange(
                 set_state=contributor_target,
@@ -346,7 +351,7 @@ def _apply_collector_cascade(
             except BackendError:
                 continue
             next_queue.append((contributor_id, post))
-        else:
+        elif is_release:
             # Release-only: clear the collected-by label, no state change.
             change = MarkerChange(clear_collected_by=True)
             audit = (
@@ -375,4 +380,6 @@ def _apply_collector_cascade(
             )
             # Released contributors don't change state, so no further
             # cascading from them.
+        # else: matching_rule exists but the contributor's type has no
+        # mapped target and no default — leave the contributor in place.
     return next_queue

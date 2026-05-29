@@ -14,6 +14,7 @@ from workflow.core.cascade import (
     cascade_after_state_change,
 )
 from workflow.core.model.state_machine import (
+    CollectAdvanceRule,
     Collects,
     ReversibilityClass,
     Spawn,
@@ -167,7 +168,9 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
-            advance_on=(("released", "shipped"),),
+            advance_on=(
+                CollectAdvanceRule(collector_state="released", default_target="shipped"),
+            ),
         ),
     )
     release.states["released"] = State(
@@ -283,7 +286,9 @@ def test_cascade_collect_advance_propagates_to_contributors():
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
-            advance_on=(("released", "shipped"),),
+            advance_on=(
+                CollectAdvanceRule(collector_state="released", default_target="shipped"),
+            ),
         ),
     )
     registry.processes_by_name["release"].state_machine.states["released"] = state_def
@@ -362,7 +367,9 @@ def test_cascade_multi_hop_chain():
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
-            advance_on=(("released", "shipped"),),
+            advance_on=(
+                CollectAdvanceRule(collector_state="released", default_target="shipped"),
+            ),
         ),
     )
     registry.processes_by_name["release"].state_machine.states["released"] = state_def

@@ -1,7 +1,28 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "description": "Cut, review, and ship a release train. The release manager assembles a candidate from staged work, runs the go/no-go review, then ships or defers.",
+  "group": "delivery",
+  "description": "Cut, review, and ship a release train. Dev tickets (bug/feature/chore/experiment/hotfix) are handed off from `inner-loop.staged` and live here as contributors; a release ticket is created at `cut` (or `hotfix_cut`), collects the staged contributors, then runs review → deploy → released. On `released` the contributor tickets cascade to `shipped`; on `abandoned` / `rolled_back` they're returned to the queue for the next train.",
   "states": {
+    "staged": {
+      "class": "resting",
+      "reversibility": "reversible-slow",
+      "handoff": true,
+      "issue_types": [
+        "bug",
+        "feature",
+        "chore",
+        "experiment",
+        "hotfix"
+      ]
+    },
+    "measuring": {
+      "class": "resting",
+      "reversibility": "reversible-slow",
+      "handoff": true,
+      "issue_types": [
+        "experiment"
+      ]
+    },
     "cut": {
       "class": "resting",
       "reversibility": "reversible-slow",
@@ -9,11 +30,13 @@
         "release"
       ],
       "collects": {
-        "process": "inner-loop",
         "from_states": ["staged"],
         "issue_types": ["bug", "feature", "chore", "experiment"],
         "advance_on": {
-          "released": "shipped"
+          "released": {
+            "experiment": "measuring",
+            "*": "shipped"
+          }
         },
         "release_on": ["abandoned", "rolled_back"]
       }
@@ -25,7 +48,6 @@
         "release"
       ],
       "collects": {
-        "process": "inner-loop",
         "from_states": ["staged"],
         "issue_types": ["hotfix"],
         "advance_on": {
@@ -128,6 +150,12 @@
       "close_reason": "completed"
     },
     "released": {
+      "class": "terminal",
+      "reversibility": "reversible-slow",
+      "terminal_taxonomy": "shipped",
+      "close_reason": "completed"
+    },
+    "shipped": {
       "class": "terminal",
       "reversibility": "reversible-slow",
       "terminal_taxonomy": "shipped",

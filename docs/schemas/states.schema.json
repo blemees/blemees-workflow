@@ -15,6 +15,10 @@
       "type": "string",
       "description": "One-paragraph prose summary of what this process is for. Rendered into the per-process `<process>.md` opening section and used as the tail for this process's entry in the workflow `README.md` index. Plain markdown allowed; keep it under ~3 sentences."
     },
+    "group": {
+      "type": "string",
+      "description": "Optional layout hint for the process map. Processes sharing a `group` value render inside the same Mermaid composite state block — a bordered region clustering related processes (e.g., `delivery` for refinement/inner-loop/pr/release; `incident` for incident-response/mitigation/postmortem). Pure layout sugar — has no semantic effect on transitions, spawns, collects, or the cascade."
+    },
     "states": {
       "type": "object",
       "description": "Map of state-id → state spec.",
@@ -127,9 +131,9 @@
         "collects": {
           "type": "object",
           "description": "Fan-in contract — the inverse of `spawns`. Only valid on RESTING states. When `create-issue --to <this state>` runs, the framework queries the source process for candidate contributor issues currently in `from_states` and not yet collected. Authoring lives on the receiver side (parallel to `handoff`/`spawn` declarative pattern). The framework does NOT auto-create the collector; the human cuts when ready.",
-          "required": ["process", "from_states"],
+          "required": ["from_states"],
           "properties": {
-            "process": {"type": "string", "description": "Source process name. Must resolve via the registry."},
+            "process": {"type": "string", "description": "Source process name. Optional — when omitted, the validator derives it from `from_states[0]` via the state-name-uniqueness invariant. Authored values must match the resolved value."},
             "from_states": {
               "type": "array",
               "description": "One or more states in the source process whose issues are eligible contributors. Each entry must be a resting or terminal state (collecting from a working state would conflict with that state's claim).",

@@ -1,5 +1,12 @@
 stateDiagram-v2
     direction TB
+    %% Cross-process interfaces:
+    %%   Handoff: measuring (shared resting state)
+    %%   Spawn:   promoted → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   killed → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   iterated → process (derived from initial_state) (issue_type=experiment, initial=raw)
+    %%
+
     measuring --> measurement_complete: measurement window elapses (time)
     measuring --> aborting: PO claims to abort
     aborting --> aborted: PO publishes abort reason

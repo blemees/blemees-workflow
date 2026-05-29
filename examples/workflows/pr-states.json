@@ -1,5 +1,6 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "group": "delivery",
   "description": "The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state.",
   "states": {
     "draft": {

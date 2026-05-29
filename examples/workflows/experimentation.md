@@ -1,6 +1,6 @@
 # Process: experimentation
 
-Measure a flag-gated experiment in production and reach a verdict — ship-to-all, kill, or iterate. Owned by the product owner once the dev work is merged.
+Measure a flag-gated experiment in production and reach a verdict — ship-to-all, kill, or iterate. Owned by the product owner once the dev work is merged. Entry is `measuring`, a shared handoff with `release` — when an experiment-typed contributor lands in a release that ships, `release.cut.collects.advance_on` cascades it here per the `experiment → measuring` per-type rule.
 
 > Defined in: `experimentation-states.json`
 
@@ -13,6 +13,13 @@ Measure a flag-gated experiment in production and reach a verdict — ship-to-al
 ```mermaid
 stateDiagram-v2
     direction TB
+    %% Cross-process interfaces:
+    %%   Handoff: measuring (shared resting state)
+    %%   Spawn:   promoted → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   killed → process (derived from initial_state) (issue_type=chore, initial=raw)
+    %%   Spawn:   iterated → process (derived from initial_state) (issue_type=experiment, initial=raw)
+    %%
+
     measuring --> measurement_complete: measurement window elapses (time)
     measuring --> aborting: PO claims to abort
     aborting --> aborted: PO publishes abort reason
@@ -52,3 +59,15 @@ stateDiagram-v2
 | `analyzing` | `promoted` | advance | 'PO promotes experiment to feature (files promotion chore on process refinement)' | — | — |
 | `analyzing` | `killed` | advance | 'PO kills experiment (files cleanup chore on process refinement)' | — | — |
 | `analyzing` | `iterated` | advance | 'PO requests experiment iteration (files new experiment on process refinement)' | — | — |
+
+## Cross-process handoffs
+
+**Handoff states** (shared resting states declared in ≥2 processes):
+
+- `measuring` — interface state, also declared by the partner process(es).
+
+**Spawns** (states that create child issues on other processes):
+
+- `promoted` (independent) → process `(derived from initial_state)` as `chore` issue at `raw`
+- `killed` (independent) → process `(derived from initial_state)` as `chore` issue at `raw`
+- `iterated` (independent) → process `(derived from initial_state)` as `experiment` issue at `raw`

@@ -2106,6 +2106,16 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     # with the PR-side use of --refs because PR types are never receivers).
     initial_state_def = process.state_machine.states.get(args.initial_state)
     collects = initial_state_def.collects if initial_state_def is not None else None
+    # Resolve the source process for `collects` — authored value wins;
+    # otherwise derive from `from_states[0]` (state names are unique
+    # workflow-wide).
+    collects_process: str | None = None
+    if collects is not None:
+        collects_process = collects.process
+        if collects_process is None and collects.from_states:
+            collects_process = registry.find_process_for_state(
+                collects.from_states[0]
+            )
 
     # PR-specific flag gating. --head/--base/--refs are valid only when the
     # resolved type maps to pull-requests; conversely, PR creates require
@@ -2261,7 +2271,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 payload["draft"] = args.initial_state == "draft"
             if collects is not None:
                 payload["collects"] = {
-                    "process": collects.process,
+                    "process": collects_process,
                     "from_states": list(collects.from_states),
                     "contributors": contributor_ids if not args.all_candidates else "(all candidates)",
                     "mode": (
@@ -2284,7 +2294,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 print(f"  draft:         {args.initial_state == 'draft'}")
             if collects is not None:
                 src_states = ", ".join(collects.from_states)
-                print(f"  collects from: {collects.process}.{src_states}")
+                print(f"  collects from: {collects_process}.{src_states}")
                 if args.all_candidates:
                     print("  contributors:  (all candidates — querying skipped in dry-run)")
                 elif args.collect_none:
@@ -2324,7 +2334,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 _handle_workflow_error(
                     ConfigError(
                         f"--all-candidates: no uncollected issues found in "
-                        f"{collects.process} states "
+                        f"{collects_process} states "
                         f"{list(collects.from_states)}."
                     )
                 )
@@ -2342,7 +2352,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 _handle_workflow_error(
                     ConfigError(
                         f"--refs references issue(s) {invalid} that are not "
-                        f"uncollected candidates in {collects.process} states "
+                        f"uncollected candidates in {collects_process} states "
                         f"{list(collects.from_states)}. Pass --force to "
                         f"override the eligibility check."
                     )
@@ -2538,6 +2548,13 @@ def _do_collect_into(args: argparse.Namespace) -> int:
         return 2
     collector_state_def = collector_ctx.state_machine.states.get(collector_state_obj.state)
     collects = collector_state_def.collects if collector_state_def is not None else None
+    collects_process: str | None = None
+    if collects is not None:
+        collects_process = collects.process
+        if collects_process is None and collects.from_states:
+            collects_process = registry.find_process_for_state(
+                collects.from_states[0]
+            )
     if collects is None:
         _handle_workflow_error(
             ConfigError(
@@ -2566,7 +2583,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
             _handle_workflow_error(
                 ConfigError(
                     f"--refs references issue(s) {invalid} that are not "
-                    f"uncollected candidates in {collects.process} states "
+                    f"uncollected candidates in {collects_process} states "
                     f"{list(collects.from_states)}. Pass --force to override."
                 )
             )

@@ -1,5 +1,6 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
+  "group": "incident",
   "description": "Coordinate the live response to a production incident: declare, mitigate, stabilize. Spawns a postmortem on stabilization.",
   "states": {
     "declared": {

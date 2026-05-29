@@ -116,12 +116,52 @@ class Spawn:
 
 
 @dataclass(frozen=True)
+class CollectAdvanceRule:
+    """One entry in `collects.advance_on`.
+
+    When the collector reaches `collector_state`, contributors advance
+    to a target state that may depend on the contributor's issue type.
+    `default_target` (when set) applies to contributors whose type is
+    not explicitly listed in `by_type`; if no default and the type
+    isn't listed, no advance fires for that contributor.
+
+    The simple shape `{released: shipped}` parses to a rule with
+    `default_target="shipped"` and empty `by_type`. The per-type shape
+    `{released: {experiment: measuring, "*": shipped}}` parses to
+    `default_target="shipped"` and `by_type=(("experiment", "measuring"),)`.
+    """
+
+    collector_state: str
+    default_target: str | None = None
+    by_type: tuple[tuple[str, str], ...] = ()  # (contributor_type, target_state)
+
+    def target_for(self, contributor_type: str | None) -> str | None:
+        if contributor_type is not None:
+            for t, tgt in self.by_type:
+                if t == contributor_type:
+                    return tgt
+        return self.default_target
+
+    def all_targets(self) -> tuple[str, ...]:
+        """Every target state this rule can advance contributors to —
+        the default plus every per-type override. Used by the validator
+        and the emitter's collect-feedback-terminal computation."""
+        seen: list[str] = []
+        if self.default_target is not None and self.default_target not in seen:
+            seen.append(self.default_target)
+        for _t, tgt in self.by_type:
+            if tgt not in seen:
+                seen.append(tgt)
+        return tuple(seen)
+
+
+@dataclass(frozen=True)
 class Collects:
     """Fan-in contract carried by a resting state — the inverse of `Spawn`.
 
     Issues created at the host state gather existing issues from another
     process as contributors. Used to model the release-train pattern:
-    `release.accumulating` collects staged inner-loop work.
+    `release.cut` collects staged inner-loop work.
 
     Authoring lives on the **receiver** side (mirrors the existing
     handoff/spawn pattern). The framework queries the candidate set at
@@ -132,15 +172,20 @@ class Collects:
 
     `advance_on` is selective contributor-side feedback: when the
     collector reaches a listed state, every contributor (bearing the
-    `collected-by:<collector>` marker) auto-advances to the mapped
-    state on the source process. Mirrors `Spawn.advance_on` but flows
-    the other way — instead of child-terminal → parent-state, it's
-    collector-state → contributor-state. Targets must be resting or
-    terminal on the source process (no auto-enter into working states).
+    `collected-by:<collector>` marker) auto-advances to a target state
+    on the source process. The target can be a single string (all
+    contributor types advance to the same state) OR a per-type map (a
+    contributor's target depends on its issue type, with `*` as the
+    catch-all). Targets must be resting or terminal on the source
+    process (no auto-enter into working states).
     """
 
-    process: str             # source process name
-    from_states: tuple[str, ...]  # resting/terminal states on the source process
+    # Source process name. Optional in authoring — state names are
+    # unique workflow-wide, so the validator can derive the source
+    # process from `from_states`. Authored values must match the
+    # derived value. Stored as `None` when omitted.
+    process: str | None = None
+    from_states: tuple[str, ...] = ()  # resting/terminal states on the source process
     # Optional issue-type filter. When empty, every issue type accepted
     # by the source process is eligible. When set, candidates must
     # carry one of the listed types. Use this when one process has
@@ -148,7 +193,7 @@ class Collects:
     # (e.g., a `cut` release collecting bug/feature/chore PRs and a
     # `hotfix_cut` release collecting only hotfix PRs).
     issue_types: tuple[str, ...] = ()
-    advance_on: tuple[tuple[str, str], ...] = ()  # (collector_state, contributor_target_state)
+    advance_on: tuple[CollectAdvanceRule, ...] = ()
     # Collector states that **drop** the collection without moving the
     # contributors. The contributor's state is unchanged; the framework
     # clears the `collected-by:<collector>` label so the contributor is
@@ -157,10 +202,12 @@ class Collects:
     # happen — the items are still candidates."
     release_on: tuple[str, ...] = ()
 
-    def contributor_next_state(self, collector_state: str) -> str | None:
-        for k, v in self.advance_on:
-            if k == collector_state:
-                return v
+    def contributor_next_state(
+        self, collector_state: str, contributor_type: str | None = None
+    ) -> str | None:
+        for rule in self.advance_on:
+            if rule.collector_state == collector_state:
+                return rule.target_for(contributor_type)
         return None
 
     def releases_on(self, collector_state: str) -> bool:
@@ -308,6 +355,11 @@ class StateMachine:
 
     name: str
     description: str | None = None
+    # Optional grouping hint for the process map. Processes sharing a
+    # `group` value render inside the same Mermaid composite state
+    # block (a bordered region). Pure layout sugar — has no semantic
+    # effect on transitions, spawns, collects, or the cascade.
+    group: str | None = None
     states: dict[str, State] = field(default_factory=dict)
     transitions: list[Transition] = field(default_factory=list)
     gates_in_legend: dict[str, ReversibilityClass] = field(default_factory=dict)
@@ -315,13 +367,17 @@ class StateMachine:
 
     @property
     def accepted_issue_types(self) -> list[str]:
-        """Sorted union of every working state's `issue_types`. This is the
-        umbrella for the process — the set of types that can be created
-        with `--to <some resting state of this process>`."""
+        """Sorted union of every state's `issue_types` (working + resting).
+        This is the process's umbrella — the set of types the process
+        declares it handles at some point in its lifecycle. Most processes'
+        umbrella equals the working union, since resting types are
+        typically a subset of working. The exception is a process that
+        accepts a type by handoff/collect without ever claiming it into
+        a working state (e.g. release carrying dev tickets in `staged`
+        until the train ships)."""
         seen: set[str] = set()
         for st in self.states.values():
-            if st.state_class is StateClass.WORKING:
-                seen.update(st.issue_types)
+            seen.update(st.issue_types)
         return sorted(seen)
 
     def state(self, name: str) -> State:

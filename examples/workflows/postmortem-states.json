@@ -1,6 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "description": "Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes when the writeup is approved.",
+  "group": "incident",
+  "description": "Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files follow-ups (bug/chore/feature) on refinement via the terminal-state spawn declaration — `workflow spawn-issue --issue-type bug --initial-state raw` (etc.) for each item.",
   "states": {
     "pending": {
       "class": "resting",
@@ -18,27 +19,25 @@
         "postmortem"
       ]
     },
-    "ready_for_followups": {
-      "class": "resting",
-      "reversibility": "reversible-fast",
-      "issue_types": [
-        "postmortem"
-      ]
-    },
-    "creating_followups": {
-      "class": "working",
-      "roles": [
-        "product-manager"
-      ],
-      "issue_types": [
-        "postmortem"
-      ]
-    },
     "complete": {
       "class": "terminal",
       "reversibility": "reversible-slow",
       "terminal_taxonomy": "resolved",
-      "close_reason": "completed"
+      "close_reason": "completed",
+      "spawns": [
+        {
+          "issue_type": "bug",
+          "initial_state": "raw"
+        },
+        {
+          "issue_type": "chore",
+          "initial_state": "raw"
+        },
+        {
+          "issue_type": "feature",
+          "initial_state": "raw"
+        }
+      ]
     }
   },
   "transitions": [
@@ -50,21 +49,9 @@
     },
     {
       "source": "drafting",
-      "destination": "ready_for_followups",
-      "type": "advance",
-      "label": "PM completes postmortem narrative"
-    },
-    {
-      "source": "ready_for_followups",
-      "destination": "creating_followups",
-      "type": "claim",
-      "label": "PM claims for follow-up filing"
-    },
-    {
-      "source": "creating_followups",
       "destination": "complete",
       "type": "advance",
-      "label": "PM files compensating issues (spawn events to process refinement)"
+      "label": "PM closes postmortem (then files follow-ups on refinement)"
     }
   ]
 }

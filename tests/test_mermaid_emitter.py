@@ -72,6 +72,21 @@ def test_process_map_lists_all_processes_and_handoffs(
     assert 'state "incident-response" as incident_response' in text
     assert 'state "inner-loop" as inner_loop' in text
 
+    # Group hint: processes sharing a `group` value render inside a
+    # Mermaid composite state block. The shipped examples use
+    # `delivery` (refinement/inner-loop/pr/release) and `incident`
+    # (incident-response/mitigation/config-change/data-change/postmortem).
+    assert 'state "delivery" as delivery {' in text
+    assert 'state "incident" as incident {' in text
+    # Hyphenated members inside a composite get a nested alias line.
+    assert 'state "inner-loop" as inner_loop' in text
+    assert 'state "incident-response" as incident_response' in text
+    # Non-hyphenated members appear as bare identifiers inside the block.
+    # (Bare identifier in indented body — a substring check is fine.)
+    assert "        mitigation" in text
+    assert "        postmortem" in text
+    assert "        refinement" in text
+
     # Known handoffs — `ready_for_dev` originates in refinement (PM
     # advances into the state); inner-loop claims out of it.
     # `ready_bounced` flows the other way (inner-loop bounces back to
@@ -88,12 +103,12 @@ def test_process_map_lists_all_processes_and_handoffs(
     assert "inner_loop --> pr: ᐉ implementing" in text
     # Independent spawn: incident-response.stabilized → postmortem.
     assert "incident_response --> postmortem: ᐉ stabilized" in text
-    # Collect (inverse of spawn): release has two collector states. `cut`
-    # gathers bug/feature/chore/experiment work; `hotfix_cut` gathers
-    # only hotfixes. Both pull from inner-loop.staged. The label
-    # surfaces the issue-type filter in brackets.
-    assert "inner_loop --> release: ꘜ cut [bug,feature,chore,experiment]" in text
-    assert "inner_loop --> release: ꘜ hotfix_cut [hotfix]" in text
+    # Handoff: dev tickets cross from inner-loop into release via the
+    # shared `staged` state. The release-side collect is intra-process
+    # (release.cut / release.hotfix_cut collect from release.staged), so
+    # there is no inner_loop → release collect edge anymore.
+    assert "inner_loop --> release: ⊙ staged" in text
+    assert "inner_loop --> release: ꘜ" not in text
 
     # External entry: processes that declare an `is_initial` state
     # contribute an edge from the built-in `[*]` sentinel. `release` is
@@ -123,6 +138,10 @@ def test_process_map_lists_all_processes_and_handoffs(
     assert "release --> [*]: ■ released" not in text
     assert "release --> [*]: ■ abandoned" not in text
     assert "release --> [*]: ■ rolled_back" not in text
+    # release.shipped IS a real exit — it's the contributor target
+    # (where dev tickets land after the train ships), not a collector
+    # trigger.
+    assert "release --> [*]: ■ shipped" in text
 
     # Feedback terminals — these close the child issue but the parent
     # process auto-advances on them, so they're not real workflow exits.

@@ -1,10 +1,12 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
-  "description": "Measure a flag-gated experiment in production and reach a verdict — ship-to-all, kill, or iterate. Owned by the product owner once the dev work is merged.",
+  "group": "delivery",
+  "description": "Measure a flag-gated experiment in production and reach a verdict — ship-to-all, kill, or iterate. Owned by the product owner once the dev work is merged. Entry is `measuring`, a shared handoff with `release` — when an experiment-typed contributor lands in a release that ships, `release.cut.collects.advance_on` cascades it here per the `experiment → measuring` per-type rule.",
   "states": {
     "measuring": {
       "class": "resting",
       "reversibility": "reversible-slow",
+      "handoff": true,
       "issue_types": [
         "experiment"
       ]
@@ -38,19 +40,31 @@
       "class": "terminal",
       "reversibility": "reversible-slow",
       "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
+      "close_reason": "completed",
+      "spawns": {
+        "issue_type": "chore",
+        "initial_state": "raw"
+      }
     },
     "killed": {
       "class": "terminal",
       "reversibility": "reversible-slow",
       "terminal_taxonomy": "abandoned",
-      "close_reason": "not planned"
+      "close_reason": "not planned",
+      "spawns": {
+        "issue_type": "chore",
+        "initial_state": "raw"
+      }
     },
     "iterated": {
       "class": "terminal",
       "reversibility": "reversible-fast",
       "terminal_taxonomy": "superseded",
-      "close_reason": "not planned"
+      "close_reason": "not planned",
+      "spawns": {
+        "issue_type": "experiment",
+        "initial_state": "raw"
+      }
     },
     "aborted": {
       "class": "terminal",

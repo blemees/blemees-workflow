@@ -108,6 +108,7 @@ from pathlib import Path
 from typing import Any
 
 from workflow.core.model.state_machine import (
+    CollectAdvanceRule,
     Collects,
     ReversibilityClass,
     Spawn,
@@ -211,6 +212,13 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
     if description == "":
         description = None
 
+    group_raw = data.get("group")
+    if group_raw is not None and not isinstance(group_raw, str):
+        raise ParseError("Top-level `group` must be a string if present.")
+    group = group_raw.strip() if isinstance(group_raw, str) else None
+    if group == "":
+        group = None
+
     states_raw = data.get("states")
     if not isinstance(states_raw, dict):
         raise ParseError("`states` must be a JSON object (id → state spec).")
@@ -259,6 +267,7 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
     return StateMachine(
         name=name,
         description=description,
+        group=group,
         states=states,
         transitions=transitions,
         gates_in_legend=gates_in_legend,
@@ -651,11 +660,20 @@ def _parse_collects(
             f"state where the collector issue is created."
         )
 
-    process = raw.get("process")
-    if not isinstance(process, str) or not process.strip():
+    # `process` is optional — state names are unique workflow-wide, so
+    # the source process is derivable from `from_states`. The validator
+    # resolves omitted process names; if authored it must match the
+    # resolution.
+    process_raw = raw.get("process")
+    process: str | None
+    if process_raw is None:
+        process = None
+    elif isinstance(process_raw, str) and process_raw.strip():
+        process = process_raw.strip()
+    else:
         raise ParseError(
-            f"State {state_id!r}: `collects.process` is required and must be "
-            f"a non-empty string."
+            f"State {state_id!r}: `collects.process`, if present, must be a "
+            f"non-empty string."
         )
 
     from_states_raw = raw.get("from_states")
@@ -703,12 +721,12 @@ def _parse_collects(
             issue_types.append(cleaned)
 
     advance_on_raw = raw.get("advance_on")
-    advance_on: list[tuple[str, str]] = []
+    advance_on: list[CollectAdvanceRule] = []
     if advance_on_raw is not None:
         if not isinstance(advance_on_raw, dict):
             raise ParseError(
                 f"State {state_id!r}: `collects.advance_on` must be an object "
-                f"mapping collector-state → contributor-state (got "
+                f"mapping collector-state → target (got "
                 f"{type(advance_on_raw).__name__})."
             )
         for k, v in advance_on_raw.items():
@@ -717,12 +735,68 @@ def _parse_collects(
                     f"State {state_id!r}: `collects.advance_on` keys must be "
                     f"collector-state names (got {k!r})."
                 )
-            if not isinstance(v, str) or not v.strip():
-                raise ParseError(
-                    f"State {state_id!r}: `collects.advance_on[{k!r}]` must be "
-                    f"a contributor-state name (got {v!r})."
+            collector_state = k.strip()
+            if isinstance(v, str):
+                if not v.strip():
+                    raise ParseError(
+                        f"State {state_id!r}: `collects.advance_on[{k!r}]` "
+                        f"must be a non-empty target state name."
+                    )
+                advance_on.append(
+                    CollectAdvanceRule(
+                        collector_state=collector_state,
+                        default_target=v.strip(),
+                        by_type=(),
+                    )
                 )
-            advance_on.append((k.strip(), v.strip()))
+            elif isinstance(v, dict):
+                if not v:
+                    raise ParseError(
+                        f"State {state_id!r}: `collects.advance_on[{k!r}]` "
+                        f"must declare at least one target."
+                    )
+                default_target: str | None = None
+                by_type: list[tuple[str, str]] = []
+                seen_types: set[str] = set()
+                for tk, tv in v.items():
+                    if not isinstance(tk, str) or not tk.strip():
+                        raise ParseError(
+                            f"State {state_id!r}: "
+                            f"`collects.advance_on[{k!r}]` keys must be "
+                            f"contributor type ids or '*' (got {tk!r})."
+                        )
+                    if not isinstance(tv, str) or not tv.strip():
+                        raise ParseError(
+                            f"State {state_id!r}: "
+                            f"`collects.advance_on[{k!r}][{tk!r}]` must be a "
+                            f"non-empty target state name."
+                        )
+                    type_key = tk.strip()
+                    target_state = tv.strip()
+                    if type_key in seen_types:
+                        raise ParseError(
+                            f"State {state_id!r}: "
+                            f"`collects.advance_on[{k!r}]` has duplicate "
+                            f"contributor type {type_key!r}."
+                        )
+                    seen_types.add(type_key)
+                    if type_key == "*":
+                        default_target = target_state
+                    else:
+                        by_type.append((type_key, target_state))
+                advance_on.append(
+                    CollectAdvanceRule(
+                        collector_state=collector_state,
+                        default_target=default_target,
+                        by_type=tuple(by_type),
+                    )
+                )
+            else:
+                raise ParseError(
+                    f"State {state_id!r}: `collects.advance_on[{k!r}]` must "
+                    f"be a target state name (string) or a per-type map "
+                    f"(object); got {type(v).__name__}."
+                )
 
     release_on_raw = raw.get("release_on")
     release_on: list[str] = []
@@ -746,7 +820,7 @@ def _parse_collects(
                 )
             release_on.append(cleaned)
 
-    overlap = {k for k, _ in advance_on} & set(release_on)
+    overlap = {rule.collector_state for rule in advance_on} & set(release_on)
     if overlap:
         raise ParseError(
             f"State {state_id!r}: `collects.advance_on` and `collects.release_on` "
@@ -756,7 +830,7 @@ def _parse_collects(
         )
 
     return Collects(
-        process=process.strip(),
+        process=process,
         from_states=tuple(from_states),
         issue_types=tuple(issue_types),
         advance_on=tuple(advance_on),

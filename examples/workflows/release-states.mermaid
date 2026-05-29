@@ -1,5 +1,10 @@
 stateDiagram-v2
     direction TB
+    %% Cross-process interfaces:
+    %%   Handoff: staged (shared resting state)
+    %%   Handoff: measuring (shared resting state)
+    %%
+
     cut --> preparing: RM claims release train
     hotfix_cut --> preparing: IC / RM claims hotfix train
     preparing --> ready_for_release_decision: RM publishes release notes, tags release candidate
@@ -18,5 +23,10 @@ stateDiagram-v2
     abandoned --> [*]: terminal (abandoned)
     rolled_back --> [*]: terminal (reverted)
     released --> [*]: terminal (shipped)
+    shipped --> [*]: terminal (shipped)
+    [*] --> staged: handoff
+    staged --> [*]: handoff
+    [*] --> measuring: handoff
+    measuring --> [*]: handoff
     [*] --> cut: collect
     [*] --> hotfix_cut: collect

@@ -1,6 +1,6 @@
 # Process: inner-loop
 
-The developer's day-to-day flow: claim a refined ticket, implement, open a PR, ship. Spawns a PR child issue and tracks staged/shipped state.
+The developer's day-to-day flow: claim a refined ticket, implement, open a PR. After merge, the ticket lands in `staged`, which is a shared handoff with `release` — from there the release process owns the lifecycle through to shipped. Spawns a PR child issue during implementing.
 
 > Defined in: `inner-loop-states.json`
 
@@ -20,6 +20,7 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Handoff: ready_for_dev (shared resting state)
+    %%   Handoff: staged (shared resting state)
     %%   Handoff: ready_bounced (shared resting state)
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
     %%
@@ -29,11 +30,10 @@ stateDiagram-v2
     ready_for_hotfix --> implementing: developer claims hotfix
     implementing --> ready_bounced: developer bounces ticket
     implementing --> staged: PR merged (auto from pr)
-    staged --> shipped: release shipped (auto from release)
     implementing_spike --> spike_completed: developer posts spike findings
-    shipped --> [*]: terminal (shipped)
     spike_completed --> [*]: terminal (resolved)
     [*] --> ready_for_dev: handoff
+    staged --> [*]: handoff
     ready_bounced --> [*]: handoff
     [*] --> ready_for_hotfix: spawn
     [*] --> ready_for_spike: spawn
@@ -49,7 +49,6 @@ stateDiagram-v2
 | `implementing` | working | — | developer | bug, feature, chore, experiment, hotfix | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
 | `implementing_spike` | working | — | developer | spike | clarify-scope, needs-arch-review, general | — | — |
 | `staged` | resting | reversible-slow | — | bug, feature, chore, experiment, hotfix | — | — | — |
-| `shipped` | terminal | reversible-slow | — | — | — | shipped | completed |
 | `spike_completed` | terminal | reversible-fast | — | — | — | resolved | completed |
 | `ready_bounced` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
 
@@ -62,7 +61,6 @@ stateDiagram-v2
 | `ready_for_hotfix` | `implementing` | claim | 'developer claims hotfix' | — | — |
 | `implementing` | `ready_bounced` | advance | 'developer bounces ticket' | — | — |
 | `implementing` | `staged` | advance | 'PR merged (auto from pr)' | — | — |
-| `staged` | `shipped` | event | 'release shipped (auto from release)' | — | — |
 | `implementing_spike` | `spike_completed` | advance | 'developer posts spike findings' | — | — |
 
 ## Cross-process handoffs
@@ -70,6 +68,7 @@ stateDiagram-v2
 **Handoff states** (shared resting states declared in ≥2 processes):
 
 - `ready_for_dev` — interface state, also declared by the partner process(es).
+- `staged` — interface state, also declared by the partner process(es).
 - `ready_bounced` — interface state, also declared by the partner process(es).
 
 **Spawns** (states that create child issues on other processes):
