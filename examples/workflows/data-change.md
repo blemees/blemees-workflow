@@ -17,8 +17,8 @@ stateDiagram-v2
     creating_backup --> backup_ready: responder confirms backup captured and restorable
     backup_ready --> applying_data_change: responder claims to apply data change
     applying_data_change --> data_change_applied: responder applies and verifies data change
-    data_change_applied --> [*]: terminal (shipped)
-    [*] --> ready_for_data_change: spawn
+    data_change_applied --> [*]: ⊡ mitigated
+    [*] --> ready_for_data_change: ᐉ execute_mitigation
 ```
 
 ## States
@@ -39,3 +39,17 @@ stateDiagram-v2
 | `creating_backup` | `backup_ready` | advance | 'responder confirms backup captured and restorable' | — | — |
 | `backup_ready` | `applying_data_change` | claim | 'responder claims to apply data change' | — | — |
 | `applying_data_change` | `data_change_applied` | advance | 'responder applies and verifies data change' | — | — |
+
+## Cross-process interfaces
+
+### Inbound
+
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `ready_for_data_change` | ᐉ spawn | [`mitigation`](./mitigation.md) · `execute_mitigation` | `data-change` issue |
+
+### Outbound
+
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `data_change_applied` | ⊡ feedback | [`mitigation`](./mitigation.md) | advances parent to `mitigated` (spawn from `execute_mitigation`, `data-change`) |

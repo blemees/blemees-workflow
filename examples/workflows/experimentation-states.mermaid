@@ -15,7 +15,17 @@ stateDiagram-v2
     analyzing --> promoted: PO promotes experiment to feature (files promotion chore on process refinement)
     analyzing --> killed: PO kills experiment (files cleanup chore on process refinement)
     analyzing --> iterated: PO requests experiment iteration (files new experiment on process refinement)
-    promoted --> [*]: terminal (shipped)
-    killed --> [*]: terminal (abandoned)
-    iterated --> [*]: terminal (superseded)
-    aborted --> [*]: terminal (abandoned)
+    promoted --> [*]: ■ promoted
+    killed --> [*]: ■ killed
+    iterated --> [*]: ■ iterated
+    aborted --> [*]: ■ aborted
+
+    note left of promoted
+        ᐉ ready_for_dev (chore)
+    end note
+    note left of killed
+        ᐉ ready_for_dev (chore)
+    end note
+    note left of iterated
+        ᐉ raw (experiment)
+    end note

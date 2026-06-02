@@ -13,12 +13,6 @@ The developer's day-to-day flow: claim a refined ticket, implement, open a PR. A
 - `hotfix` — **Hotfix**: Compressed inner-loop work for urgent production fixes during active incidents. Branch prefix `hotfix/`. Spawned by mitigation under IC authority; skips refinement; QA may be bypassed.
 - `spike` — **Spike**: Time-boxed investigation. Branch prefix `spike/`. Deliverable is a findings doc, not merged code — the PR is never merged. Follow-ups re-enter refinement.
 
-## External entry points
-
-States where new issues materialize from outside the workflow — manual `create-issue --to <state>`, a webhook, or a scheduled job. Distinct from spawn / collect targets, which are reached via upstream work in another process; the framework enforces the two as mutually exclusive per state.
-
-- `ready_for_dev` — engineer files chore directly (skips refinement)
-
 ## State diagram
 
 ```mermaid
@@ -31,20 +25,29 @@ stateDiagram-v2
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
     %%
 
-    [*] --> ready_for_dev: engineer files chore directly (skips refinement)
+    [*] --> ready_for_dev: ▶ ready_for_dev
     ready_for_dev --> implementing: developer claims issue
     ready_for_spike --> implementing_spike: developer claims spike
     ready_for_hotfix --> implementing: developer claims hotfix
     implementing --> ready_bounced: developer bounces ticket
     implementing --> staged: PR merged (auto from pr)
     implementing_spike --> spike_completed: developer posts spike findings
-    spike_completed --> [*]: terminal (resolved)
-    [*] --> ready_for_dev: handoff
-    staged --> [*]: handoff
-    ready_bounced --> [*]: handoff
-    [*] --> ready_for_dev: spawn
-    [*] --> ready_for_hotfix: spawn
-    [*] --> ready_for_spike: spawn
+    spike_completed --> [*]: ⊡ spike_returned
+    [*] --> ready_for_dev: ⊙ ready_for_dev
+    staged --> [*]: ⊙ staged
+    ready_bounced --> [*]: ⊙ ready_bounced
+    [*] --> ready_for_dev: ᐉ complete
+    [*] --> ready_for_dev: ᐉ killed
+    [*] --> ready_for_dev: ᐉ promoted
+    [*] --> ready_for_hotfix: ᐉ execute_mitigation
+    [*] --> ready_for_spike: ᐉ spiking
+
+    note left of implementing
+        ᐉ draft (pr)
+    end note
+    note left of staged
+        ⊡ merged (pr)
+    end note
 ```
 
 ## States
@@ -71,15 +74,30 @@ stateDiagram-v2
 | `implementing` | `staged` | advance | 'PR merged (auto from pr)' | — | — |
 | `implementing_spike` | `spike_completed` | advance | 'developer posts spike findings' | — | — |
 
-## Cross-process handoffs
+## Cross-process interfaces
 
-**Handoff states** (shared resting states declared in ≥2 processes):
+### Inbound
 
-- `ready_for_dev` — interface state, also declared by the partner process(es).
-- `staged` — interface state, also declared by the partner process(es).
-- `ready_bounced` — interface state, also declared by the partner process(es).
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `ready_for_dev` | ▶ entry | — (external) | `create-issue --to ready_for_dev` — engineer files chore directly (skips refinement) |
+| `ready_for_dev` | ᐉ spawn | [`experimentation`](./experimentation.md) · `killed` | `chore` issue |
+| `ready_for_dev` | ᐉ spawn | [`experimentation`](./experimentation.md) · `promoted` | `chore` issue |
+| `ready_for_dev` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `chore` issue |
+| `ready_for_hotfix` | ᐉ spawn | [`mitigation`](./mitigation.md) · `execute_mitigation` | `hotfix` issue |
+| `ready_for_spike` | ᐉ spawn | [`refinement`](./refinement.md) · `spiking` | `spike` issue |
+| `staged` | ⊡ feedback | [`pr`](./pr.md) · `merged` | child terminates → advance (spawned from `implementing`, `pr`) |
+| `ready_for_dev` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
+| `staged` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
+| `ready_bounced` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
 
-**Spawns** (states that create child issues on other processes):
+### Outbound
 
-- `implementing` (subprocess) → process `pr` as `pr` issue at `draft`
-    - on child `merged` → parent `staged`
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `shipped` | ⊡ feedback | [`mitigation`](./mitigation.md) | advances parent to `mitigated` (spawn from `execute_mitigation`, `hotfix`) |
+| `spike_completed` | ⊡ feedback | [`refinement`](./refinement.md) | advances parent to `spike_returned` (spawn from `spiking`, `spike`) |
+| `implementing` | ᐉ spawn | [`pr`](./pr.md) · `draft` | as `pr` issue (subprocess) |
+| `ready_for_dev` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
+| `staged` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
+| `ready_bounced` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |

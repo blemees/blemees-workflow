@@ -8,12 +8,6 @@ Coordinate the live response to a production incident: declare, mitigate, stabil
 
 - `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident-mitigation`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
 
-## External entry points
-
-States where new issues materialize from outside the workflow — manual `create-issue --to <state>`, a webhook, or a scheduled job. Distinct from spawn / collect targets, which are reached via upstream work in another process; the framework enforces the two as mutually exclusive per state.
-
-- `declared` — alert / report triggers incident (external)
-
 ## State diagram
 
 ```mermaid
@@ -24,7 +18,7 @@ stateDiagram-v2
     %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
     %%
 
-    [*] --> declared: alert / report triggers incident (external)
+    [*] --> declared: ▶ declared
     declared --> triaging: IC claims incident
     triaging --> needs_diagnosis: IC assigns severity, assigns responder
     needs_diagnosis --> diagnosing: responder claims diagnosis
@@ -34,7 +28,17 @@ stateDiagram-v2
     needs_verification --> verifying: responder claims verification
     verifying --> cause_identified: responder reports mitigation failed
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
-    stabilized --> [*]: terminal (superseded)
+    stabilized --> [*]: ■ stabilized
+
+    note left of mitigating
+        ᐉ ready_for_mitigation (incident-mitigation)
+    end note
+    note left of needs_verification
+        ⊡ mitigated (incident-mitigation)
+    end note
+    note left of stabilized
+        ᐉ pending (postmortem)
+    end note
 ```
 
 ## States
@@ -65,10 +69,18 @@ stateDiagram-v2
 | `verifying` | `cause_identified` | advance | 'responder reports mitigation failed' | — | — |
 | `verifying` | `stabilized` | advance | 'responder confirms production stable (spawns postmortem on process postmortem)' | — | — |
 
-## Cross-process handoffs
+## Cross-process interfaces
 
-**Spawns** (states that create child issues on other processes):
+### Inbound
 
-- `mitigating` (subprocess) → process `mitigation` as `incident-mitigation` issue at `ready_for_mitigation`
-    - on child `mitigated` → parent `needs_verification`
-- `stabilized` (independent) → process `postmortem` as `postmortem` issue at `pending`
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `declared` | ▶ entry | — (external) | `create-issue --to declared` — alert / report triggers incident (external) |
+| `needs_verification` | ⊡ feedback | [`mitigation`](./mitigation.md) · `mitigated` | child terminates → advance (spawned from `mitigating`, `incident-mitigation`) |
+
+### Outbound
+
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `mitigating` | ᐉ spawn | [`mitigation`](./mitigation.md) · `ready_for_mitigation` | as `incident-mitigation` issue (subprocess) |
+| `stabilized` | ᐉ spawn | [`postmortem`](./postmortem.md) · `pending` | as `postmortem` issue (independent) |

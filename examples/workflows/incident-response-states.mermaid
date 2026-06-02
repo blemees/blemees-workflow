@@ -5,7 +5,7 @@ stateDiagram-v2
     %%   Spawn:   stabilized → process postmortem (issue_type=postmortem, initial=pending)
     %%
 
-    [*] --> declared: alert / report triggers incident (external)
+    [*] --> declared: ▶ declared
     declared --> triaging: IC claims incident
     triaging --> needs_diagnosis: IC assigns severity, assigns responder
     needs_diagnosis --> diagnosing: responder claims diagnosis
@@ -15,4 +15,14 @@ stateDiagram-v2
     needs_verification --> verifying: responder claims verification
     verifying --> cause_identified: responder reports mitigation failed
     verifying --> stabilized: responder confirms production stable (spawns postmortem on process postmortem)
-    stabilized --> [*]: terminal (superseded)
+    stabilized --> [*]: ■ stabilized
+
+    note left of mitigating
+        ᐉ ready_for_mitigation (incident-mitigation)
+    end note
+    note left of needs_verification
+        ⊡ mitigated (incident-mitigation)
+    end note
+    note left of stabilized
+        ᐉ pending (postmortem)
+    end note

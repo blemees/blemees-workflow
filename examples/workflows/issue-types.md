@@ -1,7 +1,5 @@
 # Issue types
 
-> Defined in: `issue-types.json`
-
 Each process declares which of these it accepts via its `issue_types` field. Type is set at creation and immutable.
 
 ## `bug` — Bug

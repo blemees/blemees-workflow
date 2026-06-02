@@ -7,17 +7,26 @@ stateDiagram-v2
     %%   Spawn:   implementing → process pr (issue_type=pr, initial=draft)
     %%
 
-    [*] --> ready_for_dev: engineer files chore directly (skips refinement)
+    [*] --> ready_for_dev: ▶ ready_for_dev
     ready_for_dev --> implementing: developer claims issue
     ready_for_spike --> implementing_spike: developer claims spike
     ready_for_hotfix --> implementing: developer claims hotfix
     implementing --> ready_bounced: developer bounces ticket
     implementing --> staged: PR merged (auto from pr)
     implementing_spike --> spike_completed: developer posts spike findings
-    spike_completed --> [*]: terminal (resolved)
-    [*] --> ready_for_dev: handoff
-    staged --> [*]: handoff
-    ready_bounced --> [*]: handoff
-    [*] --> ready_for_dev: spawn
-    [*] --> ready_for_hotfix: spawn
-    [*] --> ready_for_spike: spawn
+    spike_completed --> [*]: ⊡ spike_returned
+    [*] --> ready_for_dev: ⊙ ready_for_dev
+    staged --> [*]: ⊙ staged
+    ready_bounced --> [*]: ⊙ ready_bounced
+    [*] --> ready_for_dev: ᐉ complete
+    [*] --> ready_for_dev: ᐉ killed
+    [*] --> ready_for_dev: ᐉ promoted
+    [*] --> ready_for_hotfix: ᐉ execute_mitigation
+    [*] --> ready_for_spike: ᐉ spiking
+
+    note left of implementing
+        ᐉ draft (pr)
+    end note
+    note left of staged
+        ⊡ merged (pr)
+    end note

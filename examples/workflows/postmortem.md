@@ -21,8 +21,14 @@ stateDiagram-v2
 
     pending --> drafting: PM claims postmortem
     drafting --> complete: PM closes postmortem (then files follow-ups on refinement)
-    complete --> [*]: terminal (resolved)
-    [*] --> pending: spawn
+    complete --> [*]: ■ complete
+    [*] --> pending: ᐉ stabilized
+
+    note left of complete
+        ᐉ raw (bug)
+        ᐉ ready_for_dev (chore)
+        ᐉ raw (feature)
+    end note
 ```
 
 ## States
@@ -40,10 +46,18 @@ stateDiagram-v2
 | `pending` | `drafting` | claim | 'PM claims postmortem' | — | — |
 | `drafting` | `complete` | advance | 'PM closes postmortem (then files follow-ups on refinement)' | — | — |
 
-## Cross-process handoffs
+## Cross-process interfaces
 
-**Spawns** (states that create child issues on other processes):
+### Inbound
 
-- `complete` (independent) → process `(derived from initial_state)` as `bug` issue at `raw`
-- `complete` (independent) → process `inner-loop` as `chore` issue at `ready_for_dev`
-- `complete` (independent) → process `(derived from initial_state)` as `feature` issue at `raw`
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `pending` | ᐉ spawn | [`incident-response`](./incident-response.md) · `stabilized` | `postmortem` issue |
+
+### Outbound
+
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `complete` | ᐉ spawn | _(derived)_ · `raw` | as `bug` issue (independent) |
+| `complete` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_dev` | as `chore` issue (independent) |
+| `complete` | ᐉ spawn | _(derived)_ · `raw` | as `feature` issue (independent) |

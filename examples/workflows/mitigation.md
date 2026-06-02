@@ -23,8 +23,19 @@ stateDiagram-v2
     plan_mitigation --> mitigation_planned: responder finalizes mitigation plan
     mitigation_planned --> execute_mitigation: responder claims to execute mitigation
     execute_mitigation --> mitigated: all spawned mitigations complete (auto via wait-for-all cascade)
-    mitigated --> [*]: terminal (shipped)
-    [*] --> ready_for_mitigation: spawn
+    mitigated --> [*]: ⊡ needs_verification
+    [*] --> ready_for_mitigation: ᐉ mitigating
+
+    note left of execute_mitigation
+        ᐉ ready_for_hotfix (hotfix)
+        ᐉ ready_for_config_change (config-change)
+        ᐉ ready_for_data_change (data-change)
+    end note
+    note left of mitigated
+        ⊡ shipped (hotfix)
+        ⊡ config_applied (config-change)
+        ⊡ data_change_applied (data-change)
+    end note
 ```
 
 ## States
@@ -46,13 +57,22 @@ stateDiagram-v2
 | `mitigation_planned` | `execute_mitigation` | claim | 'responder claims to execute mitigation' | — | — |
 | `execute_mitigation` | `mitigated` | advance | 'all spawned mitigations complete (auto via wait-for-all cascade)' | — | — |
 
-## Cross-process handoffs
+## Cross-process interfaces
 
-**Spawns** (states that create child issues on other processes):
+### Inbound
 
-- `execute_mitigation` (subprocess) → process `(derived from initial_state)` as `hotfix` issue at `ready_for_hotfix`
-    - on child `shipped` → parent `mitigated`
-- `execute_mitigation` (subprocess) → process `(derived from initial_state)` as `config-change` issue at `ready_for_config_change`
-    - on child `config_applied` → parent `mitigated`
-- `execute_mitigation` (subprocess) → process `(derived from initial_state)` as `data-change` issue at `ready_for_data_change`
-    - on child `data_change_applied` → parent `mitigated`
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `ready_for_mitigation` | ᐉ spawn | [`incident-response`](./incident-response.md) · `mitigating` | `incident-mitigation` issue |
+| `mitigated` | ⊡ feedback | _(derived)_ · `shipped` | child terminates → advance (spawned from `execute_mitigation`, `hotfix`) |
+| `mitigated` | ⊡ feedback | _(derived)_ · `config_applied` | child terminates → advance (spawned from `execute_mitigation`, `config-change`) |
+| `mitigated` | ⊡ feedback | _(derived)_ · `data_change_applied` | child terminates → advance (spawned from `execute_mitigation`, `data-change`) |
+
+### Outbound
+
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `mitigated` | ⊡ feedback | [`incident-response`](./incident-response.md) | advances parent to `needs_verification` (spawn from `mitigating`, `incident-mitigation`) |
+| `execute_mitigation` | ᐉ spawn | _(derived)_ · `ready_for_hotfix` | as `hotfix` issue (subprocess) |
+| `execute_mitigation` | ᐉ spawn | _(derived)_ · `ready_for_config_change` | as `config-change` issue (subprocess) |
+| `execute_mitigation` | ᐉ spawn | _(derived)_ · `ready_for_data_change` | as `data-change` issue (subprocess) |

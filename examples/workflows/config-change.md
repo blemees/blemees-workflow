@@ -15,8 +15,8 @@ stateDiagram-v2
     direction TB
     ready_for_config_change --> applying_config_change: responder claims config change
     applying_config_change --> config_applied: responder applies and confirms config change is live
-    config_applied --> [*]: terminal (shipped)
-    [*] --> ready_for_config_change: spawn
+    config_applied --> [*]: ⊡ mitigated
+    [*] --> ready_for_config_change: ᐉ execute_mitigation
 ```
 
 ## States
@@ -33,3 +33,17 @@ stateDiagram-v2
 |---|---|---|---|---|---|
 | `ready_for_config_change` | `applying_config_change` | claim | 'responder claims config change' | — | — |
 | `applying_config_change` | `config_applied` | advance | 'responder applies and confirms config change is live' | — | — |
+
+## Cross-process interfaces
+
+### Inbound
+
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `ready_for_config_change` | ᐉ spawn | [`mitigation`](./mitigation.md) · `execute_mitigation` | `config-change` issue |
+
+### Outbound
+
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `config_applied` | ⊡ feedback | [`mitigation`](./mitigation.md) | advances parent to `mitigated` (spawn from `execute_mitigation`, `config-change`) |

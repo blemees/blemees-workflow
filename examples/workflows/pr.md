@@ -29,8 +29,8 @@ stateDiagram-v2
     qa_passed --> merging: developer claims and merges
     merging --> merged: verified staging deploy
     merging --> needs_review: merge conflict or failed staging deploy
-    merged --> [*]: terminal (shipped)
-    [*] --> draft: spawn
+    merged --> [*]: ⊡ staged
+    [*] --> draft: ᐉ implementing
 ```
 
 ## States
@@ -71,3 +71,17 @@ stateDiagram-v2
 | `qa_passed` | `merging` | claim | 'developer claims and merges' | — | — |
 | `merging` | `merged` | advance | 'verified staging deploy' | — | — |
 | `merging` | `needs_review` | advance | 'merge conflict or failed staging deploy' | — | — |
+
+## Cross-process interfaces
+
+### Inbound
+
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `draft` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `implementing` | `pr` issue |
+
+### Outbound
+
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `merged` | ⊡ feedback | [`inner-loop`](./inner-loop.md) | advances parent to `staged` (spawn from `implementing`, `pr`) |

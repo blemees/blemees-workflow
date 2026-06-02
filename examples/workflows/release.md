@@ -38,16 +38,20 @@ stateDiagram-v2
     monitoring --> released: on-call confirms post-deploy window clean
     monitoring --> rolling_back: on-call triggers rollback
     rolling_back --> rolled_back: rollback completes
-    abandoned --> [*]: terminal (abandoned)
-    rolled_back --> [*]: terminal (reverted)
-    released --> [*]: terminal (shipped)
-    shipped --> [*]: terminal (shipped)
-    [*] --> staged: handoff
-    staged --> [*]: handoff
-    [*] --> measuring: handoff
-    measuring --> [*]: handoff
-    [*] --> cut: collect
-    [*] --> hotfix_cut: collect
+    abandoned --> [*]: ■ abandoned
+    rolled_back --> [*]: ■ rolled_back
+    released --> [*]: ■ released
+    shipped --> [*]: ■ shipped
+    staged --> measuring: ⊡ released [experiment]
+    staged --> shipped: ⊡ released
+    staged --> [*]: ⧄ abandoned
+    staged --> [*]: ⧄ rolled_back
+    [*] --> staged: ⊙ staged
+    staged --> [*]: ⊙ staged
+    [*] --> measuring: ⊙ measuring
+    measuring --> [*]: ⊙ measuring
+    [*] --> cut: ꘜ cut [bug,feature,chore,experiment]
+    [*] --> hotfix_cut: ꘜ hotfix_cut [hotfix]
 ```
 
 ## States
@@ -93,20 +97,24 @@ stateDiagram-v2
 | `monitoring` | `rolling_back` | advance | 'on-call triggers rollback' | — | — |
 | `rolling_back` | `rolled_back` | advance | 'rollback completes' | — | — |
 
-## Cross-process handoffs
+## Cross-process interfaces
 
-**Handoff states** (shared resting states declared in ≥2 processes):
+### Inbound
 
-- `staged` — interface state, also declared by the partner process(es).
-- `measuring` — interface state, also declared by the partner process(es).
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `cut` | ꘜ collect | this process · `staged` | types `bug`, `feature`, `chore`, `experiment`; on `released`: `*`→`shipped`, `experiment`→`measuring`; on `abandoned` → released; on `rolled_back` → released |
+| `hotfix_cut` | ꘜ collect | this process · `staged` | types `hotfix`; on `released` → `shipped`; on `abandoned` → released; on `rolled_back` → released |
+| `staged` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
+| `measuring` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
 
-**Collects** (states that gather contributors from other processes when an issue is created here):
+### Outbound
 
-- `cut` ← process `None` from `staged` (types: `bug`, `feature`, `chore`, `experiment`)
-    - on collector `released` → per-contributor-type: `*`→`shipped`, `experiment`→`measuring`
-    - on collector `abandoned` → contributors released (back to candidacy)
-    - on collector `rolled_back` → contributors released (back to candidacy)
-- `hotfix_cut` ← process `None` from `staged` (types: `hotfix`)
-    - on collector `released` → contributors `shipped`
-    - on collector `abandoned` → contributors released (back to candidacy)
-    - on collector `rolled_back` → contributors released (back to candidacy)
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `staged` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
+| `measuring` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
+| `abandoned` | ■ exit | — (closes) | abandoned; closes `not planned` |
+| `rolled_back` | ■ exit | — (closes) | reverted; closes `completed` |
+| `released` | ■ exit | — (closes) | shipped; closes `completed` |
+| `shipped` | ■ exit | — (closes) | shipped; closes `completed` |

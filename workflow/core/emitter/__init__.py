@@ -11,6 +11,9 @@ Pre-commit hooks or CI checks should verify these files are up-to-date.
 """
 
 from workflow.core.emitter.docs import (
+    InboundSpawn,
+    OutboundCollect,
+    OutboundFeedback,
     ProcessDocInput,
     emit_index_doc,
     emit_human_inputs_doc,
@@ -18,6 +21,7 @@ from workflow.core.emitter.docs import (
     emit_process_doc,
     emit_process_map,
     emit_roles_doc,
+    spawn_sources_from_inbound,
 )
 from workflow.core.emitter.mermaid import emit_mermaid
 
@@ -30,4 +34,8 @@ __all__ = [
     "emit_process_map",
     "emit_index_doc",
     "ProcessDocInput",
+    "InboundSpawn",
+    "OutboundCollect",
+    "OutboundFeedback",
+    "spawn_sources_from_inbound",
 ]

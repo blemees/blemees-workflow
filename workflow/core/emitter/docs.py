@@ -16,7 +16,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from workflow.core.emitter.mermaid import emit_mermaid
+from workflow.core.emitter.mermaid import (
+    SYMBOL_COLLECT,
+    SYMBOL_ENTRY,
+    SYMBOL_EXIT,
+    SYMBOL_FEEDBACK,
+    SYMBOL_HANDOFF,
+    SYMBOL_RELEASE,
+    SYMBOL_SPAWN,
+    emit_mermaid,
+)
 from workflow.core.model.human_gate import HumanGateCatalog, HumanGateLevel
 from workflow.core.model.human_input import HumanInputDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
@@ -27,6 +36,43 @@ from workflow.core.model.state_machine import (
     TransitionType,
 )
 from workflow.core.model.trust_grant import TrustGrant
+
+
+@dataclass(frozen=True)
+class InboundSpawn:
+    """A sibling process's spawn rule that creates a child on this process."""
+
+    target_state: str
+    source_process: str
+    source_state: str
+    issue_type: str
+
+
+@dataclass(frozen=True)
+class OutboundFeedback:
+    """This process's terminal triggers a parent spawn's `advance_on` rule."""
+
+    child_terminal: str
+    parent_process: str
+    parent_state: str
+    parent_next: str
+    issue_type: str
+
+
+@dataclass(frozen=True)
+class OutboundCollect:
+    """A sibling process's collector gathers contributors from this process.
+
+    The mirror of the collector (inbound) side: `source_state` is a
+    resting/terminal state on *this* process that appears in another
+    process's `collects.from_states`, so issues resting here can be pulled
+    into that process's collector.
+    """
+
+    source_state: str
+    collector_process: str
+    collector_state: str
+    issue_types: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -42,7 +88,29 @@ class ProcessDocInput:
     catalog: HumanGateCatalog | None = None
     issue_type_directory: IssueTypeDirectory | None = None
     grants: dict[str, TrustGrant] | None = None
-    spawn_targets: frozenset[str] | None = None
+    inbound_spawns: tuple[InboundSpawn, ...] | None = None
+    outbound_feedback: tuple[OutboundFeedback, ...] | None = None
+    outbound_collects: tuple[OutboundCollect, ...] | None = None
+
+
+def spawn_sources_from_inbound(
+    inbound_spawns: tuple[InboundSpawn, ...] | None,
+) -> dict[str, list[str]] | None:
+    """Derive mermaid `[*] --> state: ᐉ parent` data from inbound spawn rows."""
+    if not inbound_spawns:
+        return None
+    grouped: dict[str, set[str]] = {}
+    for row in inbound_spawns:
+        grouped.setdefault(row.target_state, set()).add(row.source_state)
+    return {state: sorted(parents) for state, parents in sorted(grouped.items())}
+
+
+def feedback_terminals_from_outbound(
+    outbound_feedback: tuple[OutboundFeedback, ...] | None,
+) -> frozenset[str]:
+    if not outbound_feedback:
+        return frozenset()
+    return frozenset(row.child_terminal for row in outbound_feedback)
 
 
 def emit_process_doc(inputs: ProcessDocInput) -> str:
@@ -63,13 +131,25 @@ def emit_process_doc(inputs: ProcessDocInput) -> str:
     if accepted:
         out.extend(_section_issue_types(accepted, inputs.issue_type_directory))
 
-    out.extend(_section_entry_points(sm))
-    out.extend(_section_diagram(sm, spawn_targets=inputs.spawn_targets))
+    out.extend(
+        _section_diagram(
+            sm,
+            spawn_sources=spawn_sources_from_inbound(inputs.inbound_spawns),
+            outbound_feedback=inputs.outbound_feedback,
+        )
+    )
     out.extend(_section_states(sm))
     out.extend(_section_transitions(sm, inputs.catalog, inputs.grants))
     if inputs.catalog is not None and inputs.catalog.entries:
         out.extend(_section_human_gates(sm, inputs.catalog, inputs.grants))
-    out.extend(_section_cross_process(sm))
+    out.extend(
+        _section_cross_process(
+            sm,
+            inputs.inbound_spawns,
+            inputs.outbound_feedback,
+            inputs.outbound_collects,
+        )
+    )
 
     active_grants = _grants_for_process(sm, inputs.grants)
     if active_grants:
@@ -396,7 +476,7 @@ def emit_process_map(processes: list[Any]) -> str:
                 if a_silent and b_silent:
                     flow_ab = flow_ba = False
 
-                label = f"⊙ {state_name}"
+                label = f"{SYMBOL_HANDOFF} {state_name}"
                 if flow_ab and flow_ba:
                     # Bidirectional — emit both directions as separate edges.
                     cross_edges.add((a, b, label))
@@ -421,7 +501,7 @@ def emit_process_map(processes: list[Any]) -> str:
                 target_proc = _spawn_process(sp)
                 if target_proc is None:
                     continue
-                label = f"ᐉ {s.name}"
+                label = f"{SYMBOL_SPAWN} {s.name}"
                 cross_edges.add((p.process_name, target_proc, label))
 
     # Collects.
@@ -439,7 +519,7 @@ def emit_process_map(processes: list[Any]) -> str:
                 if s.collects.issue_types
                 else ""
             )
-            label = f"ꘜ {s.name}{type_suffix}"
+            label = f"{SYMBOL_COLLECT} {s.name}{type_suffix}"
             source_proc = s.collects.process or _collects_source_process(s.collects)
             if source_proc is None or source_proc == p.process_name:
                 # Intra-process collect — no cross-process edge to draw.
@@ -469,7 +549,7 @@ def emit_process_map(processes: list[Any]) -> str:
                         # Self-feedback would be a no-op cross-process
                         # edge; skip.
                         continue
-                    label = f"⊡ {parent_next}"
+                    label = f"{SYMBOL_FEEDBACK} {parent_next}"
                     cross_edges.add((feedback_source, p.process_name, label))
 
     # Collector → contributor feedback. The inverse of collect's data
@@ -487,10 +567,10 @@ def emit_process_map(processes: list[Any]) -> str:
                 # Intra-process collect — no cross-process feedback edge.
                 continue
             for rule in s.collects.advance_on:
-                label = f"⊡ {rule.collector_state}"
+                label = f"{SYMBOL_FEEDBACK} {rule.collector_state}"
                 cross_edges.add((p.process_name, source_proc, label))
             for collector_state in s.collects.release_on:
-                label = f"⧄ {collector_state}"
+                label = f"{SYMBOL_RELEASE} {collector_state}"
                 cross_edges.add((p.process_name, source_proc, label))
 
     if entry_edges or cross_edges or exit_edges:
@@ -499,13 +579,13 @@ def emit_process_map(processes: list[Any]) -> str:
     # (bottom) — preserves top-to-bottom flow in the v2 renderer.
     for process_name, dest_state in entry_edges:
         lines.append(
-            f"    [*] --> {_node_id(process_name)}: ▶ {dest_state}"
+            f"    [*] --> {_node_id(process_name)}: {SYMBOL_ENTRY} {dest_state}"
         )
     for src, dst, label in sorted(cross_edges):
         lines.append(f"    {_node_id(src)} --> {_node_id(dst)}: {label}")
     for process_name, terminal_state in exit_edges:
         lines.append(
-            f"    {_node_id(process_name)} --> [*]: ■ {terminal_state}"
+            f"    {_node_id(process_name)} --> [*]: {SYMBOL_EXIT} {terminal_state}"
         )
 
     return "\n".join(lines) + "\n"
@@ -518,6 +598,7 @@ def emit_index_doc(
     has_issue_types: bool,
     has_human_inputs: bool = False,
     process_map_mermaid: str | None = None,
+    state_machines: list[StateMachine] | None = None,
 ) -> str:
     """Top-level README linking to every generated doc.
 
@@ -573,14 +654,12 @@ def emit_index_doc(
             process_map_mermaid.rstrip(),
             "```",
             "",
-            "The raw mermaid source is also available at "
+            "> Raw mermaid source in: "
             "[`process-map.mermaid`](./process-map.mermaid).",
             "",
-            "**What this map does NOT show:** editorial groupings (Build / Ship "
-            "lanes), edge tiers (happy path vs feedback), or rolled-up labels. "
-            "Each shared state appears as its own edge.",
-            "",
         ])
+    if state_machines:
+        out.extend(_section_workflow_entry_points(state_machines))
     out.extend([
         "## Processes",
         "",
@@ -611,6 +690,51 @@ def _node_id(process_name: str) -> str:
     return process_name.replace("-", "_")
 
 
+def _proc_link(process_name: str) -> str:
+    """Markdown link to a sibling process's generated doc."""
+    return f"[`{process_name}`](./{process_name}.md)"
+
+
+def _collect_detail(collects: Any) -> str:
+    """One-line summary of a `collects` block for a table cell.
+
+    Joins issue-type scoping and per-collector advance / release rules with
+    `; ` since markdown table cells can't hold nested bullet lists.
+    """
+    bits: list[str] = []
+    if collects.issue_types:
+        bits.append("types " + ", ".join(f"`{t}`" for t in collects.issue_types))
+    for rule in collects.advance_on:
+        if not rule.by_type:
+            bits.append(f"on `{rule.collector_state}` → `{rule.default_target}`")
+            continue
+        pieces: list[str] = []
+        if rule.default_target is not None:
+            pieces.append(f"`*`→`{rule.default_target}`")
+        for tk, tgt in rule.by_type:
+            pieces.append(f"`{tk}`→`{tgt}`")
+        bits.append(f"on `{rule.collector_state}`: " + ", ".join(pieces))
+    for collector_state in collects.release_on:
+        bits.append(f"on `{collector_state}` → released")
+    return "; ".join(bits) if bits else "—"
+
+
+def _interface_table(
+    title: str, counterpart_header: str, rows: list[tuple[str, str, str, str]]
+) -> list[str]:
+    """Render `(state, kind, counterpart, detail)` rows as a markdown table."""
+    out = [
+        f"### {title}",
+        "",
+        f"| State | Kind | {counterpart_header} | Detail |",
+        "|---|---|---|---|",
+    ]
+    for state, kind, counterpart, detail in rows:
+        out.append(f"| `{state}` | {kind} | {counterpart} | {detail} |")
+    out.append("")
+    return out
+
+
 # ----- sections -----
 
 
@@ -628,28 +752,36 @@ def _section_issue_types(
     return out
 
 
-def _section_entry_points(sm: StateMachine) -> list[str]:
-    """Render the list of external entry states (those with `initial`).
+def _section_workflow_entry_points(state_machines: list[StateMachine]) -> list[str]:
+    """Render external entry points across the whole workflow.
 
-    Empty when no state declares `initial` (typical for spawn-only
-    processes like `pr` or `postmortem`).
+    Only processes that declare at least one `initial` state contribute
+    rows. Placed in the top-level README alongside the process map.
     """
-    entries = [s for s in sm.states.values() if s.is_initial]
+    entries: list[tuple[str, str, str | None]] = []
+    for sm in sorted(state_machines, key=lambda machine: machine.name):
+        for state in sm.states.values():
+            if state.is_initial:
+                entries.append((sm.name, state.name, state.initial_label))
     if not entries:
         return []
+
     out = ["## External entry points", ""]
     out.append(
         "States where new issues materialize from outside the workflow — "
         "manual `create-issue --to <state>`, a webhook, or a scheduled "
-        "job. Distinct from spawn / collect targets, which are reached "
-        "via upstream work in another process; the framework enforces "
-        "the two as mutually exclusive per state."
+        "job. These correspond to the `▶ <state>` edges from `[*]` on "
+        "the process map above. Distinct from spawn / collect targets, "
+        "which are reached via upstream work in another process; the "
+        "framework enforces the two as mutually exclusive per state."
     )
     out.append("")
-    for s in entries:
-        label = (s.initial_label or "").strip()
-        suffix = f" — {label}" if label else ""
-        out.append(f"- `{s.name}`{suffix}")
+    for process_name, state_name, label in entries:
+        trigger = (label or "").strip()
+        suffix = f" — {trigger}" if trigger else ""
+        out.append(
+            f"- [`{process_name}`](./{process_name}.md) · `{state_name}`{suffix}"
+        )
     out.append("")
     return out
 
@@ -657,14 +789,18 @@ def _section_entry_points(sm: StateMachine) -> list[str]:
 def _section_diagram(
     sm: StateMachine,
     *,
-    spawn_targets: frozenset[str] | None = None,
+    spawn_sources: dict[str, list[str]] | None = None,
+    outbound_feedback: tuple[OutboundFeedback, ...] | None = None,
 ) -> list[str]:
-    targets = set(spawn_targets) if spawn_targets else None
     return [
         "## State diagram",
         "",
         "```mermaid",
-        emit_mermaid(sm, spawn_targets=targets).rstrip(),
+        emit_mermaid(
+            sm,
+            spawn_sources=spawn_sources,
+            outbound_feedback=outbound_feedback,
+        ).rstrip(),
         "```",
         "",
     ]
@@ -773,75 +909,164 @@ def _section_human_gates(
     return out
 
 
-def _section_cross_process(sm: StateMachine) -> list[str]:
-    handoffs = [s for s in sm.states.values() if s.handoff]
-    spawners = [s for s in sm.states.values() if s.spawns]
-    collectors = [s for s in sm.states.values() if s.collects is not None]
-    if not handoffs and not spawners and not collectors:
-        return []
-    out = ["## Cross-process handoffs", ""]
-    if handoffs:
-        out.append("**Handoff states** (shared resting states declared in ≥2 processes):")
-        out.append("")
-        for s in handoffs:
-            out.append(f"- `{s.name}` — interface state, also declared by the partner process(es).")
-        out.append("")
-    if spawners:
-        out.append("**Spawns** (states that create child issues on other processes):")
-        out.append("")
-        for s in spawners:
-            kind = "subprocess" if s.state_class is StateClass.WORKING else "independent"
-            for sp in s.spawns:
-                process_label = sp.process or "(derived from initial_state)"
-                head = (
-                    f"- `{s.name}` ({kind}) → process `{process_label}` "
-                    f"as `{sp.issue_type}` issue at `{sp.initial_state}`"
-                )
-                out.append(head)
-                for child_term, parent_next in sp.advance_on:
-                    out.append(
-                        f"    - on child `{child_term}` → parent `{parent_next}`"
-                    )
-        out.append("")
-    if collectors:
-        out.append(
-            "**Collects** (states that gather contributors from other "
-            "processes when an issue is created here):"
+def _section_cross_process(
+    sm: StateMachine,
+    inbound_spawns: tuple[InboundSpawn, ...] | None = None,
+    outbound_feedback: tuple[OutboundFeedback, ...] | None = None,
+    outbound_collects: tuple[OutboundCollect, ...] | None = None,
+) -> list[str]:
+    """Render cross-process interfaces as two tables — inbound and outbound.
+
+    A row is `(state, kind, counterpart, detail)`. Inbound rows describe work
+    or signals arriving at this process; outbound rows describe this process
+    reaching out. Handoff states are bidirectional and appear in both tables.
+    """
+    inbound: list[tuple[str, str, str, str]] = []
+    outbound: list[tuple[str, str, str, str]] = []
+
+    # ----- inbound -----
+    # External entry — new issues materialize here from outside the workflow.
+    for s in sm.states.values():
+        if not s.is_initial:
+            continue
+        trigger = (s.initial_label or "").strip()
+        detail = f"`create-issue --to {s.name}`"
+        if trigger:
+            detail += f" — {trigger}"
+        inbound.append((s.name, f"{SYMBOL_ENTRY} entry", "— (external)", detail))
+
+    # Inbound spawns — child issues created here by an upstream process.
+    for row in inbound_spawns or ():
+        inbound.append(
+            (
+                row.target_state,
+                f"{SYMBOL_SPAWN} spawn",
+                f"{_proc_link(row.source_process)} · `{row.source_state}`",
+                f"`{row.issue_type}` issue",
+            )
         )
-        out.append("")
-        for s in collectors:
-            c = s.collects
-            assert c is not None
-            sources = ", ".join(f"`{fs}`" for fs in c.from_states)
-            type_suffix = (
-                f" (types: {', '.join(f'`{t}`' for t in c.issue_types)})"
-                if c.issue_types
-                else ""
-            )
-            out.append(
-                f"- `{s.name}` ← process `{c.process}` from {sources}{type_suffix}"
-            )
-            for rule in c.advance_on:
-                if not rule.by_type:
-                    out.append(
-                        f"    - on collector `{rule.collector_state}` → "
-                        f"contributors `{rule.default_target}`"
+
+    # Inbound feedback — this process is the *parent*: a child it spawned
+    # terminates and that advances us. Derived from our own `spawns.advance_on`
+    # (the `parent_next` target lives on this process).
+    for s in sm.states.values():
+        for sp in s.spawns:
+            counterpart_proc = _proc_link(sp.process) if sp.process else "_(derived)_"
+            for child_terminal, parent_next in sp.advance_on:
+                inbound.append(
+                    (
+                        parent_next,
+                        f"{SYMBOL_FEEDBACK} feedback",
+                        f"{counterpart_proc} · `{child_terminal}`",
+                        f"child terminates → advance (spawned from `{s.name}`, "
+                        f"`{sp.issue_type}`)",
                     )
-                    continue
-                pieces: list[str] = []
-                if rule.default_target is not None:
-                    pieces.append(f"`*`→`{rule.default_target}`")
-                for tk, tgt in rule.by_type:
-                    pieces.append(f"`{tk}`→`{tgt}`")
-                out.append(
-                    f"    - on collector `{rule.collector_state}` → "
-                    f"per-contributor-type: {', '.join(pieces)}"
                 )
-            for collector_state in c.release_on:
-                out.append(
-                    f"    - on collector `{collector_state}` → contributors released (back to candidacy)"
+
+    # Collects — this process gathers contributors from another process.
+    for s in sm.states.values():
+        if s.collects is None:
+            continue
+        c = s.collects
+        source = f"{_proc_link(c.process)} · " if c.process else "this process · "
+        source += ", ".join(f"`{fs}`" for fs in c.from_states)
+        inbound.append((s.name, f"{SYMBOL_COLLECT} collect", source, _collect_detail(c)))
+
+    # ----- outbound -----
+    # Outbound feedback — this process is the *child*: a terminal here advances
+    # a parent on another process.
+    for row in outbound_feedback or ():
+        outbound.append(
+            (
+                row.child_terminal,
+                f"{SYMBOL_FEEDBACK} feedback",
+                _proc_link(row.parent_process),
+                f"advances parent to `{row.parent_next}` (spawn from "
+                f"`{row.parent_state}`, `{row.issue_type}`)",
+            )
+        )
+
+    # Outbound spawns — states here that create child issues elsewhere. The
+    # return trip (advance_on) is shown above as inbound feedback.
+    for s in sm.states.values():
+        if not s.spawns:
+            continue
+        kind = "subprocess" if s.state_class is StateClass.WORKING else "independent"
+        for sp in s.spawns:
+            counterpart_proc = _proc_link(sp.process) if sp.process else "_(derived)_"
+            outbound.append(
+                (
+                    s.name,
+                    f"{SYMBOL_SPAWN} spawn",
+                    f"{counterpart_proc} · `{sp.initial_state}`",
+                    f"as `{sp.issue_type}` issue ({kind})",
                 )
-        out.append("")
+            )
+
+    # Collected-from — another process's collector gathers from a state here.
+    # The mirror of the collect (inbound) side, similar to outbound spawns.
+    for row in outbound_collects or ():
+        type_suffix = (
+            " — types " + ", ".join(f"`{t}`" for t in row.issue_types)
+            if row.issue_types
+            else ""
+        )
+        outbound.append(
+            (
+                row.source_state,
+                f"{SYMBOL_COLLECT} collected-from",
+                f"{_proc_link(row.collector_process)} · `{row.collector_state}`",
+                f"contributors pulled into collector{type_suffix}",
+            )
+        )
+
+    # Handoffs — shared resting states declared in ≥2 processes. Bidirectional,
+    # so they appear in both tables.
+    handoffs = [s for s in sm.states.values() if s.handoff]
+    for s in handoffs:
+        inbound.append(
+            (
+                s.name,
+                f"{SYMBOL_HANDOFF} handoff",
+                "partner process(es)",
+                "shared resting state (also outbound)",
+            )
+        )
+    for s in handoffs:
+        outbound.append(
+            (
+                s.name,
+                f"{SYMBOL_HANDOFF} handoff",
+                "partner process(es)",
+                "shared resting state (also inbound)",
+            )
+        )
+
+    # Bare terminals — true workflow exits: terminals with no feedback, spawn,
+    # or handoff role. Feedback terminals (named in some parent's
+    # `spawn.advance_on`) continue work in the parent, so they're excluded.
+    feedback_terminals = {row.child_terminal for row in outbound_feedback or ()}
+    for s in sm.states.values():
+        if not s.is_terminal:
+            continue
+        if s.name in feedback_terminals or s.spawns or s.handoff:
+            continue
+        bits: list[str] = []
+        if s.terminal_taxonomy is not None:
+            bits.append(s.terminal_taxonomy.value)
+        if s.close_reason:
+            bits.append(f"closes `{s.close_reason}`")
+        detail = "; ".join(bits) if bits else "workflow exit"
+        outbound.append((s.name, f"{SYMBOL_EXIT} exit", "— (closes)", detail))
+
+    if not inbound and not outbound:
+        return []
+
+    out = ["## Cross-process interfaces", ""]
+    if inbound:
+        out.extend(_interface_table("Inbound", "From", inbound))
+    if outbound:
+        out.extend(_interface_table("Outbound", "To", outbound))
     return out
 
 

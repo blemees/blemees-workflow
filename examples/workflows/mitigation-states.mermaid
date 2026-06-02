@@ -10,5 +10,16 @@ stateDiagram-v2
     plan_mitigation --> mitigation_planned: responder finalizes mitigation plan
     mitigation_planned --> execute_mitigation: responder claims to execute mitigation
     execute_mitigation --> mitigated: all spawned mitigations complete (auto via wait-for-all cascade)
-    mitigated --> [*]: terminal (shipped)
-    [*] --> ready_for_mitigation: spawn
+    mitigated --> [*]: ⊡ needs_verification
+    [*] --> ready_for_mitigation: ᐉ mitigating
+
+    note left of execute_mitigation
+        ᐉ ready_for_hotfix (hotfix)
+        ᐉ ready_for_config_change (config-change)
+        ᐉ ready_for_data_change (data-change)
+    end note
+    note left of mitigated
+        ⊡ shipped (hotfix)
+        ⊡ config_applied (config-change)
+        ⊡ data_change_applied (data-change)
+    end note

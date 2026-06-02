@@ -71,9 +71,15 @@ stateDiagram-v2
     release --> [*]: ■ shipped
 ```
 
-The raw mermaid source is also available at [`process-map.mermaid`](./process-map.mermaid).
+> Raw mermaid source in: [`process-map.mermaid`](./process-map.mermaid).
 
-**What this map does NOT show:** editorial groupings (Build / Ship lanes), edge tiers (happy path vs feedback), or rolled-up labels. Each shared state appears as its own edge.
+## External entry points
+
+States where new issues materialize from outside the workflow — manual `create-issue --to <state>`, a webhook, or a scheduled job. These correspond to the `▶ <state>` edges from `[*]` on the process map above. Distinct from spawn / collect targets, which are reached via upstream work in another process; the framework enforces the two as mutually exclusive per state.
+
+- [`incident-response`](./incident-response.md) · `declared` — alert / report triggers incident (external)
+- [`inner-loop`](./inner-loop.md) · `ready_for_dev` — engineer files chore directly (skips refinement)
+- [`refinement`](./refinement.md) · `raw` — issue created (external)
 
 ## Processes
 

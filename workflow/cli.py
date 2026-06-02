@@ -3038,7 +3038,11 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     """
     from workflow.config import build_registry
     from workflow.core.emitter import (
+        InboundSpawn,
+        OutboundCollect,
+        OutboundFeedback,
         ProcessDocInput,
+        spawn_sources_from_inbound,
         emit_human_inputs_doc,
         emit_index_doc,
         emit_issue_types_doc,
@@ -3090,40 +3094,121 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         if human_input_directory is None and process.human_input_directory is not None:
             human_input_directory = process.human_input_directory
 
-    # Compute spawn-targets per process: for each sibling's `spawns`,
-    # record the destination process's `initial_state` so its diagram
-    # gets a `[*] --> state: spawn` arrow. Resolve the target process
-    # via the state-name-uniqueness invariant when the author omits
-    # `process`.
+    # Compute spawn-sources per process: for each sibling's `spawns`,
+    # record the parent state and destination `initial_state` so the
+    # child diagram gets a `[*] --> state: ᐉ <parent_state>` arrow.
+    # Resolve the target process via the state-name-uniqueness invariant
+    # when the author omits `process`.
     state_to_process: dict[str, str] = {}
     for p in processes_loaded:
         for state_name in p.state_machine.states:
             state_to_process[state_name] = p.process_name
-    spawn_targets_by_process: dict[str, set[str]] = {}
+    inbound_spawns_by_process: dict[str, list[InboundSpawn]] = {}
+    outbound_feedback_by_process: dict[str, list[OutboundFeedback]] = {}
+    # Mirror of the collector side: for each `collects`, the source process(es)
+    # whose states are gathered FROM get an outbound "collected-from" row.
+    outbound_collects_by_process: dict[str, list[OutboundCollect]] = {}
     for p in processes_loaded:
         for s in p.state_machine.states.values():
             for sp in s.spawns:
                 target_proc = sp.process or state_to_process.get(sp.initial_state)
                 if target_proc is None:
                     continue
-                spawn_targets_by_process.setdefault(target_proc, set()).add(
-                    sp.initial_state
+                inbound_spawns_by_process.setdefault(target_proc, []).append(
+                    InboundSpawn(
+                        target_state=sp.initial_state,
+                        source_process=p.process_name,
+                        source_state=s.name,
+                        issue_type=sp.issue_type,
+                    )
                 )
+                for child_terminal, parent_next in sp.advance_on:
+                    outbound_feedback_by_process.setdefault(target_proc, []).append(
+                        OutboundFeedback(
+                            child_terminal=child_terminal,
+                            parent_process=p.process_name,
+                            parent_state=s.name,
+                            parent_next=parent_next,
+                            issue_type=sp.issue_type,
+                        )
+                    )
+            if s.collects is not None:
+                c = s.collects
+                for from_state in c.from_states:
+                    source_proc = c.process or state_to_process.get(from_state)
+                    if source_proc is None or source_proc == p.process_name:
+                        # Intra-process collect — no cross-process row to draw.
+                        continue
+                    outbound_collects_by_process.setdefault(source_proc, []).append(
+                        OutboundCollect(
+                            source_state=from_state,
+                            collector_process=p.process_name,
+                            collector_state=s.name,
+                            issue_types=c.issue_types,
+                        )
+                    )
+    for proc_name in inbound_spawns_by_process:
+        inbound_spawns_by_process[proc_name].sort(
+            key=lambda row: (
+                row.target_state,
+                row.source_process,
+                row.source_state,
+                row.issue_type,
+            )
+        )
+    for proc_name in outbound_feedback_by_process:
+        outbound_feedback_by_process[proc_name].sort(
+            key=lambda row: (
+                row.child_terminal,
+                row.parent_process,
+                row.parent_state,
+                row.parent_next,
+                row.issue_type,
+            )
+        )
+    for proc_name in outbound_collects_by_process:
+        outbound_collects_by_process[proc_name].sort(
+            key=lambda row: (
+                row.source_state,
+                row.collector_process,
+                row.collector_state,
+            )
+        )
 
     # Second pass: emit mermaid + markdown per process now that
     # cross-process info is available.
     for process in processes_loaded:
         wf_name = process.process_name
-        spawn_targets = spawn_targets_by_process.get(wf_name)
+        inbound_spawns_raw = inbound_spawns_by_process.get(wf_name)
+        inbound_spawns = tuple(inbound_spawns_raw) if inbound_spawns_raw else None
+        outbound_feedback_raw = outbound_feedback_by_process.get(wf_name)
+        outbound_feedback = (
+            tuple(outbound_feedback_raw) if outbound_feedback_raw else None
+        )
+        outbound_collects_raw = outbound_collects_by_process.get(wf_name)
+        outbound_collects = (
+            tuple(outbound_collects_raw) if outbound_collects_raw else None
+        )
+        spawn_sources = spawn_sources_from_inbound(inbound_spawns)
 
         if workflow_dir is None:
             # No on-disk target; print to stdout and continue.
-            print(emit_mermaid(process.state_machine, spawn_targets=spawn_targets))
+            print(
+                emit_mermaid(
+                    process.state_machine,
+                    spawn_sources=spawn_sources,
+                    outbound_feedback=outbound_feedback,
+                )
+            )
             continue
 
         mermaid_path = workflow_dir / f"{wf_name}-states.mermaid"
         mermaid_path.write_text(
-            emit_mermaid(process.state_machine, spawn_targets=spawn_targets),
+            emit_mermaid(
+                process.state_machine,
+                spawn_sources=spawn_sources,
+                outbound_feedback=outbound_feedback,
+            ),
             encoding="utf-8",
         )
         written.append(str(mermaid_path))
@@ -3136,7 +3221,9 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
                     catalog=process.catalog,
                     issue_type_directory=process.issue_type_directory,
                     grants=process.grants,
-                    spawn_targets=frozenset(spawn_targets) if spawn_targets else None,
+                    inbound_spawns=inbound_spawns,
+                    outbound_feedback=outbound_feedback,
+                    outbound_collects=outbound_collects,
                 )
             ),
             encoding="utf-8",
@@ -3180,6 +3267,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
                 has_issue_types=issue_type_directory is not None,
                 has_human_inputs=human_input_directory is not None,
                 process_map_mermaid=process_map_mermaid,
+                state_machines=[p.state_machine for p in processes_loaded],
             ),
             encoding="utf-8",
         )

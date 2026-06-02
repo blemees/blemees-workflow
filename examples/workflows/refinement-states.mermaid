@@ -6,7 +6,7 @@ stateDiagram-v2
     %%   Spawn:   spiking → process inner-loop (issue_type=spike, initial=ready_for_spike)
     %%
 
-    [*] --> raw: issue created (external)
+    [*] --> raw: ▶ raw
     raw --> refining: PM claims raw
     refining --> duplicate: PM marks duplicate
     refining --> wont_fix: PM marks won't-fix
@@ -23,8 +23,16 @@ stateDiagram-v2
     ready_for_dev --> deprioritized: PM parks issue
     deprioritized --> refining: PM claims to re-refine (staleness check)
     deprioritized --> wont_fix: PM kills parked issue
-    duplicate --> [*]: terminal (deduplicated)
-    wont_fix --> [*]: terminal (abandoned)
-    ready_for_dev --> [*]: handoff
-    [*] --> ready_bounced: handoff
-    [*] --> raw: spawn
+    duplicate --> [*]: ■ duplicate
+    wont_fix --> [*]: ■ wont_fix
+    ready_for_dev --> [*]: ⊙ ready_for_dev
+    [*] --> ready_bounced: ⊙ ready_bounced
+    [*] --> raw: ᐉ complete
+    [*] --> raw: ᐉ iterated
+
+    note left of spiking
+        ᐉ ready_for_spike (spike)
+    end note
+    note left of spike_returned
+        ⊡ spike_completed (spike)
+    end note

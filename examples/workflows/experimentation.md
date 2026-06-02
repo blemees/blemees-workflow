@@ -28,10 +28,20 @@ stateDiagram-v2
     analyzing --> promoted: PO promotes experiment to feature (files promotion chore on process refinement)
     analyzing --> killed: PO kills experiment (files cleanup chore on process refinement)
     analyzing --> iterated: PO requests experiment iteration (files new experiment on process refinement)
-    promoted --> [*]: terminal (shipped)
-    killed --> [*]: terminal (abandoned)
-    iterated --> [*]: terminal (superseded)
-    aborted --> [*]: terminal (abandoned)
+    promoted --> [*]: ■ promoted
+    killed --> [*]: ■ killed
+    iterated --> [*]: ■ iterated
+    aborted --> [*]: ■ aborted
+
+    note left of promoted
+        ᐉ ready_for_dev (chore)
+    end note
+    note left of killed
+        ᐉ ready_for_dev (chore)
+    end note
+    note left of iterated
+        ᐉ raw (experiment)
+    end note
 ```
 
 ## States
@@ -60,14 +70,20 @@ stateDiagram-v2
 | `analyzing` | `killed` | advance | 'PO kills experiment (files cleanup chore on process refinement)' | — | — |
 | `analyzing` | `iterated` | advance | 'PO requests experiment iteration (files new experiment on process refinement)' | — | — |
 
-## Cross-process handoffs
+## Cross-process interfaces
 
-**Handoff states** (shared resting states declared in ≥2 processes):
+### Inbound
 
-- `measuring` — interface state, also declared by the partner process(es).
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `measuring` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
 
-**Spawns** (states that create child issues on other processes):
+### Outbound
 
-- `promoted` (independent) → process `inner-loop` as `chore` issue at `ready_for_dev`
-- `killed` (independent) → process `inner-loop` as `chore` issue at `ready_for_dev`
-- `iterated` (independent) → process `(derived from initial_state)` as `experiment` issue at `raw`
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `promoted` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_dev` | as `chore` issue (independent) |
+| `killed` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_dev` | as `chore` issue (independent) |
+| `iterated` | ᐉ spawn | _(derived)_ · `raw` | as `experiment` issue (independent) |
+| `measuring` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
+| `aborted` | ■ exit | — (closes) | abandoned; closes `not planned` |

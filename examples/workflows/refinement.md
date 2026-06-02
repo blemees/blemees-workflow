@@ -10,12 +10,6 @@ Shape raw ideas and bug reports into ready-for-dev tickets. The product manager 
 - `experiment` — **Experiment**: Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Requires hypothesis, metric, and cohort up-front. Post-merge owned by product-owner; closes at verdict on the experimentation lifecycle.
 - `feature` — **Feature**: New user-facing capability or enhancement to existing behavior. Branch prefix `feat/`. Standard inner-loop flow with no per-step variations.
 
-## External entry points
-
-States where new issues materialize from outside the workflow — manual `create-issue --to <state>`, a webhook, or a scheduled job. Distinct from spawn / collect targets, which are reached via upstream work in another process; the framework enforces the two as mutually exclusive per state.
-
-- `raw` — issue created (external)
-
 ## State diagram
 
 ```mermaid
@@ -27,7 +21,7 @@ stateDiagram-v2
     %%   Spawn:   spiking → process inner-loop (issue_type=spike, initial=ready_for_spike)
     %%
 
-    [*] --> raw: issue created (external)
+    [*] --> raw: ▶ raw
     raw --> refining: PM claims raw
     refining --> duplicate: PM marks duplicate
     refining --> wont_fix: PM marks won't-fix
@@ -44,11 +38,19 @@ stateDiagram-v2
     ready_for_dev --> deprioritized: PM parks issue
     deprioritized --> refining: PM claims to re-refine (staleness check)
     deprioritized --> wont_fix: PM kills parked issue
-    duplicate --> [*]: terminal (deduplicated)
-    wont_fix --> [*]: terminal (abandoned)
-    ready_for_dev --> [*]: handoff
-    [*] --> ready_bounced: handoff
-    [*] --> raw: spawn
+    duplicate --> [*]: ■ duplicate
+    wont_fix --> [*]: ■ wont_fix
+    ready_for_dev --> [*]: ⊙ ready_for_dev
+    [*] --> ready_bounced: ⊙ ready_bounced
+    [*] --> raw: ᐉ complete
+    [*] --> raw: ᐉ iterated
+
+    note left of spiking
+        ᐉ ready_for_spike (spike)
+    end note
+    note left of spike_returned
+        ⊡ spike_completed (spike)
+    end note
 ```
 
 ## States
@@ -89,14 +91,26 @@ stateDiagram-v2
 | `deprioritized` | `refining` | claim | 'PM claims to re-refine (staleness check)' | — | — |
 | `deprioritized` | `wont_fix` | advance | 'PM kills parked issue' | — | — |
 
-## Cross-process handoffs
+## Cross-process interfaces
 
-**Handoff states** (shared resting states declared in ≥2 processes):
+### Inbound
 
-- `ready_for_dev` — interface state, also declared by the partner process(es).
-- `ready_bounced` — interface state, also declared by the partner process(es).
+| State | Kind | From | Detail |
+|---|---|---|---|
+| `raw` | ▶ entry | — (external) | `create-issue --to raw` — issue created (external) |
+| `raw` | ᐉ spawn | [`experimentation`](./experimentation.md) · `iterated` | `experiment` issue |
+| `raw` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `bug` issue |
+| `raw` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `feature` issue |
+| `spike_returned` | ⊡ feedback | [`inner-loop`](./inner-loop.md) · `spike_completed` | child terminates → advance (spawned from `spiking`, `spike`) |
+| `ready_for_dev` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
+| `ready_bounced` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
 
-**Spawns** (states that create child issues on other processes):
+### Outbound
 
-- `spiking` (independent) → process `inner-loop` as `spike` issue at `ready_for_spike`
-    - on child `spike_completed` → parent `spike_returned`
+| State | Kind | To | Detail |
+|---|---|---|---|
+| `spiking` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_spike` | as `spike` issue (independent) |
+| `ready_for_dev` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
+| `ready_bounced` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
+| `duplicate` | ■ exit | — (closes) | deduplicated; closes `not planned` |
+| `wont_fix` | ■ exit | — (closes) | abandoned; closes `not planned` |

@@ -20,13 +20,17 @@ stateDiagram-v2
     monitoring --> released: on-call confirms post-deploy window clean
     monitoring --> rolling_back: on-call triggers rollback
     rolling_back --> rolled_back: rollback completes
-    abandoned --> [*]: terminal (abandoned)
-    rolled_back --> [*]: terminal (reverted)
-    released --> [*]: terminal (shipped)
-    shipped --> [*]: terminal (shipped)
-    [*] --> staged: handoff
-    staged --> [*]: handoff
-    [*] --> measuring: handoff
-    measuring --> [*]: handoff
-    [*] --> cut: collect
-    [*] --> hotfix_cut: collect
+    abandoned --> [*]: ■ abandoned
+    rolled_back --> [*]: ■ rolled_back
+    released --> [*]: ■ released
+    shipped --> [*]: ■ shipped
+    staged --> measuring: ⊡ released [experiment]
+    staged --> shipped: ⊡ released
+    staged --> [*]: ⧄ abandoned
+    staged --> [*]: ⧄ rolled_back
+    [*] --> staged: ⊙ staged
+    staged --> [*]: ⊙ staged
+    [*] --> measuring: ⊙ measuring
+    measuring --> [*]: ⊙ measuring
+    [*] --> cut: ꘜ cut [bug,feature,chore,experiment]
+    [*] --> hotfix_cut: ꘜ hotfix_cut [hotfix]
