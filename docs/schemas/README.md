@@ -1,6 +1,6 @@
 # JSON Schemas
 
-Structural schemas for the five authored file types in `blemees-workflow`. **Editor-side feedback only** — the canonical validation is the Python parsers in `workflow/core/parser/` and the cross-reference checks in `workflow/core/validator.py`, surfaced via `workflow validate-workflow`. The schemas mostly cover type / enum constraints; cross-field rules (terminal-needs-taxonomy, gate-only-when-hitl, current_level-in-allowed_levels, etc.) stay in Python.
+Structural schemas for the five authored file types in `blemees-workflow`. **Editor-side feedback only** — the canonical validation is the Python parsers in `workflow/core/parser/` and the cross-reference checks in `workflow/core/validator.py`, surfaced via `workflow validate-workflow`. The schemas mostly cover type / enum constraints; cross-field rules (closing state-needs-taxonomy, gate-only-when-hitl, current_level-in-allowed_levels, etc.) stay in Python.
 
 ## Files
 

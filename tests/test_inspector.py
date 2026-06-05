@@ -5,14 +5,19 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from workflow.core.inspector import available_transitions
-from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
+from workflow.core.model.human_gate import (
+    HumanGate,
+    HumanGateCatalog,
+    HumanGateLevel,
+    HumanGateType,
+)
 from workflow.core.model.state_machine import (
     Closes,
+    ClosureTaxonomy,
     ReversibilityClass,
     State,
     StateClass,
     StateMachine,
-    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -138,6 +143,6 @@ def test_trust_grant_relaxes_effective_level() -> None:
     assert wont.grant_relaxed is False
 
 
-def test_no_actions_for_terminal_state() -> None:
+def test_no_actions_for_closing_state() -> None:
     sm, catalog = _build()
     assert available_transitions(sm, catalog, {}, source_state="wont_fix") == []

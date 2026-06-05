@@ -4,31 +4,34 @@ These principles govern the design of state machine diagrams for agent workflow 
 
 ---
 
-## 1. Every state is resting, working, or terminal
+## 1. Every state is resting or working
 
 - **Resting** — no agent is actively working. The issue is parked, waiting for someone to claim it or for an external event. These are pollable queues.
 - **Working** — an agent has claimed the issue and is actively doing something. Exactly one role owns the item in this state.
-- **Terminal** — the issue is done. No further transitions.
 
-There are no other state types. If a state doesn't fit one of these three, the diagram needs restructuring.
+There are no other state classes. The two classes are an *ownership* distinction: a resting state is unowned, a working state has exactly one owner. If a state doesn't fit one of these two, the diagram needs restructuring.
+
+**Closing states.** Termination is not a class — it is a `closes` annotation on a resting state (see ADR-0002). A resting state carrying `closes: { taxonomy, reason }` is a **closing state**: a sink that closes the tracker's issue on entry. It has no outgoing transitions. This mirrors `is_initial` (the entry annotation on a resting state): entry and exit are both annotations on the unowned class, not classes of their own.
 
 ## 2. Transitions follow strict type rules
 
 | Transition type | From | To | Label pattern | Trigger mechanism |
 |---|---|---|---|---|
 | **Claim** | resting | working | `{role} claims {what}` | Agent polls queue or receives trigger, then runs a claim script |
-| **Role action** | working | resting or terminal | `{role} {verb}` | Agent completes work and runs a state-transition script |
-| **External event** | resting | resting or terminal | `{description} (external)`, `(time)`, or `from/to process {name}` | System event (CI, deploy, timer, webhook) or cross-process handoff (see principle 9) |
+| **Role action** | working | resting | `{role} {verb}` | Agent completes work and runs a state-transition script |
+| **External event** | resting | resting | `{description} (external)`, `(time)`, or `from/to process {name}` | System event (CI, deploy, timer, webhook) or cross-process handoff (see principle 9) |
+
+Closing is no longer a transition *target type* — it's a property of the destination state. A role action or external event into a **closing** resting state is what closes the issue. The destination column is just "resting" (closing states are resting).
 
 No other transition patterns are allowed:
 
-- **resting → resting** is only valid for external/system events (PR merged, production deploy, timer elapses, handoff from another process). Never for agent actions within the same process.
+- **resting → resting** is only valid for external/system events (PR merged, production deploy, timer elapses, handoff from another process) or for landing in a closing state (auto-close). Never for agent actions within the same process.
 - **working → working** is only valid when the same actor continues (e.g., consultant resumes after spike completes). Never across different roles.
-- **resting → terminal** is only valid for external events (auto-close).
+- A **closing** state has no outgoing transitions — it is a sink (enforced by the validator).
 
 ## 3. Agents must claim before working
 
-An agent never acts directly on a resting state. They first claim it (resting → working), then do their work, then park it (working → resting) or close it (working → terminal). This two-step pattern ensures:
+An agent never acts directly on a resting state. They first claim it (resting → working), then do their work, then park it (working → resting) or close it (working → closing state). This two-step pattern ensures:
 
 - The polling/trigger mechanism knows who is responsible.
 - No work is done without an accountable owner.
@@ -78,20 +81,20 @@ Each claim transition maps to a gh helper script (e.g., `claim-raw.sh`, `claim-i
 
 This means the state machine isn't just a diagram — it's the contract that the scripts enforce. If a transition isn't on the diagram, there shouldn't be a script for it.
 
-## 8. Terminal states carry a taxonomy
+## 8. Closing states carry a taxonomy
 
-Not all terminals are equivalent. Every terminal state must be tagged with one of the following categories. The tag supports metrics, dashboards, and post-hoc analysis.
+Not all closing states are equivalent. Every closing state's `closes.taxonomy` must be one of the following categories. The tag supports metrics, dashboards, and post-hoc analysis.
 
 | Tag | Meaning | Examples |
 |---|---|---|
 | **shipped** | Work reached users | `released`, `promoted` (exp), `mitigated`, `config_applied`, `data_change_applied` |
-| **resolved** | Process-complete terminal with no user-facing output (meta-work) | `complete` (postmortem, ADR, retro) |
+| **resolved** | Process-complete close with no user-facing output (meta-work) | `complete` (postmortem, ADR, retro) |
 | **reverted** | Work reached users then was withdrawn | `rolled_back`, `kill_switched` |
 | **abandoned** | Work was not shipped — stopped on purpose (whether at intake or in flight) | `wont_fix`, `killed` (exp), `aborted` (exp), `abandoned` (release train) |
 | **deduplicated** | Work was not shipped because it was a duplicate | `duplicate` |
 | **superseded** | Work continues on a follow-up issue — same-process iteration or cross-process handoff | `iterated` (exp), `stabilized` (incident → postmortem), `ready_bounced` (inner loop → refinement) |
 
-The tag is a label on the terminal state node, or in the note adjacent to it. A terminal without a tag is incomplete.
+The tag lives in `closes.taxonomy`; it is required (the parser rejects a `closes` block without it).
 
 ## 9. Cross-process handoffs use shared resting states
 
@@ -154,7 +157,7 @@ A skill whose scripts transition states on a workflow the skill does not bundle 
 
 ## 11. Transitions may be gated; gating is an overlay, not a state class
 
-Transitions can require a human signal before they fire. Gating is an **overlay** on the existing state machine — it does not introduce a new state class (the resting/working/terminal taxonomy of principle 1 stands) and it does not introduce a new transition type (the four types of principle 2 stand). It marks specific transitions with a HITL annotation; the underlying graph is unchanged.
+Transitions can require a human signal before they fire. Gating is an **overlay** on the existing state machine — it does not introduce a new state class (the resting/working taxonomy of principle 1 stands) and it does not introduce a new transition type (the three types of principle 2 stand). It marks specific transitions with a HITL annotation; the underlying graph is unchanged.
 
 On the workflow diagram:
 

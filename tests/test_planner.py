@@ -11,14 +11,19 @@ from pathlib import Path
 import pytest
 
 from workflow.backends.base import IssueState
-from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
+from workflow.core.model.human_gate import (
+    HumanGate,
+    HumanGateCatalog,
+    HumanGateLevel,
+    HumanGateType,
+)
 from workflow.core.model.state_machine import (
     Closes,
+    ClosureTaxonomy,
     ReversibilityClass,
     State,
     StateClass,
     StateMachine,
-    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -207,8 +212,8 @@ def test_plan_release_without_last_state_errors() -> None:
         )
 
 
-def test_terminal_advance_closes_issue_as_completed() -> None:
-    """Advancing into a terminal-shipped state plans close_issue with the
+def test_closing_advance_closes_issue_as_completed() -> None:
+    """Advancing into a closing state-shipped state plans close_issue with the
     `completed` reason. The backend will close the GitHub issue."""
     workflow = _build_workflow()
     workflow.transitions.append(
@@ -271,8 +276,8 @@ def test_advance_into_non_closing_state_does_not_close_issue() -> None:
     assert plan.change.close_issue is False
 
 
-def test_abandoned_terminal_closes_as_not_planned() -> None:
-    """Abandoned / deduplicated terminals close with `not planned`."""
+def test_abandoned_closing_closes_as_not_planned() -> None:
+    """Abandoned / deduplicated closing states close with `not planned`."""
     workflow = _build_workflow()
     workflow.transitions.append(
         Transition(
@@ -877,7 +882,12 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
     tmp_path: Path,
 ) -> None:
     """Audit-gated dispatch — synthesize a reversible-destination HumanGate at default audit."""
-    from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
+    from workflow.core.model.human_gate import (
+        HumanGate,
+        HumanGateCatalog,
+        HumanGateLevel,
+        HumanGateType,
+    )
     from workflow.core.model.state_machine import (
         ReversibilityClass,
         State,

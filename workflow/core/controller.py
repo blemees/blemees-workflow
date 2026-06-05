@@ -9,7 +9,7 @@ describes the planned change.
 
 After a successful state change the controller invokes the cascade
 machinery (`workflow.core.cascade.cascade_after_state_change`) to walk
-cross-process `advance_on` chains: child terminals trigger parent
+cross-process `advance_on` chains: child closing states trigger parent
 advances, collector advances propagate to contributors, etc. The
 cascade requires a `registry` (the full `Workflow` registry) so it
 can look up sibling-process spawn / collect definitions; controllers

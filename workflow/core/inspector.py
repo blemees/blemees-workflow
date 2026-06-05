@@ -16,10 +16,10 @@ from dataclasses import dataclass
 
 from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel
 from workflow.core.model.state_machine import (
+    ClosureTaxonomy,
     ReversibilityClass,
     StateClass,
     StateMachine,
-    ClosureTaxonomy,
     TransitionType,
 )
 from workflow.core.model.trust_grant import TrustGrant

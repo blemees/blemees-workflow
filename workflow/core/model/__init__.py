@@ -13,13 +13,13 @@ from workflow.core.model.human_gate import (
 from workflow.core.model.role import Role, RoleDirectory
 from workflow.core.model.state_machine import (
     Closes,
+    ClosureTaxonomy,
     Collects,
     ReversibilityClass,
     Spawn,
     State,
     StateClass,
     StateMachine,
-    ClosureTaxonomy,
     Transition,
     TransitionType,
 )

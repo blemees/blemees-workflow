@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://blemees.io/schemas/blemees-workflow/states.schema.json",
   "title": "blemees-workflow state machine",
-  "description": "Schema for `*-states.json` files. Provides editor / IDE feedback on structure and enum values; cross-field rules (terminal-taxonomy presence, role/issue_types/reversibility placement, handoff partner check, spawns.advance_on key/value resolution, etc.) are enforced by the Python parser + validator and surface via `workflow validate-workflow`.",
+  "description": "Schema for `*-states.json` files. Provides editor / IDE feedback on structure and enum values; cross-field rules (closes shape + sink/exclusivity, role/issue_types/reversibility placement, handoff partner check, spawns.advance_on key/value resolution, etc.) are enforced by the Python parser + validator and surface via `workflow validate-workflow`.",
   "type": "object",
   "additionalProperties": true,
   "required": ["states", "transitions"],
@@ -50,7 +50,7 @@
         },
         "advance_on": {
           "type": "object",
-          "description": "Map {child-terminal-state: parent-next-state}. Selective auto-advance — parent advances only on listed child terminals; unmapped terminals keep the parent put. Forbidden on terminal-state spawns. Across all spawn rules on a single state, every parent-next-state value must be the same (the cascade's wait-for-all rule needs a single target).",
+          "description": "Map {child-closing-state: parent-next-state}. Selective auto-advance — parent advances only on listed child closing states; unmapped closing states keep the parent put. Forbidden on closing-state spawns. Across all spawn rules on a single state, every parent-next-state value must be the same (the cascade's wait-for-all rule needs a single target).",
           "additionalProperties": {"type": "string"}
         }
       }
@@ -61,40 +61,49 @@
       "required": ["class"],
       "properties": {
         "class": {
-          "enum": ["resting", "working", "terminal"],
-          "description": "State class per state-machine-principles.md#1."
+          "enum": ["resting", "working"],
+          "description": "State class per state-machine-principles.md#1. Two ownership classes; termination is the `closes` annotation, not a class."
         },
         "roles": {
           "type": "array",
-          "description": "Role ids permitted to occupy this working state. REQUIRED on working states; FORBIDDEN on resting / terminal states. Resting states are open queues; downstream working states declare who may pick items up.",
+          "description": "Role ids permitted to occupy this working state. REQUIRED on working states; FORBIDDEN on resting states (incl. closing). Resting states are open queues; downstream working states declare who may pick items up.",
           "items": {"type": "string", "minLength": 1},
           "minItems": 1,
           "uniqueItems": true
         },
         "issue_types": {
           "type": "array",
-          "description": "Issue type ids that may occupy this state. REQUIRED on working AND resting states; FORBIDDEN on terminal. Working: types this state will do work on. Resting: types that may sit waiting here — must be a subset of the process's working-state umbrella; spawn-target resting states typically declare a single type, shared handoff states declare the full set crossing the interface. The process's overall accepted set is derived as the union of every working state's `issue_types`.",
+          "description": "Issue type ids that may occupy this state. REQUIRED on working AND non-closing resting states; FORBIDDEN on closing states (a closed issue holds nothing). Working: types this state will do work on. Resting: types that may sit waiting here — must be a subset of the process's working-state umbrella; spawn-target resting states typically declare a single type, shared handoff states declare the full set crossing the interface. The process's overall accepted set is derived as the union of every working state's `issue_types`.",
           "items": {"type": "string", "minLength": 1},
           "uniqueItems": true
         },
         "reversibility": {
           "enum": ["irreversible", "reversible-fast", "reversible-slow"],
-          "description": "How reversible landing in this state is. REQUIRED on resting and terminal states; FORBIDDEN on working states (working states are transient — only landings have a reversibility class). Enforced by the Python parser."
+          "description": "How reversible landing in this state is. REQUIRED on resting and closing states; FORBIDDEN on working states (working states are transient — only landings have a reversibility class). Enforced by the Python parser."
         },
-        "terminal_taxonomy": {
-          "enum": [
-            "shipped",
-            "resolved",
-            "reverted",
-            "abandoned",
-            "deduplicated",
-            "superseded"
-          ],
-          "description": "Required on terminal states; forbidden elsewhere (enforced by parser). See state-machine-principles.md#8."
-        },
-        "close_reason": {
-          "type": "string",
-          "description": "Backend close-reason hint. REQUIRED on terminal states, FORBIDDEN elsewhere. For GitHub: 'completed' or 'not planned'."
+        "closes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["taxonomy", "reason"],
+          "description": "Marks a resting state as a closing state (sink that closes the issue on entry; ADR-0002). Only valid on resting states; mutually exclusive with is_initial / collects / handoff / issue_types; the state must have no outgoing transitions. Enforced by the Python parser + validator.",
+          "properties": {
+            "taxonomy": {
+              "enum": [
+                "shipped",
+                "resolved",
+                "reverted",
+                "abandoned",
+                "deduplicated",
+                "superseded"
+              ],
+              "description": "Outcome category. See state-machine-principles.md#8."
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Backend close-reason. For GitHub: 'completed' or 'not planned'."
+            }
+          }
         },
         "handoff": {
           "type": "boolean",
@@ -109,7 +118,7 @@
         },
         "mark_pr_ready": {
           "type": "boolean",
-          "description": "When True, advancing into this state flips the underlying PR from draft to ready-for-review on the tracker (`gh pr ready` on GitHub). No-op when the issue isn't a pull request. Not valid on terminal states."
+          "description": "When True, advancing into this state flips the underlying PR from draft to ready-for-review on the tracker (`gh pr ready` on GitHub). No-op when the issue isn't a pull request. Not valid on closing states."
         },
         "human_inputs": {
           "type": "array",
@@ -126,7 +135,7 @@
               "minItems": 1
             }
           ],
-          "description": "Subprocess / spawn contract. Valid on working, resting, or terminal states. May be a single rule (legacy shape) or a list of rules — a state can declare multiple kinds of work it dispatches. At spawn time, the CLI picks a rule by `--issue-type` (and `--initial-state` if needed). The cascade's wait-for-all rule advances the parent only when every active child satisfies its rule's `advance_on`. The validator enforces (a) no two rules share `(issue_type, initial_state)` on a state and (b) the set of `advance_on` targets across all rules on a state is a singleton."
+          "description": "Subprocess / spawn contract. Valid on working, resting, or closing states. May be a single rule (legacy shape) or a list of rules — a state can declare multiple kinds of work it dispatches. At spawn time, the CLI picks a rule by `--issue-type` (and `--initial-state` if needed). The cascade's wait-for-all rule advances the parent only when every active child satisfies its rule's `advance_on`. The validator enforces (a) no two rules share `(issue_type, initial_state)` on a state and (b) the set of `advance_on` targets across all rules on a state is a singleton."
         },
         "collects": {
           "type": "object",
@@ -136,7 +145,7 @@
             "process": {"type": "string", "description": "Source process name. Optional — when omitted, the validator derives it from `from_states[0]` via the state-name-uniqueness invariant. Authored values must match the resolved value."},
             "from_states": {
               "type": "array",
-              "description": "One or more states in the source process whose issues are eligible contributors. Each entry must be a resting or terminal state (collecting from a working state would conflict with that state's claim).",
+              "description": "One or more states in the source process whose issues are eligible contributors. Each entry must be a resting (incl. closing) state (collecting from a working state would conflict with that state's claim).",
               "items": {"type": "string", "minLength": 1},
               "minItems": 1,
               "uniqueItems": true
@@ -149,7 +158,7 @@
             },
             "advance_on": {
               "type": "object",
-              "description": "Selective contributor feedback: map {collector-state: contributor-target-state}. When the collector reaches a listed state, every contributor bearing the `collected-by:<collector>` marker auto-advances to the mapped state on the source process. Targets must be resting or terminal on the source process (no auto-enter into working states). Mirrors `spawns.advance_on` but flows the other direction — collector-state drives contributor-state.",
+              "description": "Selective contributor feedback: map {collector-state: contributor-target-state}. When the collector reaches a listed state, every contributor bearing the `collected-by:<collector>` marker auto-advances to the mapped state on the source process. Targets must be resting (incl. closing) on the source process (no auto-enter into working states). Mirrors `spawns.advance_on` but flows the other direction — collector-state drives contributor-state.",
               "additionalProperties": {"type": "string"}
             },
             "release_on": {

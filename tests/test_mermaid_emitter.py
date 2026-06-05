@@ -29,11 +29,11 @@ def test_emit_legend_lists_spawns(inner_loop_workflow_path: Path) -> None:
     assert "Spawn:   implementing → process pr" in text
 
 
-def test_emit_terminal_sink_uses_exit_symbol(refinement_workflow_path: Path) -> None:
+def test_emit_closing_sink_uses_exit_symbol(refinement_workflow_path: Path) -> None:
     text = emit_mermaid(parse_state_machine(refinement_workflow_path))
     assert "wont_fix --> [*]: ■ wont_fix" in text
     assert "duplicate --> [*]: ■ duplicate" in text
-    assert "terminal (abandoned)" not in text
+    assert "closing state (abandoned)" not in text
 
 
 def test_emit_star_edges_use_process_map_symbols(
@@ -79,7 +79,7 @@ def test_emit_star_edges_use_process_map_symbols(
         spawn_sources=inner_loop_sources,
         outbound_feedback=(
             OutboundFeedback(
-                child_terminal="spike_completed",
+                child_closing_state="spike_completed",
                 parent_process="refinement",
                 parent_state="spiking",
                 parent_next="spike_returned",
@@ -121,7 +121,7 @@ def test_emit_spawn_state_notes(inner_loop_workflow_path: Path) -> None:
     assert "advance_on:" not in text
 
 
-def test_emit_spawn_state_notes_for_multi_spawn_terminal(workflow_dir: Path) -> None:
+def test_emit_spawn_state_notes_for_multi_spawn_closing(workflow_dir: Path) -> None:
     from workflow.config import build_registry
 
     registry = build_registry(workflow_dir=workflow_dir)
@@ -187,7 +187,12 @@ def test_emit_index_doc_lists_workflow_entry_points(workflow_dir: Path) -> None:
 
 def test_emit_process_doc_lists_inbound_interfaces(workflow_dir: Path) -> None:
     from workflow.config import build_registry
-    from workflow.core.emitter import InboundSpawn, OutboundFeedback, ProcessDocInput, emit_process_doc
+    from workflow.core.emitter import (
+        InboundSpawn,
+        OutboundFeedback,
+        ProcessDocInput,
+        emit_process_doc,
+    )
 
     registry = build_registry(workflow_dir=workflow_dir)
     assert registry is not None
@@ -205,7 +210,7 @@ def test_emit_process_doc_lists_inbound_interfaces(workflow_dir: Path) -> None:
             ),
             outbound_feedback=(
                 OutboundFeedback(
-                    child_terminal="merged",
+                    child_closing_state="merged",
                     parent_process="inner-loop",
                     parent_state="implementing",
                     parent_next="staged",
@@ -334,21 +339,21 @@ def test_process_map_lists_all_processes_and_handoffs(
     assert "[*] --> release: ▶ cut" not in text
     assert "[*] --> release: ▶ hotfix_cut" not in text
 
-    # External exit: terminal states render as exit edges UNLESS:
-    # (a) the terminal is named in some sibling's `spawn.advance_on`
-    #     (feedback terminal — work continues in the parent process),
-    # (b) the terminal itself spawns a follow-up issue (superseded —
+    # External exit: closing states render as exit edges UNLESS:
+    # (a) the closing state is named in some sibling's `spawn.advance_on`
+    #     (feedback closing state — work continues in the parent process),
+    # (b) the closing state itself spawns a follow-up issue (superseded —
     #     work continues as a new child item, and the spawn edge
     #     already shows the continuation), or
-    # (c) the terminal is named in a `collects.advance_on` /
-    #     `release_on` on the same process (collector terminal —
+    # (c) the closing state is named in a `collects.advance_on` /
+    #     `release_on` on the same process (collector closing state —
     #     reaching it fans the contributors out, the cascade carries
     #     the work back into the contributor process).
     assert "refinement --> [*]: ■ wont_fix" in text
     # incident-response.stabilized spawns postmortem — suppress sink.
     assert "incident_response --> [*]: ■ stabilized" not in text
     # release.{released,abandoned,rolled_back} are all collector
-    # terminals on cut / hotfix_cut — suppress sinks.
+    # closing states on cut / hotfix_cut — suppress sinks.
     assert "release --> [*]: ■ released" not in text
     assert "release --> [*]: ■ abandoned" not in text
     assert "release --> [*]: ■ rolled_back" not in text
@@ -357,7 +362,7 @@ def test_process_map_lists_all_processes_and_handoffs(
     # trigger.
     assert "release --> [*]: ■ shipped" in text
 
-    # Feedback terminals — these close the child issue but the parent
+    # Feedback closing states — these close the child issue but the parent
     # process auto-advances on them, so they're not real workflow exits.
     # `spike_completed` (refinement spawns spike; auto-returns to
     # consult_requested), `staged` (inner-loop's PR-spawn auto-advances

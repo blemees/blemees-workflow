@@ -5,15 +5,20 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from workflow.backends.base import IssueState
-from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
+from workflow.core.model.human_gate import (
+    HumanGate,
+    HumanGateCatalog,
+    HumanGateLevel,
+    HumanGateType,
+)
 from workflow.core.model.state_machine import (
     Closes,
+    ClosureTaxonomy,
     Collects,
     ReversibilityClass,
     State,
     StateClass,
     StateMachine,
-    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -377,8 +382,8 @@ def _collector_workflow(collects: Collects) -> StateMachine:
     return sm
 
 
-def _source_workflow_with_terminal_staged() -> StateMachine:
-    """A minimal source workflow with a `staged` terminal state."""
+def _source_workflow_with_closing_staged() -> StateMachine:
+    """A minimal source workflow with a `staged` closing state."""
     sm = StateMachine(name="src_proc")
     sm.states["draft"] = State(
         name="draft",
@@ -409,7 +414,7 @@ def test_collects_unknown_process_errors() -> None:
 
 def test_collects_unknown_from_state_errors() -> None:
     parent = _collector_workflow(Collects(process="src_proc", from_states=("nope",)))
-    src = _source_workflow_with_terminal_staged()
+    src = _source_workflow_with_closing_staged()
     findings = validate_state_machine(
         parent,
         catalog=None,
@@ -436,7 +441,7 @@ def test_collects_working_from_state_errors() -> None:
         sibling_machines={"collector_proc": parent, "src_proc": src},
     )
     assert any(
-        "Collect only from resting or terminal" in f.message for f in findings
+        "Collect only from resting or closing state" in f.message for f in findings
     )
 
 
@@ -580,7 +585,7 @@ def test_process_reached_via_spawn_does_not_warn() -> None:
 
 def test_collects_valid_passes() -> None:
     parent = _collector_workflow(Collects(process="src_proc", from_states=("staged",)))
-    src = _source_workflow_with_terminal_staged()
+    src = _source_workflow_with_closing_staged()
     findings = validate_state_machine(
         parent,
         catalog=None,
@@ -617,7 +622,7 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
             issue_types=("bug",),
         ),
     }
-    # Child process with the right type + initial state + terminal.
+    # Child process with the right type + initial state + closing state.
     child = StateMachine(name="child")
     child.states = {
         "queue": State(

@@ -28,10 +28,9 @@ are gone — the schema demands intent.
       "reversibility": "reversible-slow"
     },
     "wont_fix": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "abandoned",
-      "close_reason": "not planned"
+      "closes": {"taxonomy": "abandoned", "reason": "not planned"}
     }
   },
   "transitions": [
@@ -57,20 +56,26 @@ and is not authored in the JSON. The human-gate catalog path follows the
 same convention: `<process>-human-gates.json`.
 
 ### States
-- `class` (string, required): `"resting"` | `"working"` | `"terminal"`.
-- `reversibility` (string, required on resting + terminal, forbidden on
+- `class` (string, required): `"resting"` | `"working"`.
+- `reversibility` (string, required on resting, forbidden on
   working): `"irreversible"` | `"reversible-fast"` | `"reversible-slow"`.
   Says how reversible *landing* in this state is. Working states are
   transient — only landings have a reversibility class.
-- `terminal_taxonomy` (string, required when `class=terminal`):
-  `"shipped"` | `"resolved"` | `"reverted"` | `"abandoned"` | `"deduplicated"` | `"superseded"`.
+- `closes` (object, optional, resting states only): marks a closing state —
+  a sink that closes the issue on entry. Shape `{"taxonomy": <tag>,
+  "reason": <close reason>}`, where `taxonomy` is one of `"shipped"` |
+  `"resolved"` | `"reverted"` | `"abandoned"` | `"deduplicated"` |
+  `"superseded"`. Mutually exclusive with `initial` / `collects` /
+  `handoff` / `issue_types`; a closing state must have no outgoing
+  transitions.
 - `roles` (list of strings, required on working, forbidden elsewhere):
   role ids permitted to occupy this state. Non-empty. The role-restriction
   lives on the working state, not on the resting queue it's claimed from.
   Resting states are open queues; downstream working states declare who
   may pick items up.
 - `issue_types` (list of strings): the issue types that may occupy this
-  state. Required on working AND resting states; forbidden on terminal.
+  state. Required on working AND non-closing resting states; forbidden on
+  closing states.
   - Working: types this state will actually do work on (claim semantics).
     The process's umbrella accepted-types set is derived as the union
     across all working states.
@@ -85,8 +90,8 @@ same convention: `<process>-human-gates.json`.
 ### Transitions
 - `source` (string, required): state id. `"[*]"` is no longer authored —
   use the `initial` field on a resting state instead.
-- `destination` (string, required): state id. Terminal sinks are implicit;
-  the emitter generates them from each terminal state's `terminal_taxonomy`.
+- `destination` (string, required): state id. Closing-state sinks are implicit;
+  the emitter generates them from each closing state's `closes`.
 - `type` (string, required): `"claim"` | `"advance"` | `"event"`.
 - `label` (string, required): the human-readable transition label.
 - `human_gate` (string, optional): the human-gate catalog's `gate_name` for
@@ -109,6 +114,7 @@ from typing import Any
 
 from workflow.core.model.state_machine import (
     Closes,
+    ClosureTaxonomy,
     CollectAdvanceRule,
     Collects,
     ReversibilityClass,
@@ -116,7 +122,6 @@ from workflow.core.model.state_machine import (
     State,
     StateClass,
     StateMachine,
-    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -136,7 +141,7 @@ _REVERSIBILITY = {
     "reversible-slow": ReversibilityClass.REVERSIBLE_SLOW,
 }
 
-_TERMINAL_TAX = {tax.value: tax for tax in ClosureTaxonomy}
+_CLOSURE_TAX = {tax.value: tax for tax in ClosureTaxonomy}
 
 _TRANSITION_TYPE = {
     "claim": TransitionType.CLAIM,
@@ -293,14 +298,14 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
                 f"{sorted(_REVERSIBILITY.keys())} (got {rev_raw!r})."
             )
         reversibility = _REVERSIBILITY[rev_raw]
-    # Reversibility is REQUIRED on resting + terminal states (every state
+    # Reversibility is REQUIRED on resting + closing states (every state
     # an issue can "land" in declares how reversible the landing is).
     # Working states are transient — the field is FORBIDDEN there.
     if state_class is StateClass.WORKING and reversibility is not None:
         raise ParseError(
             f"State {state_id!r}: `reversibility` is not valid on working "
             f"states (working states are transient — only resting and "
-            f"terminal landings have a reversibility class)."
+            f"closing state landings have a reversibility class)."
         )
     if state_class is not StateClass.WORKING and reversibility is None:
         raise ParseError(
@@ -401,7 +406,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         raise ParseError(
             f"State {state_id!r}: `handoff` is only valid on resting "
             f"states (handovers are the interface between processes; "
-            f"working / terminal states aren't interfaces)."
+            f"working / closing states aren't interfaces)."
         )
 
     spawns = _parse_spawns(state_id, state_class, spec.get("spawns"))
@@ -493,9 +498,9 @@ def _parse_spawns(
       work the agent can dispatch from this state).
 
     Working and resting states may declare `advance_on` (selective auto-
-    advance on the listed child terminals; everything else keeps the
+    advance on the listed child closing states; everything else keeps the
     parent put). Resting-state `advance_on` targets must be non-working
-    states (event-style transition; no claim). Terminal states forbid
+    states (event-style transition; no claim). Closing states forbid
     `advance_on` (the parent is already closed). Cross-state-class
     validation of `advance_on` targets lives in the validator.
 
@@ -531,15 +536,6 @@ def _parse_one_spawn(
         raise ParseError(
             f"State {state_id!r}: `spawns[{idx}]` must be an object "
             f"(got {type(raw).__name__})."
-        )
-    # Reject the legacy field outright so authors don't carry the field
-    # forward with the now-different semantic.
-    if "on_terminal" in raw:
-        raise ParseError(
-            f"State {state_id!r}: `spawns[{idx}].on_terminal` was renamed to "
-            f"`spawns.advance_on`, and the semantic changed: the map is "
-            f"now SELECTIVE (advance parent only on these child terminals; "
-            f"others keep the parent put), not exhaustive."
         )
     process_raw = raw.get("process")
     process: str | None = None
@@ -602,7 +598,7 @@ def _parse_collects(
     """Parse the optional `collects` field. Only valid on resting states.
 
     Cross-process validation (`process` resolves, `from_states` are
-    resting/terminal in that process) lives in the validator — the parser
+    resting/closing state in that process) lives in the validator — the parser
     doesn't have other workflows in scope here.
     """
     if raw is None:
@@ -821,10 +817,10 @@ def _parse_closes(
             f"unowned sink."
         )
     tax_raw = raw.get("taxonomy")
-    if not isinstance(tax_raw, str) or tax_raw not in _TERMINAL_TAX:
+    if not isinstance(tax_raw, str) or tax_raw not in _CLOSURE_TAX:
         raise ParseError(
             f"State {state_id!r}: `closes.taxonomy` must be one of "
-            f"{sorted(_TERMINAL_TAX.keys())} (got {tax_raw!r})."
+            f"{sorted(_CLOSURE_TAX.keys())} (got {tax_raw!r})."
         )
     reason_raw = raw.get("reason")
     if not isinstance(reason_raw, str) or not reason_raw.strip():
@@ -832,7 +828,7 @@ def _parse_closes(
             f"State {state_id!r}: `closes.reason` is required and must be a "
             f"non-empty string (for GitHub, 'completed' or 'not planned')."
         )
-    return Closes(taxonomy=_TERMINAL_TAX[tax_raw], reason=reason_raw.strip())
+    return Closes(taxonomy=_CLOSURE_TAX[tax_raw], reason=reason_raw.strip())
 
 
 def _parse_initial(
@@ -905,8 +901,8 @@ def _parse_transition(
     if destination == "[*]":
         raise ParseError(
             f"transitions[{idx}]: `state→[*]` transitions are implicit; the "
-            f"emitter generates terminal sinks from each terminal state's "
-            f"`terminal_taxonomy`. Remove this transition."
+            f"emitter generates closing-state sinks from each closing state's "
+            f"`closes`. Remove this transition."
         )
     if source not in states:
         raise ParseError(
@@ -923,7 +919,7 @@ def _parse_transition(
             f"transitions[{idx}]: `cross_process` was removed. Shared "
             f"handovers use `handoff: true` on the resting state; "
             f"subprocess / independent spawns use `spawns: {{...}}` on "
-            f"the working / terminal state."
+            f"the working / closing state."
         )
     if not isinstance(type_raw, str) or type_raw not in _TRANSITION_TYPE:
         raise ParseError(
@@ -939,7 +935,7 @@ def _parse_transition(
             f"transitions[{idx}]: `kind` and `process` fields were "
             f"removed along with the cross_process type. Use `handoff: "
             f"true` on a resting state for shared handovers, or "
-            f"`spawns: {{...}}` on a working / terminal state for spawns."
+            f"`spawns: {{...}}` on a working / closing state for spawns."
         )
 
     # Label is optional for all types except external (which has no good

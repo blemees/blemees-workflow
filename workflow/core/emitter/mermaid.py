@@ -32,7 +32,7 @@ SYMBOL_RELEASE = "⧄"
 
 
 class _OutboundFeedbackRow(Protocol):
-    child_terminal: str
+    child_closing_state: str
     parent_process: str
     parent_next: str
     issue_type: str
@@ -54,9 +54,9 @@ def emit_mermaid(
     - Entry / exit / handoff sinks anchored to the `[*]` sentinel.
     - Spawn notes on states that declare `spawns` (`ᐉ initial_state (type)`).
     - Feedback notes on parent states targeted by local `advance_on`
-      (`⊡ child_terminal (type)`).
-    - Outbound feedback edges from child terminals that auto-advance a
-      parent (`terminal --> [*]: ⊡ parent_next`), instead of `■` exits.
+      (`⊡ child_closing_state (type)`).
+    - Outbound feedback edges from child closing states that auto-advance a
+      parent (`closing state --> [*]: ⊡ parent_next`), instead of `■` exits.
     - Collect-advance edges from contributor states (`from_state -->
       target: ⊡ collector_state`, with `[type]` suffix for per-type rules).
 
@@ -68,7 +68,7 @@ def emit_mermaid(
     """
     spawn_sources = spawn_sources or {}
     outbound = list(outbound_feedback or ())
-    feedback_terminals = {row.child_terminal for row in outbound}
+    feedback_closing_states = {row.child_closing_state for row in outbound}
     lines: list[str] = ["stateDiagram-v2", "    direction TB"]
 
     cross_legend = _emit_cross_process_legend(state_machine)
@@ -100,18 +100,18 @@ def emit_mermaid(
             continue
         if state.name in sourced:
             continue
-        if state.name in feedback_terminals:
+        if state.name in feedback_closing_states:
             continue
         lines.append(f"    {state.name} --> [*]: {SYMBOL_EXIT} {state.name}")
 
     feedback_edges: set[tuple[str, str]] = set()
     for row in outbound:
-        if row.child_terminal not in state_machine.states:
+        if row.child_closing_state not in state_machine.states:
             continue
-        feedback_edges.add((row.child_terminal, row.parent_next))
-    for child_terminal, parent_next in sorted(feedback_edges):
+        feedback_edges.add((row.child_closing_state, row.parent_next))
+    for child_closing_state, parent_next in sorted(feedback_edges):
         lines.append(
-            f"    {child_terminal} --> [*]: {SYMBOL_FEEDBACK} {parent_next}"
+            f"    {child_closing_state} --> [*]: {SYMBOL_FEEDBACK} {parent_next}"
         )
 
     lines.extend(_emit_collect_advance_edges(state_machine))
@@ -245,8 +245,8 @@ def _spawn_target_label(sp: Spawn) -> str:
     return f"{SYMBOL_SPAWN} {sp.initial_state} ({sp.issue_type})"
 
 
-def _feedback_label(child_terminal: str, issue_type: str) -> str:
-    return f"{SYMBOL_FEEDBACK} {child_terminal} ({issue_type})"
+def _feedback_label(child_closing_state: str, issue_type: str) -> str:
+    return f"{SYMBOL_FEEDBACK} {child_closing_state} ({issue_type})"
 
 
 def _emit_interface_notes(state_machine: StateMachine) -> list[str]:
@@ -257,10 +257,10 @@ def _emit_interface_notes(state_machine: StateMachine) -> list[str]:
     for state in state_machine.states.values():
         for sp in state.spawns:
             spawn_by_state.setdefault(state.name, []).append(_spawn_target_label(sp))
-            for child_terminal, parent_next in sp.advance_on:
+            for child_closing_state, parent_next in sp.advance_on:
                 if parent_next not in state_machine.states:
                     continue
-                line = _feedback_label(child_terminal, sp.issue_type)
+                line = _feedback_label(child_closing_state, sp.issue_type)
                 existing = inbound_feedback_by_state.setdefault(parent_next, [])
                 if line not in existing:
                     existing.append(line)

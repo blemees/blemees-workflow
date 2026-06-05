@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "incident",
-  "description": "Plan and execute a mitigation strategy during an active incident. The responder drafts a plan, then dispatches one or more sub-mitigations \u2014 a hotfix, a configuration change, a data change, or any combination \u2014 each as a child issue on its own process. `execute_mitigation` declares a multi-spawn rule per mitigation type; the wait-for-all cascade closes this issue at `mitigated` only when every spawned child reaches its respective applied / shipped terminal, which in turn cascades the parent incident to `needs_verification`.",
+  "description": "Plan and execute a mitigation strategy during an active incident. The responder drafts a plan, then dispatches one or more sub-mitigations \u2014 a hotfix, a configuration change, a data change, or any combination \u2014 each as a child issue on its own process. `execute_mitigation` declares a multi-spawn rule per mitigation type; the wait-for-all cascade closes this issue at `mitigated` only when every spawned child reaches its respective applied / shipped closing state, which in turn cascades the parent incident to `needs_verification`.",
   "states": {
     "ready_for_mitigation": {
       "class": "resting",

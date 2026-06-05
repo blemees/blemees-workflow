@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from workflow.core.model.state_machine import (
+    ClosureTaxonomy,
     ReversibilityClass,
     StateClass,
-    ClosureTaxonomy,
     TransitionType,
 )
 from workflow.core.parser.state_machine import parse_state_machine
@@ -175,7 +175,7 @@ def test_human_gate_alone_makes_transition_gated() -> None:
 def test_cross_process_transition_type_rejected() -> None:
     """The `cross_process` transition type was removed in favor of
     `handoff: true` on resting states and `spawns: {...}` on working /
-    terminal states. The parser rejects authored `cross_process`
+    closing states. The parser rejects authored `cross_process`
     transitions with a clear migration hint."""
     bad = _minimal()
     bad["transitions"].append(
@@ -258,19 +258,6 @@ def test_spawns_accepts_array_of_rules() -> None:
     assert rules[0].issue_type == "bug"
     assert rules[1].process is None  # derived later by the validator
     assert rules[1].issue_type == "feature"
-
-
-def test_legacy_on_terminal_rejected() -> None:
-    """The renamed-from `on_terminal` is rejected with a migration hint."""
-    spec = _minimal()
-    spec["states"]["b"]["spawns"] = {
-        "process": "other",
-        "issue_type": "bug",
-        "initial_state": "queue",
-        "on_terminal": {"done": "raw"},
-    }
-    with pytest.raises(ParseError, match="renamed to.*advance_on"):
-        parse_state_machine(json.dumps(spec))
 
 
 def test_spawns_allowed_on_resting() -> None:
@@ -538,7 +525,7 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     assert impl.spawns[0].process == "pr"
     assert impl.spawns[0].issue_type == "pr"
     assert impl.spawns[0].initial_state == "draft"
-    # PR terminal `merged` → parent inner-loop resting state `staged`.
-    # (PR's terminal was renamed from `staged` to `merged` so state names
+    # PR closing state `merged` → parent inner-loop resting state `staged`.
+    # (PR's closing state was renamed from `staged` to `merged` so state names
     # don't collide across processes.)
     assert impl.spawns[0].advance_on == (("merged", "staged"),)

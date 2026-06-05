@@ -148,7 +148,7 @@ def _apply_spawn_parent_cascade(
     # Match this child to its spawn rule. Primary key is issue_type;
     # if the child's IssueState has no issue_type (e.g. test mocks or
     # backends that don't surface it), fall back to all rules on the
-    # state and pick by advance_on containing the child's terminal.
+    # state and pick by advance_on containing the child's closing state.
     if child_state.issue_type is not None:
         candidate_rules = [
             sp for sp in parent_state_def.spawns

@@ -52,7 +52,7 @@ Live production incident. Opened by the IC at declaration; carries through incid
 
 ## `incident-mitigation` — Incident mitigation
 
-A mitigation work item spawned from an incident. The responder drafts a plan in `plan_mitigation` and then in `execute_mitigation` dispatches one or more sub-mitigations (any combination of `hotfix`, `config-change`, `data-change`) as child issues on their respective processes. Tied to the parent incident via `parent-of:<incident>`. Closes at `mitigated` only when every spawned child reaches its applied / shipped terminal — wait-for-all — at which point the parent incident cascades to `needs_verification`.
+A mitigation work item spawned from an incident. The responder drafts a plan in `plan_mitigation` and then in `execute_mitigation` dispatches one or more sub-mitigations (any combination of `hotfix`, `config-change`, `data-change`) as child issues on their respective processes. Tied to the parent incident via `parent-of:<incident>`. Closes at `mitigated` only when every spawned child reaches its applied / shipped closing state — wait-for-all — at which point the parent incident cascades to `needs_verification`.
 
 **GitHub Issue Type**: `Incident mitigation` · **Color**: `orange`
 

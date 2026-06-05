@@ -450,7 +450,7 @@ class GitHubBackend:
         if change.clear_agent_claim:
             self.unassign(issue_id)
 
-        # Close the issue when the advance lands on a terminal-done state.
+        # Close the issue when the advance lands on a closing state-done state.
         if change.close_issue:
             self.close_issue(issue_id, reason=change.close_reason)
 

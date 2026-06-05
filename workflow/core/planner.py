@@ -329,7 +329,7 @@ def _plan_advance(
                         )
 
         # Per principle 1, leaving a working state clears the claim — the
-        # role no longer "owns" the issue once it's resting/terminal.
+        # role no longer "owns" the issue once it's resting/closing state.
         leaving_working = _is_working_state(state_machine, transition.source)
         close, reason = _closing_close_info(state_machine, transition.destination)
         dest = state_machine.states.get(transition.destination)
