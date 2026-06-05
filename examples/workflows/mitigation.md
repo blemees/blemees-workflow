@@ -40,13 +40,13 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_mitigation` | resting | reversible-fast | — | incident-mitigation | — | — | — |
 | `plan_mitigation` | working | — | incident-responder | incident-mitigation | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
 | `mitigation_planned` | resting | reversible-fast | — | incident-mitigation | — | — | — |
 | `execute_mitigation` | working | — | incident-responder | incident-mitigation | clarify-scope, general | — | — |
-| `mitigated` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `mitigated` | resting | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

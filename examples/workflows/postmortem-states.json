@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "incident",
-  "description": "Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files follow-ups (bug/chore/feature) on refinement via the terminal-state spawn declaration — `workflow spawn-issue --issue-type bug --initial-state raw` (etc.) for each item.",
+  "description": "Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files follow-ups (bug/chore/feature) on refinement via the terminal-state spawn declaration \u2014 `workflow spawn-issue --issue-type bug --initial-state raw` (etc.) for each item.",
   "states": {
     "pending": {
       "class": "resting",
@@ -25,10 +25,8 @@
       ]
     },
     "complete": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-slow",
-      "terminal_taxonomy": "resolved",
-      "close_reason": "completed",
       "spawns": [
         {
           "issue_type": "bug",
@@ -43,7 +41,11 @@
           "issue_type": "feature",
           "initial_state": "raw"
         }
-      ]
+      ],
+      "closes": {
+        "taxonomy": "resolved",
+        "reason": "completed"
+      }
     }
   },
   "transitions": [

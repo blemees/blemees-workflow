@@ -56,7 +56,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `staged` | resting | reversible-slow | — | bug, feature, chore, experiment, hotfix | — | — | — |
 | `measuring` | resting | reversible-slow | — | experiment | — | — | — |
@@ -67,15 +67,15 @@ stateDiagram-v2
 | `reviewing_release` | working | — | product-owner | release | needs-security-review, blocked-on-data, general | — | — |
 | `gated_nogo` | resting | reversible-fast | — | release | — | — | — |
 | `abandoning` | working | — | product-owner | release | general | — | — |
-| `abandoned` | terminal | reversible-fast | — | — | — | abandoned | not planned |
+| `abandoned` | resting | reversible-fast | — | — | — | abandoned | not planned |
 | `deploying` | resting | reversible-slow | — | release | — | — | — |
 | `rolling_out` | resting | reversible-slow | — | release | — | — | — |
 | `ready_for_monitoring` | resting | reversible-slow | — | release | — | — | — |
 | `monitoring` | working | — | developer | release | blocked-on-data, general | — | — |
 | `rolling_back` | working | — | incident-commander, release-manager | release | clarify-scope, needs-arch-review, blocked-on-data, general | — | — |
-| `rolled_back` | terminal | reversible-slow | — | — | — | reverted | completed |
-| `released` | terminal | reversible-slow | — | — | — | shipped | completed |
-| `shipped` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `rolled_back` | resting | reversible-slow | — | — | — | reverted | completed |
+| `released` | resting | reversible-slow | — | — | — | shipped | completed |
+| `shipped` | resting | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

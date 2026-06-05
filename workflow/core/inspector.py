@@ -50,7 +50,7 @@ class AvailableTransition:
     # Destination state info (None when destination is `[*]`)
     destination_state_class: StateClass | None = None
     destination_reversibility: ReversibilityClass | None = None
-    destination_terminal_taxonomy: ClosureTaxonomy | None = None
+    destination_closure_taxonomy: ClosureTaxonomy | None = None
     # Roles permitted to occupy the destination state. Empty when the
     # destination is unrestricted, isn't a working state, or is `[*]`.
     destination_roles: tuple[str, ...] = ()
@@ -115,8 +115,8 @@ def available_transitions(
                 agent_prepares_path=gate.agent_prepares_path if gate else None,
                 destination_state_class=dst_state.state_class if dst_state else None,
                 destination_reversibility=dst_state.reversibility if dst_state else None,
-                destination_terminal_taxonomy=(
-                    dst_state.terminal_taxonomy if dst_state else None
+                destination_closure_taxonomy=(
+                    dst_state.closes.taxonomy if dst_state and dst_state.closes else None
                 ),
                 destination_roles=dst_state.roles if dst_state else (),
             )

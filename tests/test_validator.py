@@ -34,8 +34,9 @@ def _irreversible_workflow_without_hitl() -> StateMachine:
     workflow.states["working"] = State(name="working", state_class=StateClass.WORKING)
     workflow.states["released"] = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     workflow.transitions.append(
         Transition(
@@ -168,21 +169,6 @@ def test_irreversible_destination_with_gate_passes() -> None:
     assert not any(f.principle_cite == "state-machine-principles.md#11" for f in findings)
 
 
-def test_terminal_without_taxonomy_warns() -> None:
-    workflow = StateMachine(name="t")
-    workflow.states["working"] = State(name="working", state_class=StateClass.WORKING)
-    workflow.states["done"] = State(
-        name="done",
-        state_class=StateClass.TERMINAL,
-        terminal_taxonomy=None,
-    )
-    workflow.transitions.append(
-        Transition(source="working", destination="done", label="agent done")
-    )
-    findings = validate_state_machine(workflow, None, {})
-    assert any(f.principle_cite == "state-machine-principles.md#8" for f in findings)
-
-
 def test_gate_with_multiple_source_states_errors() -> None:
     """A gate must fire from exactly one source state. Two transitions
     sharing a gate name but originating from different sources is an
@@ -265,8 +251,9 @@ def test_audit_with_irreversible_destination_errors() -> None:
     workflow.states["src"] = State(name="src", state_class=StateClass.WORKING)
     workflow.states["irrev_dst"] = State(
         name="irrev_dst",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     workflow.transitions.append(
         Transition(
@@ -400,10 +387,9 @@ def _source_workflow_with_terminal_staged() -> StateMachine:
     )
     sm.states["staged"] = State(
         name="staged",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     return sm
 
@@ -469,10 +455,9 @@ def test_entry_with_collects_on_same_state_errors() -> None:
     src = StateMachine(name="src")
     src.states["staged"] = State(
         name="staged",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     findings = validate_state_machine(
         sm,
@@ -647,11 +632,9 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
         ),
         "done": State(
             name="done",
-            state_class=StateClass.TERMINAL,
-            terminal_taxonomy=__import__(
-                "workflow.core.model.state_machine", fromlist=["ClosureTaxonomy"]
-            ).ClosureTaxonomy.SHIPPED,
-            close_reason="completed",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.IRREVERSIBLE,
+            closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
         ),
     }
     findings = validate_state_machine(

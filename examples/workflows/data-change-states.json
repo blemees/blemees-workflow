@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "incident",
-  "description": "Apply a data change as an incident mitigation: corruption repair, manual update, backfill, replay. Backup is mandatory before any mutation — the process serializes `creating_backup` → `backup_ready` → `applying_data_change` so the responder cannot skip the safety net. Spawned from `mitigation.execute_mitigation`, closes at `data_change_applied` to release the parent.",
+  "description": "Apply a data change as an incident mitigation: corruption repair, manual update, backfill, replay. Backup is mandatory before any mutation \u2014 the process serializes `creating_backup` \u2192 `backup_ready` \u2192 `applying_data_change` so the responder cannot skip the safety net. Spawned from `mitigation.execute_mitigation`, closes at `data_change_applied` to release the parent.",
   "states": {
     "ready_for_data_change": {
       "class": "resting",
@@ -46,10 +46,12 @@
       ]
     },
     "data_change_applied": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-slow",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
+      "closes": {
+        "taxonomy": "shipped",
+        "reason": "completed"
+      }
     }
   },
   "transitions": [

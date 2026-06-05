@@ -13,6 +13,7 @@ import pytest
 from workflow.backends.base import IssueState
 from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
 from workflow.core.model.state_machine import (
+    Closes,
     ReversibilityClass,
     State,
     StateClass,
@@ -48,14 +49,16 @@ def _build_workflow() -> StateMachine:
         ),
         "promoted": State(
             name="promoted",
-            state_class=StateClass.TERMINAL,
+            state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.IRREVERSIBLE,
-        ),
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    ),
         "killed": State(
             name="killed",
-            state_class=StateClass.TERMINAL,
+            state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.IRREVERSIBLE,
-        ),
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    ),
         "implementing": State(
             name="implementing",
             state_class=StateClass.WORKING,
@@ -218,9 +221,8 @@ def test_terminal_advance_closes_issue_as_completed() -> None:
     )
     workflow.states["merged"] = State(
         name="merged",
-        state_class=StateClass.TERMINAL,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
+        state_class=StateClass.RESTING,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     state = IssueState(
         issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
@@ -236,10 +238,10 @@ def test_terminal_advance_closes_issue_as_completed() -> None:
     assert plan.change.close_reason == "completed"
 
 
-def test_terminal_without_close_reason_does_not_close_issue() -> None:
-    """A terminal with no `close_reason` is a handoff-style exit — the work
-    continues elsewhere on another process's diagram, so the tracker's
-    issue stays open."""
+def test_advance_into_non_closing_state_does_not_close_issue() -> None:
+    """Advancing into a plain resting state (no `closes`) leaves the issue
+    open — e.g. a handoff-style exit where the work continues elsewhere on
+    another process's diagram."""
     workflow = _build_workflow()
     workflow.transitions.append(
         Transition(
@@ -251,9 +253,10 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
     )
     workflow.states["bounced"] = State(
         name="bounced",
-        state_class=StateClass.TERMINAL,
-        terminal_taxonomy=ClosureTaxonomy.SUPERSEDED,
-        # No close_reason — handoff terminal, issue stays open.
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        issue_types=("bug",),
+        # No `closes` — a non-closing resting state keeps the issue open.
     )
     state = IssueState(
         issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
@@ -281,9 +284,8 @@ def test_abandoned_terminal_closes_as_not_planned() -> None:
     )
     workflow.states["wont"] = State(
         name="wont",
-        state_class=StateClass.TERMINAL,
-        terminal_taxonomy=ClosureTaxonomy.ABANDONED,
-        close_reason="not planned",
+        state_class=StateClass.RESTING,
+        closes=Closes(taxonomy=ClosureTaxonomy.ABANDONED, reason="not planned"),
     )
     state = IssueState(
         issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
@@ -1065,10 +1067,10 @@ def test_advance_into_mark_pr_ready_sets_marker() -> None:
     workflow.states["ready_for_dev"] = State(
         name=rfd.name,
         state_class=rfd.state_class,
-        terminal_taxonomy=rfd.terminal_taxonomy,
+        reversibility=rfd.reversibility,
         roles=rfd.roles,
         issue_types=rfd.issue_types,
-        close_reason=rfd.close_reason,
+        closes=rfd.closes,
         handoff=rfd.handoff,
         spawns=rfd.spawns,
         mark_pr_ready=True,

@@ -33,11 +33,11 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `pending` | resting | reversible-slow | — | postmortem | — | — | — |
 | `drafting` | working | — | product-manager | postmortem | blocked-on-data, needs-security-review, general | — | — |
-| `complete` | terminal | reversible-slow | — | — | — | resolved | completed |
+| `complete` | resting | reversible-slow | — | — | — | resolved | completed |
 
 ## Transitions
 

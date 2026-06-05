@@ -98,14 +98,16 @@
       ]
     },
     "stabilized": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "superseded",
-      "close_reason": "completed",
       "spawns": {
         "process": "postmortem",
         "issue_type": "postmortem",
         "initial_state": "pending"
+      },
+      "closes": {
+        "taxonomy": "superseded",
+        "reason": "completed"
       }
     }
   },

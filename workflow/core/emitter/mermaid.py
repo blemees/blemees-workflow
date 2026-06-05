@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import Protocol, Sequence
 
 from workflow.core.model.state_machine import (
-    StateClass,
     Spawn,
     StateMachine,
     Transition,
@@ -93,12 +92,11 @@ def emit_mermaid(
     for t in state_machine.transitions:
         lines.append(f"    {_emit_transition(t, state_machine)}")
 
-    # Auto-emit terminal sinks for any TERMINAL state that has no
-    # authored outgoing transition. The taxonomy is shown in the label so
-    # the diagram visually classifies the terminal.
+    # Auto-emit sinks for any closing state that has no authored outgoing
+    # transition, so the diagram visually classifies the exit.
     sourced = {t.source for t in state_machine.transitions}
     for state in state_machine.states.values():
-        if state.state_class is not StateClass.TERMINAL:
+        if not state.is_closing:
             continue
         if state.name in sourced:
             continue

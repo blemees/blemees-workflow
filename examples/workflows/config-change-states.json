@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "incident",
-  "description": "Apply a configuration change as an incident mitigation: feature-flag toggle, kill switch, runtime config value, rate-limit adjustment. Linear claim/advance flow — spawned from `mitigation.execute_mitigation`, closes at `config_applied` to release the parent. Out of scope: schema changes that require migrations (use `data-change`).",
+  "description": "Apply a configuration change as an incident mitigation: feature-flag toggle, kill switch, runtime config value, rate-limit adjustment. Linear claim/advance flow \u2014 spawned from `mitigation.execute_mitigation`, closes at `config_applied` to release the parent. Out of scope: schema changes that require migrations (use `data-change`).",
   "states": {
     "ready_for_config_change": {
       "class": "resting",
@@ -26,10 +26,12 @@
       ]
     },
     "config_applied": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
+      "closes": {
+        "taxonomy": "shipped",
+        "reason": "completed"
+      }
     }
   },
   "transitions": [

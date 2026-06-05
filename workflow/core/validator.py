@@ -69,7 +69,6 @@ def validate_state_machine(
     findings: list[ValidationFinding] = []
 
     findings.extend(_check_irreversible_destinations_gated(state_machine))
-    findings.extend(_check_terminal_taxonomy(state_machine))
     findings.extend(_check_closing_states_are_sinks(state_machine))
     findings.extend(_check_closes_exclusivity(state_machine))
     findings.extend(_check_reversibility_declared_on_legend_states(state_machine))
@@ -159,24 +158,6 @@ def _check_irreversible_destinations_gated(
                     message=(
                         f"Transition {t.source!r} → {t.destination!r} ({t.label!r}) "
                         "lands in an irreversible state without [hitl]."
-                    ),
-                    location=state_machine.source_path,
-                )
-            )
-    return findings
-
-
-def _check_terminal_taxonomy(state_machine: StateMachine) -> list[ValidationFinding]:
-    findings: list[ValidationFinding] = []
-    for state in state_machine.states.values():
-        if state.state_class is StateClass.TERMINAL and state.terminal_taxonomy is None:
-            findings.append(
-                ValidationFinding(
-                    severity=Severity.WARNING,
-                    principle_cite="state-machine-principles.md#8",
-                    message=(
-                        f"Terminal state {state.name!r} has no taxonomy tag. "
-                        "Add `terminal (<tag>)` to the sink transition or a note."
                     ),
                     location=state_machine.source_path,
                 )
@@ -942,14 +923,14 @@ def _check_spawns(
             # Example: mitigation spawns a hotfix into inner-loop, but
             # the hotfix's terminal (`shipped`) is in release because
             # `inner-loop.staged` is a handoff to release.
-            if state.state_class is not StateClass.TERMINAL and sp.advance_on:
-                global_terminals: set[str] = set()
+            if not state.is_closing and sp.advance_on:
+                global_closing_states: set[str] = set()
                 for sibling in sibling_machines.values():
                     for s in sibling.states.values():
-                        if s.state_class is StateClass.TERMINAL:
-                            global_terminals.add(s.name)
-                declared_terminals = {k for k, _ in sp.advance_on}
-                unknown = declared_terminals - global_terminals
+                        if s.is_closing:
+                            global_closing_states.add(s.name)
+                declared_closing_states = {k for k, _ in sp.advance_on}
+                unknown = declared_closing_states - global_closing_states
                 if unknown:
                     findings.append(
                         ValidationFinding(
@@ -958,7 +939,7 @@ def _check_spawns(
                             message=(
                                 f"State {state.name!r}: `spawns.advance_on` "
                                 f"references state(s) {sorted(unknown)} that "
-                                f"aren't terminals on any known process."
+                                f"aren't closing states on any known process."
                             ),
                             location=state_machine.source_path,
                         )

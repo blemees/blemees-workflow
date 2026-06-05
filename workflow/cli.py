@@ -1143,9 +1143,9 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
                 "destination_reversibility": (
                     a.destination_reversibility.value if a.destination_reversibility else None
                 ),
-                "destination_terminal_taxonomy": (
-                    a.destination_terminal_taxonomy.value
-                    if a.destination_terminal_taxonomy
+                "destination_closure_taxonomy": (
+                    a.destination_closure_taxonomy.value
+                    if a.destination_closure_taxonomy
                     else None
                 ),
                 "destination_roles": list(a.destination_roles),
@@ -1231,8 +1231,8 @@ def _print_next_actions(
             dst_bits.append(a.destination_reversibility.value)
         if a.destination_state_class is not None:
             cls = a.destination_state_class.value
-            if a.destination_terminal_taxonomy is not None:
-                cls += f"/{a.destination_terminal_taxonomy.value}"
+            if a.destination_closure_taxonomy is not None:
+                cls += f"/{a.destination_closure_taxonomy.value}"
             dst_bits.append(cls)
         if dst_bits:
             print(f"    destination: {', '.join(dst_bits)}")
@@ -1385,7 +1385,7 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
         # has a `parent-of:` label, propagate to the parent per the parent
         # state's spawns.advance_on mapping.
         if not ctx["dry_run"]:
-            _propagate_to_parent_on_terminal(ctx, args.issue, args.destination)
+            _propagate_to_parent_on_closing(ctx, args.issue, args.destination)
 
         return 0
     except WorkflowError as exc:
@@ -1393,7 +1393,7 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
         return 2
 
 
-def _propagate_to_parent_on_terminal(
+def _propagate_to_parent_on_closing(
     ctx: dict, child_id: str, child_destination: str
 ) -> None:
     """If the child issue advanced to a terminal AND has a parent link,
@@ -1406,7 +1406,6 @@ def _propagate_to_parent_on_terminal(
     failure but don't fail the child advance if the parent advance fails.
     """
     from workflow.config import build_registry
-    from workflow.core.model.state_machine import StateClass
 
     try:
         registry = build_registry(
@@ -1418,13 +1417,13 @@ def _propagate_to_parent_on_terminal(
         if registry is None:
             return
 
-        # Confirm the child landed on a terminal.
+        # Confirm the child landed on a closing state.
         child_process = registry.find_process_for_state(child_destination)
         if child_process is None:
             return
         child_ctx = registry.get_process(child_process)
         child_state_decl = child_ctx.state_machine.states.get(child_destination)
-        if child_state_decl is None or child_state_decl.state_class is not StateClass.TERMINAL:
+        if child_state_decl is None or not child_state_decl.is_closing:
             return
 
         # Look up the child's parent via the `parent-of:` label.
@@ -3663,7 +3662,9 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
 
         for state_name, state in wf_context.state_machine.states.items():
             labels.add(f"state:{state_name}")
-            if state.state_class.value == "resting":
+            # Closing states are resting but are sinks — a closed issue has no
+            # origin to return to, so they get no `last-state:` marker.
+            if state.state_class.value == "resting" and not state.is_closing:
                 labels.add(f"last-state:{state_name}")
 
         if wf_context.catalog:

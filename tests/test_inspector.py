@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from workflow.core.inspector import available_transitions
 from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
 from workflow.core.model.state_machine import (
+    Closes,
     ReversibilityClass,
     State,
     StateClass,
@@ -34,10 +35,10 @@ def _build() -> tuple[StateMachine, HumanGateCatalog]:
         ),
         "wont_fix": State(
             name="wont_fix",
-            state_class=StateClass.TERMINAL,
+            state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.REVERSIBLE_FAST,
-            terminal_taxonomy=ClosureTaxonomy.ABANDONED,
-        ),
+        closes=Closes(taxonomy=ClosureTaxonomy.ABANDONED, reason="completed"),
+    ),
     }
     sm.transitions = [
         Transition(
@@ -107,7 +108,7 @@ def test_available_transitions_from_working_returns_hitl_actions() -> None:
 
     wont = by_dest["wont_fix"]
     assert wont.default_level is HumanGateLevel.AUDIT
-    assert wont.destination_terminal_taxonomy is ClosureTaxonomy.ABANDONED
+    assert wont.destination_closure_taxonomy is ClosureTaxonomy.ABANDONED
 
 
 def test_trust_grant_relaxes_effective_level() -> None:

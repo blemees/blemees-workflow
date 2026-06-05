@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "delivery",
-  "description": "Cut, review, and ship a release train. Dev tickets (bug/feature/chore/experiment/hotfix) are handed off from `inner-loop.staged` and live here as contributors; a release ticket is created at `cut` (or `hotfix_cut`), collects the staged contributors, then runs review → deploy → released. On `released` the contributor tickets cascade to `shipped`; on `abandoned` / `rolled_back` they're returned to the queue for the next train.",
+  "description": "Cut, review, and ship a release train. Dev tickets (bug/feature/chore/experiment/hotfix) are handed off from `inner-loop.staged` and live here as contributors; a release ticket is created at `cut` (or `hotfix_cut`), collects the staged contributors, then runs review \u2192 deploy \u2192 released. On `released` the contributor tickets cascade to `shipped`; on `abandoned` / `rolled_back` they're returned to the queue for the next train.",
   "states": {
     "staged": {
       "class": "resting",
@@ -30,15 +30,25 @@
         "release"
       ],
       "collects": {
-        "from_states": ["staged"],
-        "issue_types": ["bug", "feature", "chore", "experiment"],
+        "from_states": [
+          "staged"
+        ],
+        "issue_types": [
+          "bug",
+          "feature",
+          "chore",
+          "experiment"
+        ],
         "advance_on": {
           "released": {
             "experiment": "measuring",
             "*": "shipped"
           }
         },
-        "release_on": ["abandoned", "rolled_back"]
+        "release_on": [
+          "abandoned",
+          "rolled_back"
+        ]
       }
     },
     "hotfix_cut": {
@@ -48,12 +58,19 @@
         "release"
       ],
       "collects": {
-        "from_states": ["staged"],
-        "issue_types": ["hotfix"],
+        "from_states": [
+          "staged"
+        ],
+        "issue_types": [
+          "hotfix"
+        ],
         "advance_on": {
           "released": "shipped"
         },
-        "release_on": ["abandoned", "rolled_back"]
+        "release_on": [
+          "abandoned",
+          "rolled_back"
+        ]
       }
     },
     "preparing": {
@@ -111,10 +128,12 @@
       ]
     },
     "abandoned": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "abandoned",
-      "close_reason": "not planned"
+      "closes": {
+        "taxonomy": "abandoned",
+        "reason": "not planned"
+      }
     },
     "deploying": {
       "class": "resting",
@@ -167,22 +186,28 @@
       ]
     },
     "rolled_back": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-slow",
-      "terminal_taxonomy": "reverted",
-      "close_reason": "completed"
+      "closes": {
+        "taxonomy": "reverted",
+        "reason": "completed"
+      }
     },
     "released": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-slow",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
+      "closes": {
+        "taxonomy": "shipped",
+        "reason": "completed"
+      }
     },
     "shipped": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-slow",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
+      "closes": {
+        "taxonomy": "shipped",
+        "reason": "completed"
+      }
     }
   },
   "transitions": [
@@ -244,7 +269,7 @@
       "source": "deploying",
       "destination": "rolling_out",
       "type": "event",
-      "label": "production deploy completes (external — rollout starts)"
+      "label": "production deploy completes (external \u2014 rollout starts)"
     },
     {
       "source": "rolling_out",

@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "delivery",
-  "description": "The developer's day-to-day flow: claim a refined ticket, implement, open a PR. After merge, the ticket lands in `staged`, which is a shared handoff with `release` — from there the release process owns the lifecycle through to shipped. Spawns a PR child issue during implementing.",
+  "description": "The developer's day-to-day flow: claim a refined ticket, implement, open a PR. After merge, the ticket lands in `staged`, which is a shared handoff with `release` \u2014 from there the release process owns the lifecycle through to shipped. Spawns a PR child issue during implementing.",
   "states": {
     "ready_for_dev": {
       "class": "resting",
@@ -88,10 +88,12 @@
       ]
     },
     "spike_completed": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "resolved",
-      "close_reason": "completed"
+      "closes": {
+        "taxonomy": "resolved",
+        "reason": "completed"
+      }
     },
     "ready_bounced": {
       "class": "resting",

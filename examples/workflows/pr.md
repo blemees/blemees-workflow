@@ -35,7 +35,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `draft` | resting | reversible-fast | — | pr | — | — | — |
 | `drafting` | working | — | developer | pr | clarify-scope, general | — | — |
@@ -49,7 +49,7 @@ stateDiagram-v2
 | `qa_failed` | resting | reversible-fast | — | pr | — | — | — |
 | `fixing_qa` | working | — | developer | pr | clarify-scope, blocked-on-data, general | — | — |
 | `merging` | working | — | developer | pr | general | — | — |
-| `merged` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `merged` | resting | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

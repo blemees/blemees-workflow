@@ -43,7 +43,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `declared` | resting | reversible-fast | — | incident | — | — | — |
 | `triaging` | working | — | incident-commander | incident | blocked-on-data, general | — | — |
@@ -53,7 +53,7 @@ stateDiagram-v2
 | `mitigating` | working | — | incident-commander | incident | clarify-scope, needs-arch-review, needs-security-review, blocked-on-data, general | — | — |
 | `needs_verification` | resting | reversible-fast | — | incident | — | — | — |
 | `verifying` | working | — | incident-responder | incident | blocked-on-data, general | — | — |
-| `stabilized` | terminal | reversible-fast | — | — | — | superseded | completed |
+| `stabilized` | resting | reversible-fast | — | — | — | superseded | completed |
 
 ## Transitions
 

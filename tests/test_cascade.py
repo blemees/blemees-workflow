@@ -14,6 +14,7 @@ from workflow.core.cascade import (
     cascade_after_state_change,
 )
 from workflow.core.model.state_machine import (
+    Closes,
     CollectAdvanceRule,
     Collects,
     ReversibilityClass,
@@ -133,10 +134,9 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
     )
     mitigation.states["mitigated"] = State(
         name="mitigated",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
 
     # inner-loop
@@ -153,10 +153,9 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
     )
     inner.states["shipped"] = State(
         name="shipped",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
 
     # release
@@ -175,10 +174,9 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
     )
     release.states["released"] = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
 
     registry = _MockRegistry(
@@ -279,10 +277,8 @@ def test_cascade_collect_advance_propagates_to_contributors():
     state_def = registry.processes_by_name["release"].state_machine.states["released"]
     state_def = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
@@ -290,6 +286,7 @@ def test_cascade_collect_advance_propagates_to_contributors():
                 CollectAdvanceRule(collector_state="released", default_target="shipped"),
             ),
         ),
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     registry.processes_by_name["release"].state_machine.states["released"] = state_def
 
@@ -360,10 +357,8 @@ def test_cascade_multi_hop_chain():
     # Wire `released` as a collect-advance trigger like the earlier test.
     state_def = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-        close_reason="completed",
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
@@ -371,6 +366,7 @@ def test_cascade_multi_hop_chain():
                 CollectAdvanceRule(collector_state="released", default_target="shipped"),
             ),
         ),
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     registry.processes_by_name["release"].state_machine.states["released"] = state_def
 
@@ -459,10 +455,9 @@ def test_cascade_cycle_guard_visits_state_pair_once():
     )
     sm_c.states["done_c"] = State(
         name="done_c",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_FAST,
-        terminal_taxonomy=ClosureTaxonomy.RESOLVED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.RESOLVED, reason="completed"),
     )
 
     registry = _MockRegistry(
@@ -541,10 +536,9 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
         )
         kid_sm.states[terminal_name] = State(
             name=terminal_name,
-            state_class=StateClass.TERMINAL,
-            terminal_taxonomy=ClosureTaxonomy.SHIPPED,
-            close_reason="completed",
-        )
+            state_class=StateClass.RESTING,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    )
 
     registry = _MockRegistry(
         processes_by_name={

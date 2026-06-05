@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "delivery",
-  "description": "The pull-request lifecycle: draft → review → merged. Spawned from inner-loop's implementing state.",
+  "description": "The pull-request lifecycle: draft \u2192 review \u2192 merged. Spawned from inner-loop's implementing state.",
   "states": {
     "draft": {
       "class": "resting",
@@ -130,10 +130,12 @@
       ]
     },
     "merged": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-slow",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
+      "closes": {
+        "taxonomy": "shipped",
+        "reason": "completed"
+      }
     }
   },
   "transitions": [

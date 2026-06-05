@@ -413,7 +413,7 @@ def emit_process_map(processes: list[Any]) -> str:
         for s in p.state_machine.states.values():
             if s.is_initial:
                 entry_edges.append((p.process_name, s.name))
-            if s.state_class is StateClass.TERMINAL and s.name not in feedback_terminals:
+            if s.is_closing and s.name not in feedback_terminals:
                 # A terminal that spawns a follow-up issue isn't really an
                 # exit — the work is superseded by the child item, not
                 # closed off. The spawn edge (drawn elsewhere as
@@ -810,7 +810,7 @@ def _section_states(sm: StateMachine) -> list[str]:
     out = ["## States", ""]
     out.append(
         "| Name | Class | Reversibility | Roles | Issue types | "
-        "Human inputs | Terminal taxonomy | Close reason |"
+        "Human inputs | Closure taxonomy | Close reason |"
     )
     out.append("|---|---|---|---|---|---|---|---|")
     for name, st in sm.states.items():
@@ -819,8 +819,8 @@ def _section_states(sm: StateMachine) -> list[str]:
         roles = ", ".join(st.roles) if st.roles else "—"
         types = ", ".join(st.issue_types) if st.issue_types else "—"
         human_inputs = ", ".join(st.human_inputs) if st.human_inputs else "—"
-        tax = st.terminal_taxonomy.value if st.terminal_taxonomy else "—"
-        close = st.close_reason or "—"
+        tax = st.closes.taxonomy.value if st.closes else "—"
+        close = st.closes.reason if st.closes else "—"
         out.append(
             f"| `{name}` | {cls} | {rev} | {roles} | {types} | {human_inputs} | {tax} | {close} |"
         )
@@ -1052,10 +1052,9 @@ def _section_cross_process(
         if s.name in feedback_terminals or s.spawns or s.handoff:
             continue
         bits: list[str] = []
-        if s.terminal_taxonomy is not None:
-            bits.append(s.terminal_taxonomy.value)
-        if s.close_reason:
-            bits.append(f"closes `{s.close_reason}`")
+        if s.closes is not None:
+            bits.append(s.closes.taxonomy.value)
+            bits.append(f"closes `{s.closes.reason}`")
         detail = "; ".join(bits) if bits else "workflow exit"
         outbound.append((s.name, f"{SYMBOL_EXIT} exit", "— (closes)", detail))
 

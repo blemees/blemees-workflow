@@ -13,12 +13,13 @@ from enum import Enum
 class StateClass(Enum):
     """Per state-machine-principles.md principle 1.
 
-    Every state is exactly one of these classes. There are no other state types.
+    Every state is one of these two ownership classes. Termination is no
+    longer a class — a closing state is a `resting` state carrying a `closes`
+    annotation (see `Closes` and ADR-0002).
     """
 
     RESTING = "resting"
     WORKING = "working"
-    TERMINAL = "terminal"
 
 
 class ReversibilityClass(Enum):
@@ -258,7 +259,6 @@ class State:
     name: str
     state_class: StateClass
     reversibility: ReversibilityClass | None = None
-    terminal_taxonomy: ClosureTaxonomy | None = None
     roles: tuple[str, ...] = ()
     issue_types: tuple[str, ...] = ()
     # Handover contract — `handoff: true` on a resting state declares it as
@@ -297,22 +297,17 @@ class State:
     # working states. Empty / absent means `request-input` is forbidden
     # at this state — agents must release the issue if they're stuck.
     human_inputs: tuple[str, ...] = ()
-    # Backend-specific close reason for terminal states. REQUIRED on
-    # terminals — every terminal closes the tracker's issue with this
-    # reason (GitHub: "completed" or "not planned"). FORBIDDEN on resting
-    # and working states. Cross-process handoffs that keep the same issue
-    # open use shared resting states, not terminals.
-    close_reason: str | None = None
     # Closing annotation (ADR-0002). When set, this resting state is a sink
-    # that closes the issue on entry; see `Closes` and `is_closing`.
+    # that closes the issue on entry, carrying the outcome taxonomy and the
+    # backend close reason (GitHub: "completed" / "not planned"). Cross-process
+    # handoffs that keep the issue open use shared resting states, not closing
+    # states. See `Closes` and `is_closing`.
     closes: Closes | None = None
     notes: list[str] = field(default_factory=list, hash=False, compare=False)
 
     @property
     def is_closing(self) -> bool:
-        # During the terminal→closes migration both forms are recognised;
-        # after the cutover only `closes` remains.
-        return self.closes is not None or self.state_class is StateClass.TERMINAL
+        return self.closes is not None
 
     @property
     def is_irreversible(self) -> bool:

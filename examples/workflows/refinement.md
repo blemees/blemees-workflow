@@ -55,7 +55,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `raw` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
 | `refining` | working | — | product-manager | bug, feature, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
@@ -67,8 +67,8 @@ stateDiagram-v2
 | `ready_for_dev` | resting | reversible-slow | — | bug, feature, experiment | — | — | — |
 | `ready_bounced` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
 | `deprioritized` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
-| `duplicate` | terminal | reversible-fast | — | — | — | deduplicated | not planned |
-| `wont_fix` | terminal | reversible-fast | — | — | — | abandoned | not planned |
+| `duplicate` | resting | reversible-fast | — | — | — | deduplicated | not planned |
+| `wont_fix` | resting | reversible-fast | — | — | — | abandoned | not planned |
 
 ## Transitions
 

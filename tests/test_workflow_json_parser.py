@@ -32,10 +32,9 @@ def _minimal() -> dict:
                 "issue_types": ["bug"],
             },
             "c": {
-                "class": "terminal",
+                "class": "resting",
                 "reversibility": "reversible-fast",
-                "terminal_taxonomy": "shipped",
-                "close_reason": "completed",
+                "closes": {"taxonomy": "shipped", "reason": "completed"},
             },
         },
         "transitions": [
@@ -52,8 +51,9 @@ def test_parses_minimal_workflow() -> None:
     assert workflow.states["a"].roles == ()
     assert workflow.states["b"].state_class is StateClass.WORKING
     assert workflow.states["b"].roles == ("product-manager",)
-    assert workflow.states["c"].state_class is StateClass.TERMINAL
-    assert workflow.states["c"].terminal_taxonomy is ClosureTaxonomy.SHIPPED
+    assert workflow.states["c"].state_class is StateClass.RESTING
+    assert workflow.states["c"].is_closing is True
+    assert workflow.states["c"].closes.taxonomy is ClosureTaxonomy.SHIPPED
     assert workflow.states["a"].is_initial is True
     assert workflow.states["a"].initial_label == "in"
     assert len(workflow.transitions) == 2
@@ -108,13 +108,6 @@ def test_closes_forbidden_on_working_state() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_terminal_requires_taxonomy() -> None:
-    bad = _minimal()
-    bad["states"]["c"] = {"class": "terminal", "reversibility": "reversible-fast"}
-    with pytest.raises(ParseError, match="terminal_taxonomy"):
-        parse_state_machine(json.dumps(bad))
-
-
 def test_resting_state_requires_reversibility() -> None:
     bad = _minimal()
     del bad["states"]["a"]["reversibility"]
@@ -122,7 +115,7 @@ def test_resting_state_requires_reversibility() -> None:
         parse_state_machine(json.dumps(bad))
 
 
-def test_terminal_state_requires_reversibility() -> None:
+def test_closing_state_requires_reversibility() -> None:
     bad = _minimal()
     del bad["states"]["c"]["reversibility"]
     with pytest.raises(ParseError, match="reversibility.*required"):
@@ -133,13 +126,6 @@ def test_working_state_rejects_reversibility() -> None:
     bad = _minimal()
     bad["states"]["b"]["reversibility"] = "reversible-fast"
     with pytest.raises(ParseError, match="not valid on working"):
-        parse_state_machine(json.dumps(bad))
-
-
-def test_non_terminal_rejects_taxonomy() -> None:
-    bad = _minimal()
-    bad["states"]["a"]["terminal_taxonomy"] = "shipped"
-    with pytest.raises(ParseError, match="only valid for"):
         parse_state_machine(json.dumps(bad))
 
 
@@ -287,18 +273,6 @@ def test_legacy_on_terminal_rejected() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_spawns_on_terminal_forbids_advance_on() -> None:
-    spec = _minimal()
-    spec["states"]["c"]["spawns"] = {
-        "process": "other",
-        "issue_type": "bug",
-        "initial_state": "queue",
-        "advance_on": {"done": "raw"},
-    }
-    with pytest.raises(ParseError, match="advance_on.*not valid on terminal"):
-        parse_state_machine(json.dumps(spec))
-
-
 def test_spawns_allowed_on_resting() -> None:
     """Resting-state spawns are valid: the parent waits in this state
     while the child runs."""
@@ -340,13 +314,6 @@ def test_initial_false_or_absent_is_default() -> None:
 def test_initial_forbidden_on_working() -> None:
     spec = _minimal()
     spec["states"]["b"]["initial"] = True
-    with pytest.raises(ParseError, match="initial.*only valid on resting"):
-        parse_state_machine(json.dumps(spec))
-
-
-def test_initial_forbidden_on_terminal() -> None:
-    spec = _minimal()
-    spec["states"]["c"]["initial"] = True
     with pytest.raises(ParseError, match="initial.*only valid on resting"):
         parse_state_machine(json.dumps(spec))
 
@@ -423,9 +390,9 @@ def test_collects_forbidden_on_working() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_collects_forbidden_on_terminal() -> None:
+def test_collects_forbidden_on_working() -> None:
     spec = _minimal()
-    spec["states"]["c"]["collects"] = {  # c is terminal
+    spec["states"]["b"]["collects"] = {  # b is working
         "process": "pr",
         "from_states": ["staged"],
     }
@@ -453,10 +420,10 @@ def test_collects_rejects_duplicate_from_states() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_mark_pr_ready_forbidden_on_terminal() -> None:
+def test_mark_pr_ready_forbidden_on_closing() -> None:
     spec = _minimal()
-    spec["states"]["c"]["mark_pr_ready"] = True
-    with pytest.raises(ParseError, match="mark_pr_ready.*not valid on terminal"):
+    spec["states"]["c"]["mark_pr_ready"] = True  # c is a closing state
+    with pytest.raises(ParseError, match="mark_pr_ready.*not valid on closing"):
         parse_state_machine(json.dumps(spec))
 
 
@@ -514,13 +481,6 @@ def test_working_state_requires_roles() -> None:
     bad = _minimal()
     del bad["states"]["b"]["roles"]
     with pytest.raises(ParseError, match="roles.*required on working"):
-        parse_state_machine(json.dumps(bad))
-
-
-def test_terminal_state_requires_close_reason() -> None:
-    bad = _minimal()
-    del bad["states"]["c"]["close_reason"]
-    with pytest.raises(ParseError, match="close_reason.*required on terminal"):
         parse_state_machine(json.dumps(bad))
 
 

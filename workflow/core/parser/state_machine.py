@@ -128,7 +128,6 @@ logger = logging.getLogger(__name__)
 _STATE_CLASS = {
     "resting": StateClass.RESTING,
     "working": StateClass.WORKING,
-    "terminal": StateClass.TERMINAL,
 }
 
 _REVERSIBILITY = {
@@ -310,26 +309,6 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"{sorted(_REVERSIBILITY.keys())})."
         )
 
-    terminal_taxonomy: ClosureTaxonomy | None = None
-    tax_raw = spec.get("terminal_taxonomy")
-    if tax_raw is not None:
-        if not isinstance(tax_raw, str) or tax_raw not in _TERMINAL_TAX:
-            raise ParseError(
-                f"State {state_id!r}: `terminal_taxonomy` must be one of "
-                f"{sorted(_TERMINAL_TAX.keys())} (got {tax_raw!r})."
-            )
-        terminal_taxonomy = _TERMINAL_TAX[tax_raw]
-
-    if state_class is StateClass.TERMINAL and terminal_taxonomy is None:
-        raise ParseError(
-            f"State {state_id!r}: terminal states require `terminal_taxonomy` "
-            f"(one of {sorted(_TERMINAL_TAX.keys())})."
-        )
-    if state_class is not StateClass.TERMINAL and terminal_taxonomy is not None:
-        raise ParseError(
-            f"State {state_id!r}: `terminal_taxonomy` is only valid for "
-            f"`class: terminal`."
-        )
 
     roles_raw = spec.get("roles", [])
     if not isinstance(roles_raw, list):
@@ -391,11 +370,6 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
                 f"State {state_id!r}: duplicate type {cleaned!r} in `issue_types`."
             )
         state_issue_types_parsed.append(cleaned)
-    if state_issue_types_parsed and state_class is StateClass.TERMINAL:
-        raise ParseError(
-            f"State {state_id!r}: `issue_types` is not valid on terminal "
-            f"states (a closed issue is no longer 'occupying' the state)."
-        )
     if state_class is StateClass.WORKING and not state_issue_types_parsed:
         raise ParseError(
             f"State {state_id!r}: `issue_types` is required on working "
@@ -416,25 +390,6 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"can pass through here."
         )
     state_issue_types = tuple(state_issue_types_parsed)
-
-    close_reason_raw = spec.get("close_reason")
-    close_reason: str | None = None
-    if close_reason_raw is not None:
-        if not isinstance(close_reason_raw, str) or not close_reason_raw.strip():
-            raise ParseError(
-                f"State {state_id!r}: `close_reason` must be a non-empty string if present."
-            )
-        if state_class is not StateClass.TERMINAL:
-            raise ParseError(
-                f"State {state_id!r}: `close_reason` is only valid for `class: terminal`."
-            )
-        close_reason = close_reason_raw.strip()
-    if state_class is StateClass.TERMINAL and close_reason is None:
-        raise ParseError(
-            f"State {state_id!r}: `close_reason` is required on terminal "
-            f"states (every terminal closes the tracker's issue). For "
-            f"GitHub, use 'completed' or 'not planned'."
-        )
 
     handoff_raw = spec.get("handoff", False)
     if not isinstance(handoff_raw, bool):
@@ -462,10 +417,10 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"State {state_id!r}: `mark_pr_ready` must be a boolean if present "
             f"(got {type(mark_pr_ready_raw).__name__})."
         )
-    if mark_pr_ready_raw and state_class is StateClass.TERMINAL:
+    if mark_pr_ready_raw and closes is not None:
         raise ParseError(
-            f"State {state_id!r}: `mark_pr_ready` is not valid on terminal "
-            f"states (terminals have already reached their final form)."
+            f"State {state_id!r}: `mark_pr_ready` is not valid on closing "
+            f"states (a closing state has already reached its final form)."
         )
 
     human_inputs_raw = spec.get("human_inputs", [])
@@ -513,10 +468,8 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         name=state_id,
         state_class=state_class,
         reversibility=reversibility,
-        terminal_taxonomy=terminal_taxonomy,
         roles=roles,
         issue_types=state_issue_types,
-        close_reason=close_reason,
         handoff=handoff_raw,
         is_initial=is_initial,
         initial_label=initial_label,
@@ -610,35 +563,30 @@ def _parse_one_spawn(
             f"(child's starting state)."
         )
 
+    # `advance_on` forbidden on closing-state spawns (the parent is already
+    # closed) is enforced by the validator — the parser doesn't have the
+    # `closes` annotation threaded into spawn parsing.
     advance_on_raw = raw.get("advance_on")
     advance_on: list[tuple[str, str]] = []
-    if state_class is StateClass.TERMINAL:
-        if advance_on_raw is not None:
+    if advance_on_raw is not None:
+        if not isinstance(advance_on_raw, dict):
             raise ParseError(
-                f"State {state_id!r}: `spawns[{idx}].advance_on` is not valid "
-                f"on terminal-state spawns (the parent is already closed). "
-                f"Remove the field for an independent spawn."
+                f"State {state_id!r}: `spawns[{idx}].advance_on` must be "
+                f"an object mapping {{child-closing-state: parent-next-state}} "
+                f"if present."
             )
-    else:
-        if advance_on_raw is not None:
-            if not isinstance(advance_on_raw, dict):
+        for k, v in advance_on_raw.items():
+            if not isinstance(k, str) or not k.strip():
                 raise ParseError(
-                    f"State {state_id!r}: `spawns[{idx}].advance_on` must be "
-                    f"an object mapping {{child-terminal: parent-next-state}} "
-                    f"if present."
+                    f"State {state_id!r}: `spawns[{idx}].advance_on` keys "
+                    f"must be child closing-state names (got {k!r})."
                 )
-            for k, v in advance_on_raw.items():
-                if not isinstance(k, str) or not k.strip():
-                    raise ParseError(
-                        f"State {state_id!r}: `spawns[{idx}].advance_on` keys "
-                        f"must be child terminal state names (got {k!r})."
-                    )
-                if not isinstance(v, str) or not v.strip():
-                    raise ParseError(
-                        f"State {state_id!r}: `spawns[{idx}].advance_on[{k!r}]"
-                        f"` must be a parent state name (got {v!r})."
-                    )
-                advance_on.append((k.strip(), v.strip()))
+            if not isinstance(v, str) or not v.strip():
+                raise ParseError(
+                    f"State {state_id!r}: `spawns[{idx}].advance_on[{k!r}]"
+                    f"` must be a parent state name (got {v!r})."
+                )
+            advance_on.append((k.strip(), v.strip()))
 
     return Spawn(
         process=process,
