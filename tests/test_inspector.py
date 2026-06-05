@@ -5,13 +5,19 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from workflow.core.inspector import available_transitions
-from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
+from workflow.core.model.human_gate import (
+    HumanGate,
+    HumanGateCatalog,
+    HumanGateLevel,
+    HumanGateType,
+)
 from workflow.core.model.state_machine import (
+    Closes,
+    ClosureTaxonomy,
     ReversibilityClass,
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
     Transition,
     TransitionType,
 )
@@ -34,10 +40,10 @@ def _build() -> tuple[StateMachine, HumanGateCatalog]:
         ),
         "wont_fix": State(
             name="wont_fix",
-            state_class=StateClass.TERMINAL,
+            state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.REVERSIBLE_FAST,
-            terminal_taxonomy=TerminalTaxonomy.ABANDONED,
-        ),
+        closes=Closes(taxonomy=ClosureTaxonomy.ABANDONED, reason="completed"),
+    ),
     }
     sm.transitions = [
         Transition(
@@ -107,7 +113,7 @@ def test_available_transitions_from_working_returns_hitl_actions() -> None:
 
     wont = by_dest["wont_fix"]
     assert wont.default_level is HumanGateLevel.AUDIT
-    assert wont.destination_terminal_taxonomy is TerminalTaxonomy.ABANDONED
+    assert wont.destination_closure_taxonomy is ClosureTaxonomy.ABANDONED
 
 
 def test_trust_grant_relaxes_effective_level() -> None:
@@ -137,6 +143,6 @@ def test_trust_grant_relaxes_effective_level() -> None:
     assert wont.grant_relaxed is False
 
 
-def test_no_actions_for_terminal_state() -> None:
+def test_no_actions_for_closing_state() -> None:
     sm, catalog = _build()
     assert available_transitions(sm, catalog, {}, source_state="wont_fix") == []

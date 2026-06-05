@@ -152,30 +152,22 @@ def _is_working_state(state_machine: StateMachine, name: str | None) -> bool:
     return state is not None and state.state_class is StateClass.WORKING
 
 
-def _terminal_close_info(
+def _closing_close_info(
     state_machine: StateMachine, name: str | None
 ) -> tuple[bool, str | None]:
     """Whether advancing into `name` should close the tracker's issue.
 
-    Returns `(close_issue, close_reason)`. The decision is purely driven by
-    the destination state's authored `close_reason` field — present means
-    close with that reason, absent means leave the issue open.
-
-    This lets `<name>-states.json` author the close behavior per-state,
-    including the handoff-terminal pattern (terminal state with no
-    `close_reason` — the work continues elsewhere, so the tracker's issue
-    stays open).
+    Returns `(close_issue, close_reason)`. The decision is driven by whether
+    the destination is a closing state (`closes` annotation): present means
+    close with `closes.reason`, absent means leave the issue open. Work that
+    continues elsewhere uses a shared resting state, not a closing one.
     """
     if name is None or name == "[*]":
         return False, None
-    from workflow.core.model.state_machine import StateClass
-
     state = state_machine.states.get(name)
-    if state is None or state.state_class is not StateClass.TERMINAL:
+    if state is None or state.closes is None:
         return False, None
-    if state.close_reason is None:
-        return False, None
-    return True, state.close_reason
+    return True, state.closes.reason
 
 
 def _require_role_match(
@@ -337,9 +329,9 @@ def _plan_advance(
                         )
 
         # Per principle 1, leaving a working state clears the claim — the
-        # role no longer "owns" the issue once it's resting/terminal.
+        # role no longer "owns" the issue once it's resting/closing state.
         leaving_working = _is_working_state(state_machine, transition.source)
-        close, reason = _terminal_close_info(state_machine, transition.destination)
+        close, reason = _closing_close_info(state_machine, transition.destination)
         dest = state_machine.states.get(transition.destination)
         change = MarkerChange(
             set_state=transition.destination,
@@ -455,7 +447,7 @@ def _advance_audit_gated(
     notes = request.body_text
     # Audit-gated advance always leaves a working state (per principle 2,
     # role-action transitions originate in WORKING); clear the claim.
-    close, reason = _terminal_close_info(state_machine, transition.destination)
+    close, reason = _closing_close_info(state_machine, transition.destination)
     dest = state_machine.states.get(transition.destination)
     change = MarkerChange(
         set_state=transition.destination,
@@ -729,7 +721,7 @@ def _plan_approve(
     # Approve fires the gated transition; the agent who was holding the
     # working state is now done, so clear the claim. The original source
     # (the working state) was the agent's seat.
-    close, reason = _terminal_close_info(state_machine, destination)
+    close, reason = _closing_close_info(state_machine, destination)
     dest = state_machine.states.get(destination)
     change = MarkerChange(
         set_state=destination,
@@ -823,7 +815,7 @@ def _plan_record_action(
     if state.audit_pending and state.audit_pending != gate.gate_name:
         raise OperationError(f"Another audit is pending ({state.audit_pending!r}).")
     # Record-action leaves the working state (same shape as audit-gated advance).
-    close, reason = _terminal_close_info(state_machine, destination)
+    close, reason = _closing_close_info(state_machine, destination)
     change = MarkerChange(
         set_state=destination,
         set_audit_pending=gate.gate_name,

@@ -1,6 +1,6 @@
 # Process: postmortem
 
-Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files follow-ups (bug/chore/feature) on refinement via the terminal-state spawn declaration — `workflow spawn-issue --issue-type bug --initial-state raw` (etc.) for each item.
+Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files follow-ups (bug/chore/feature) on refinement via the closing-state spawn declaration — `workflow spawn-issue --issue-type bug --initial-state raw` (etc.) for each item.
 
 > Defined in: `postmortem-states.json`
 
@@ -33,11 +33,11 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `pending` | resting | reversible-slow | — | postmortem | — | — | — |
 | `drafting` | working | — | product-manager | postmortem | blocked-on-data, needs-security-review, general | — | — |
-| `complete` | terminal | reversible-slow | — | — | — | resolved | completed |
+| `complete` | resting | reversible-slow | — | — | — | resolved | completed |
 
 ## Transitions
 

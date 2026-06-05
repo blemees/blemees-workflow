@@ -13,12 +13,13 @@ from enum import Enum
 class StateClass(Enum):
     """Per state-machine-principles.md principle 1.
 
-    Every state is exactly one of these classes. There are no other state types.
+    Every state is one of these two ownership classes. Termination is no
+    longer a class — a closing state is a `resting` state carrying a `closes`
+    annotation (see `Closes` and ADR-0002).
     """
 
     RESTING = "resting"
     WORKING = "working"
-    TERMINAL = "terminal"
 
 
 class ReversibilityClass(Enum):
@@ -33,10 +34,10 @@ class ReversibilityClass(Enum):
     REVERSIBLE_SLOW = "reversible-slow"
 
 
-class TerminalTaxonomy(Enum):
+class ClosureTaxonomy(Enum):
     """Per state-machine-principles.md principle 8.
 
-    Every terminal state must carry one of these tags. A terminal without a tag
+    Every closing state must carry one of these tags. A closing state without a tag
     is an authoring error caught by the validator.
 
     Six buckets covering the meaningful outcome categories:
@@ -70,29 +71,29 @@ class TransitionType(Enum):
     """
 
     CLAIM = "claim"  # resting → working
-    ADVANCE = "advance"  # working → resting or terminal (agent-driven)
+    ADVANCE = "advance"  # working → resting or closing state (agent-driven)
     EVENT = "event"  # system/time event (fired by automation, not an agent)
 
 
 @dataclass(frozen=True)
 class Spawn:
-    """Subprocess / spawn contract carried by a working or terminal state.
+    """Subprocess / spawn contract carried by a working or closing state.
 
     On a **working** state: the parent stays in the working state while a
-    child issue runs on another process. When the child reaches a terminal,
-    the parent auto-advances ONLY if that terminal appears in `advance_on`
-    — the field is selective, not exhaustive. Child terminals not in the
+    child issue runs on another process. When the child reaches a closing state,
+    the parent auto-advances ONLY if that closing state appears in `advance_on`
+    — the field is selective, not exhaustive. Child closing states not in the
     map leave the parent in its current state for the agent to advance
     manually.
 
     On a **resting** state: the parent waits at this resting queue while
-    a child issue runs. When the child reaches a terminal in `advance_on`,
+    a child issue runs. When the child reaches a closing state in `advance_on`,
     the framework fires an EVENT-style advance on the parent (no agent
     claim needed). `advance_on` targets MUST be non-working states (you
     can't auto-advance into a working state — that would bypass the
     claim-before-working invariant).
 
-    On a **terminal** state: an "independent spawn" — when the parent
+    On a **closing state** state: an "independent spawn" — when the parent
     closes, a new child issue is created. `advance_on` is empty because
     the parent is already terminating; there's nothing left to advance.
     Typical use: postmortem opens when an incident closes.
@@ -106,11 +107,11 @@ class Spawn:
     process: str | None = None
     issue_type: str = ""     # issue type to create on the target
     initial_state: str = ""  # initial state to create the child at
-    advance_on: tuple[tuple[str, str], ...] = ()  # (child_terminal, parent_next_state)
+    advance_on: tuple[tuple[str, str], ...] = ()  # (child_closing_state, parent_next_state)
 
-    def parent_next_state(self, child_terminal: str) -> str | None:
+    def parent_next_state(self, child_closing_state: str) -> str | None:
         for k, v in self.advance_on:
-            if k == child_terminal:
+            if k == child_closing_state:
                 return v
         return None
 
@@ -145,7 +146,7 @@ class CollectAdvanceRule:
     def all_targets(self) -> tuple[str, ...]:
         """Every target state this rule can advance contributors to —
         the default plus every per-type override. Used by the validator
-        and the emitter's collect-feedback-terminal computation."""
+        and the emitter's collect-feedback-closing state computation."""
         seen: list[str] = []
         if self.default_target is not None and self.default_target not in seen:
             seen.append(self.default_target)
@@ -166,7 +167,7 @@ class Collects:
     Authoring lives on the **receiver** side (mirrors the existing
     handoff/spawn pattern). The framework queries the candidate set at
     `create-issue` time; it does NOT auto-create the collector — the
-    human decides when to cut. `from_states` must be resting or terminal
+    human decides when to cut. `from_states` must be resting or closing state
     in the source process (collecting from a working state would
     conflict with that state's claim).
 
@@ -176,7 +177,7 @@ class Collects:
     on the source process. The target can be a single string (all
     contributor types advance to the same state) OR a per-type map (a
     contributor's target depends on its issue type, with `*` as the
-    catch-all). Targets must be resting or terminal on the source
+    catch-all). Targets must be resting or closing state on the source
     process (no auto-enter into working states).
     """
 
@@ -185,7 +186,7 @@ class Collects:
     # process from `from_states`. Authored values must match the
     # derived value. Stored as `None` when omitted.
     process: str | None = None
-    from_states: tuple[str, ...] = ()  # resting/terminal states on the source process
+    from_states: tuple[str, ...] = ()  # resting/closing states on the source process
     # Optional issue-type filter. When empty, every issue type accepted
     # by the source process is eligible. When set, candidates must
     # carry one of the listed types. Use this when one process has
@@ -215,6 +216,20 @@ class Collects:
 
 
 @dataclass(frozen=True)
+class Closes:
+    """Closing annotation on a resting state (per ADR-0002).
+
+    Presence of `closes` makes a resting state a closing state — a sink that
+    closes the tracker's issue on entry. `taxonomy` tags the outcome (per
+    principle 8) and `reason` is the backend close reason (GitHub:
+    "completed" / "not planned"). Replaces the former `closing state` state class.
+    """
+
+    taxonomy: ClosureTaxonomy
+    reason: str
+
+
+@dataclass(frozen=True)
 class State:
     """A node on the workflow diagram.
 
@@ -229,7 +244,7 @@ class State:
     state(s) include role X in `roles`.
 
     `issue_types` declares which issue types may occupy this state.
-    Required on working AND resting; forbidden on terminal.
+    Required on working AND resting; forbidden on closing state.
     - Working: types this state will do work on (claim semantics). The
       process's umbrella accepted-types set is derived as the union
       across all working states.
@@ -244,14 +259,13 @@ class State:
     name: str
     state_class: StateClass
     reversibility: ReversibilityClass | None = None
-    terminal_taxonomy: TerminalTaxonomy | None = None
     roles: tuple[str, ...] = ()
     issue_types: tuple[str, ...] = ()
     # Handover contract — `handoff: true` on a resting state declares it as
     # the interface between two processes. The same state name appears in
     # the other process(es)' state machines, also with `handoff: true`.
     # The registry resolves the other end(s) by name. Only valid on resting
-    # states. Working / terminal states cannot be handover interfaces.
+    # states. Working / closing states cannot be handover interfaces.
     handoff: bool = False
     # External entry — `is_initial: true` on a resting state declares it as
     # an external entry point. New issues materialize here from outside
@@ -263,7 +277,7 @@ class State:
     is_initial: bool = False
     initial_label: str | None = None
     # Subprocess / spawn contract. Only valid on working / resting /
-    # terminal states. See Spawn docstring for per-class semantics. A
+    # closing states. See Spawn docstring for per-class semantics. A
     # state can declare multiple spawn rules — different kinds of work
     # to dispatch from the same state, fired ad-hoc by the agent. The
     # cascade's wait-for-all rule advances the parent only when every
@@ -276,24 +290,24 @@ class State:
     # When True, advancing into this state flips the underlying PR from
     # draft to ready-for-review on the tracker (via `gh pr ready` on GitHub).
     # No-op when the issue isn't a pull request. Only valid on resting or
-    # working states — terminals have already reached final form.
+    # working states — closing states have already reached final form.
     mark_pr_ready: bool = False
     # Human inputs agents may invoke `request-input` on at this state.
     # Ids resolve against the shared `human-inputs.json`. Only valid on
     # working states. Empty / absent means `request-input` is forbidden
     # at this state — agents must release the issue if they're stuck.
     human_inputs: tuple[str, ...] = ()
-    # Backend-specific close reason for terminal states. REQUIRED on
-    # terminals — every terminal closes the tracker's issue with this
-    # reason (GitHub: "completed" or "not planned"). FORBIDDEN on resting
-    # and working states. Cross-process handoffs that keep the same issue
-    # open use shared resting states, not terminals.
-    close_reason: str | None = None
+    # Closing annotation (ADR-0002). When set, this resting state is a sink
+    # that closes the issue on entry, carrying the outcome taxonomy and the
+    # backend close reason (GitHub: "completed" / "not planned"). Cross-process
+    # handoffs that keep the issue open use shared resting states, not closing
+    # states. See `Closes` and `is_closing`.
+    closes: Closes | None = None
     notes: list[str] = field(default_factory=list, hash=False, compare=False)
 
     @property
-    def is_terminal(self) -> bool:
-        return self.state_class is StateClass.TERMINAL
+    def is_closing(self) -> bool:
+        return self.closes is not None
 
     @property
     def is_irreversible(self) -> bool:
@@ -323,7 +337,7 @@ class Transition:
 
     Cross-process relationships no longer use a transition type — shared
     handovers live on resting states (`handoff: true`) and subprocess /
-    independent spawns live on working / terminal states (`spawns: {...}`).
+    independent spawns live on working / closing states (`spawns: {...}`).
     """
 
     source: str  # State name

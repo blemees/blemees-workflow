@@ -1,7 +1,7 @@
 {
   "$schema": "../../docs/schemas/states.schema.json",
   "group": "delivery",
-  "description": "Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills. Chores skip this process and are filed directly on `inner-loop.ready_for_dev` — engineering hygiene work doesn't need PM refinement.",
+  "description": "Shape raw ideas and bug reports into ready-for-dev tickets. The product manager owns the queue, classifies issue type, and either marks ready or parks/kills. Chores skip this process and are filed directly on `inner-loop.ready_for_dev` \u2014 engineering hygiene work doesn't need PM refinement.",
   "states": {
     "raw": {
       "class": "resting",
@@ -127,16 +127,20 @@
       ]
     },
     "duplicate": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "deduplicated",
-      "close_reason": "not planned"
+      "closes": {
+        "taxonomy": "deduplicated",
+        "reason": "not planned"
+      }
     },
     "wont_fix": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "abandoned",
-      "close_reason": "not planned"
+      "closes": {
+        "taxonomy": "abandoned",
+        "reason": "not planned"
+      }
     }
   },
   "transitions": [

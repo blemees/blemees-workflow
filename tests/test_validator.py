@@ -5,14 +5,20 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from workflow.backends.base import IssueState
-from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
+from workflow.core.model.human_gate import (
+    HumanGate,
+    HumanGateCatalog,
+    HumanGateLevel,
+    HumanGateType,
+)
 from workflow.core.model.state_machine import (
+    Closes,
+    ClosureTaxonomy,
     Collects,
     ReversibilityClass,
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
     Transition,
     TransitionType,
 )
@@ -33,8 +39,9 @@ def _irreversible_workflow_without_hitl() -> StateMachine:
     workflow.states["working"] = State(name="working", state_class=StateClass.WORKING)
     workflow.states["released"] = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     workflow.transitions.append(
         Transition(
@@ -57,6 +64,100 @@ def test_irreversible_destination_without_hitl_fires_warning() -> None:
     assert any("irreversible" in f.message.lower() and "released" in f.message for f in matches)
 
 
+def _closing_state(name: str) -> State:
+    return State(
+        name=name,
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    )
+
+
+def test_closing_state_with_outgoing_transition_errors() -> None:
+    """A closing state is a sink — an outgoing transition is an ERROR
+    (previously implicit; now explicit since closing states are resting)."""
+    sm = StateMachine(name="t")
+    sm.states["done"] = _closing_state("done")
+    sm.states["after"] = State(
+        name="after",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        issue_types=("bug",),
+    )
+    sm.transitions.append(
+        Transition(
+            source="done",
+            destination="after",
+            label="reopen (external)",
+            transition_type=TransitionType.EVENT,
+        )
+    )
+    findings = validate_state_machine(sm, catalog=None, grants={})
+    sink = [
+        f
+        for f in findings
+        if "closing state" in f.message.lower() and "sink" in f.message.lower()
+    ]
+    assert sink, "Expected a sink-invariant finding for the closing state"
+    assert all(f.severity is Severity.ERROR for f in sink)
+
+
+def test_closing_state_as_pure_sink_passes() -> None:
+    sm = StateMachine(name="t")
+    sm.states["done"] = _closing_state("done")
+    findings = validate_state_machine(sm, catalog=None, grants={})
+    assert not [
+        f for f in findings if "closing state" in f.message.lower() and "sink" in f.message.lower()
+    ]
+
+
+def test_closes_mutually_exclusive_with_other_annotations() -> None:
+    """A closing state can't also be an entry (`is_initial`), a collector
+    (`collects`), a handoff, or carry `issue_types` (ADR-0002)."""
+    from workflow.core.model.state_machine import Collects
+
+    cases = {
+        "is_initial": dict(is_initial=True),
+        "collects": dict(collects=Collects(from_states=("x",))),
+        "handoff": dict(handoff=True),
+        "issue_types": dict(issue_types=("bug",)),
+    }
+    for label, extra in cases.items():
+        sm = StateMachine(name="t")
+        sm.states["done"] = State(
+            name="done",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.IRREVERSIBLE,
+            closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+            **extra,
+        )
+        findings = validate_state_machine(sm, catalog=None, grants={})
+        excl = [f for f in findings if "closes" in f.message.lower() and label in f.message]
+        assert excl, f"Expected exclusivity finding for closes+{label}"
+        assert all(f.severity is Severity.ERROR for f in excl)
+
+
+def test_closes_forbids_spawn_advance_on() -> None:
+    """A spawn on a closing state can't carry `advance_on` — the parent is
+    already closed, so there's nothing to advance."""
+    from workflow.core.model.state_machine import Spawn
+
+    sm = StateMachine(name="t")
+    sm.states["done"] = State(
+        name="done",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SUPERSEDED, reason="completed"),
+        spawns=(
+            Spawn(issue_type="chore", initial_state="ready", advance_on=(("shipped", "next"),)),
+        ),
+    )
+    findings = validate_state_machine(sm, catalog=None, grants={})
+    excl = [f for f in findings if "advance_on" in f.message and "closing" in f.message.lower()]
+    assert excl, "Expected an advance_on-on-closing finding"
+    assert all(f.severity is Severity.ERROR for f in excl)
+
+
 def test_irreversible_destination_with_gate_passes() -> None:
     workflow = _irreversible_workflow_without_hitl()
     # Re-emit the transition with the gate set → marks it as HITL-gated.
@@ -71,21 +172,6 @@ def test_irreversible_destination_with_gate_passes() -> None:
     ]
     findings = validate_state_machine(workflow, catalog=None, grants={})
     assert not any(f.principle_cite == "state-machine-principles.md#11" for f in findings)
-
-
-def test_terminal_without_taxonomy_warns() -> None:
-    workflow = StateMachine(name="t")
-    workflow.states["working"] = State(name="working", state_class=StateClass.WORKING)
-    workflow.states["done"] = State(
-        name="done",
-        state_class=StateClass.TERMINAL,
-        terminal_taxonomy=None,
-    )
-    workflow.transitions.append(
-        Transition(source="working", destination="done", label="agent done")
-    )
-    findings = validate_state_machine(workflow, None, {})
-    assert any(f.principle_cite == "state-machine-principles.md#8" for f in findings)
 
 
 def test_gate_with_multiple_source_states_errors() -> None:
@@ -170,8 +256,9 @@ def test_audit_with_irreversible_destination_errors() -> None:
     workflow.states["src"] = State(name="src", state_class=StateClass.WORKING)
     workflow.states["irrev_dst"] = State(
         name="irrev_dst",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     workflow.transitions.append(
         Transition(
@@ -295,8 +382,8 @@ def _collector_workflow(collects: Collects) -> StateMachine:
     return sm
 
 
-def _source_workflow_with_terminal_staged() -> StateMachine:
-    """A minimal source workflow with a `staged` terminal state."""
+def _source_workflow_with_closing_staged() -> StateMachine:
+    """A minimal source workflow with a `staged` closing state."""
     sm = StateMachine(name="src_proc")
     sm.states["draft"] = State(
         name="draft",
@@ -305,10 +392,9 @@ def _source_workflow_with_terminal_staged() -> StateMachine:
     )
     sm.states["staged"] = State(
         name="staged",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     return sm
 
@@ -328,7 +414,7 @@ def test_collects_unknown_process_errors() -> None:
 
 def test_collects_unknown_from_state_errors() -> None:
     parent = _collector_workflow(Collects(process="src_proc", from_states=("nope",)))
-    src = _source_workflow_with_terminal_staged()
+    src = _source_workflow_with_closing_staged()
     findings = validate_state_machine(
         parent,
         catalog=None,
@@ -355,7 +441,7 @@ def test_collects_working_from_state_errors() -> None:
         sibling_machines={"collector_proc": parent, "src_proc": src},
     )
     assert any(
-        "Collect only from resting or terminal" in f.message for f in findings
+        "Collect only from resting or closing state" in f.message for f in findings
     )
 
 
@@ -374,10 +460,9 @@ def test_entry_with_collects_on_same_state_errors() -> None:
     src = StateMachine(name="src")
     src.states["staged"] = State(
         name="staged",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     findings = validate_state_machine(
         sm,
@@ -500,7 +585,7 @@ def test_process_reached_via_spawn_does_not_warn() -> None:
 
 def test_collects_valid_passes() -> None:
     parent = _collector_workflow(Collects(process="src_proc", from_states=("staged",)))
-    src = _source_workflow_with_terminal_staged()
+    src = _source_workflow_with_closing_staged()
     findings = validate_state_machine(
         parent,
         catalog=None,
@@ -537,7 +622,7 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
             issue_types=("bug",),
         ),
     }
-    # Child process with the right type + initial state + terminal.
+    # Child process with the right type + initial state + closing state.
     child = StateMachine(name="child")
     child.states = {
         "queue": State(
@@ -552,11 +637,9 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
         ),
         "done": State(
             name="done",
-            state_class=StateClass.TERMINAL,
-            terminal_taxonomy=__import__(
-                "workflow.core.model.state_machine", fromlist=["TerminalTaxonomy"]
-            ).TerminalTaxonomy.SHIPPED,
-            close_reason="completed",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.IRREVERSIBLE,
+            closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
         ),
     }
     findings = validate_state_machine(

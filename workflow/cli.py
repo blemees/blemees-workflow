@@ -1143,9 +1143,9 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
                 "destination_reversibility": (
                     a.destination_reversibility.value if a.destination_reversibility else None
                 ),
-                "destination_terminal_taxonomy": (
-                    a.destination_terminal_taxonomy.value
-                    if a.destination_terminal_taxonomy
+                "destination_closure_taxonomy": (
+                    a.destination_closure_taxonomy.value
+                    if a.destination_closure_taxonomy
                     else None
                 ),
                 "destination_roles": list(a.destination_roles),
@@ -1231,8 +1231,8 @@ def _print_next_actions(
             dst_bits.append(a.destination_reversibility.value)
         if a.destination_state_class is not None:
             cls = a.destination_state_class.value
-            if a.destination_terminal_taxonomy is not None:
-                cls += f"/{a.destination_terminal_taxonomy.value}"
+            if a.destination_closure_taxonomy is not None:
+                cls += f"/{a.destination_closure_taxonomy.value}"
             dst_bits.append(cls)
         if dst_bits:
             print(f"    destination: {', '.join(dst_bits)}")
@@ -1381,11 +1381,11 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
 
-        # If this advance just landed the issue on a terminal AND the issue
+        # If this advance just landed the issue on a closing state AND the issue
         # has a `parent-of:` label, propagate to the parent per the parent
         # state's spawns.advance_on mapping.
         if not ctx["dry_run"]:
-            _propagate_to_parent_on_terminal(ctx, args.issue, args.destination)
+            _propagate_to_parent_on_closing(ctx, args.issue, args.destination)
 
         return 0
     except WorkflowError as exc:
@@ -1393,12 +1393,12 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
         return 2
 
 
-def _propagate_to_parent_on_terminal(
+def _propagate_to_parent_on_closing(
     ctx: dict, child_id: str, child_destination: str
 ) -> None:
-    """If the child issue advanced to a terminal AND has a parent link,
+    """If the child issue advanced to a closing state AND has a parent link,
     auto-advance the parent per `spawns.advance_on` — but only when the
-    child's terminal is in that map. Unmapped terminals leave the parent
+    child's closing state is in that map. Unmapped closing states leave the parent
     in its current state for manual handling.
 
     Lazy / eager: triggered at child-advance time. The parent's transition
@@ -1406,7 +1406,6 @@ def _propagate_to_parent_on_terminal(
     failure but don't fail the child advance if the parent advance fails.
     """
     from workflow.config import build_registry
-    from workflow.core.model.state_machine import StateClass
 
     try:
         registry = build_registry(
@@ -1418,13 +1417,13 @@ def _propagate_to_parent_on_terminal(
         if registry is None:
             return
 
-        # Confirm the child landed on a terminal.
+        # Confirm the child landed on a closing state.
         child_process = registry.find_process_for_state(child_destination)
         if child_process is None:
             return
         child_ctx = registry.get_process(child_process)
         child_state_decl = child_ctx.state_machine.states.get(child_destination)
-        if child_state_decl is None or child_state_decl.state_class is not StateClass.TERMINAL:
+        if child_state_decl is None or not child_state_decl.is_closing:
             return
 
         # Look up the child's parent via the `parent-of:` label.
@@ -1453,7 +1452,7 @@ def _propagate_to_parent_on_terminal(
         if not parent_id:
             return
 
-        # Resolve the parent's spawns.advance_on mapping for this terminal.
+        # Resolve the parent's spawns.advance_on mapping for this closing state.
         parent_now = backend.read_issue(parent_id)
         if parent_now.state is None:
             return
@@ -1471,7 +1470,7 @@ def _propagate_to_parent_on_terminal(
                 break
         if parent_next is None:
             print(
-                f"  (parent #{parent_id} not auto-advanced: child terminal "
+                f"  (parent #{parent_id} not auto-advanced: child closing state "
                 f"{child_destination!r} isn't in spawns.advance_on — "
                 f"parent stays in its current state.)"
             )
@@ -1485,7 +1484,7 @@ def _propagate_to_parent_on_terminal(
             issue_id=parent_id,
             destination=parent_next,
             body_text=(
-                f"**Auto-advance**: child issue #{child_id} reached terminal "
+                f"**Auto-advance**: child issue #{child_id} reached closing state "
                 f"`{child_destination}` → parent advanced per spawns.advance_on."
             ),
             actor=None,
@@ -3042,7 +3041,6 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         OutboundCollect,
         OutboundFeedback,
         ProcessDocInput,
-        spawn_sources_from_inbound,
         emit_human_inputs_doc,
         emit_index_doc,
         emit_issue_types_doc,
@@ -3050,6 +3048,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         emit_process_doc,
         emit_process_map,
         emit_roles_doc,
+        spawn_sources_from_inbound,
     )
 
     ctx = _ctx_obj_from_args(args)
@@ -3122,10 +3121,10 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
                         issue_type=sp.issue_type,
                     )
                 )
-                for child_terminal, parent_next in sp.advance_on:
+                for child_closing_state, parent_next in sp.advance_on:
                     outbound_feedback_by_process.setdefault(target_proc, []).append(
                         OutboundFeedback(
-                            child_terminal=child_terminal,
+                            child_closing_state=child_closing_state,
                             parent_process=p.process_name,
                             parent_state=s.name,
                             parent_next=parent_next,
@@ -3159,7 +3158,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     for proc_name in outbound_feedback_by_process:
         outbound_feedback_by_process[proc_name].sort(
             key=lambda row: (
-                row.child_terminal,
+                row.child_closing_state,
                 row.parent_process,
                 row.parent_state,
                 row.parent_next,
@@ -3663,7 +3662,9 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
 
         for state_name, state in wf_context.state_machine.states.items():
             labels.add(f"state:{state_name}")
-            if state.state_class.value == "resting":
+            # Closing states are resting but are sinks — a closed issue has no
+            # origin to return to, so they get no `last-state:` marker.
+            if state.state_class.value == "resting" and not state.is_closing:
                 labels.add(f"last-state:{state_name}")
 
         if wf_context.catalog:

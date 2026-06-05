@@ -110,7 +110,7 @@ class MarkerChange:
     record_confirm: str | None = None  # destination checked post-hoc
     record_revoke: str | None = None  # destination revoked
     record_response: bool = False  # recognized HumanGate resolved
-    # Issue lifecycle on the tracker. Set when advancing into a terminal
+    # Issue lifecycle on the tracker. Set when advancing into a closing state
     # state whose taxonomy means "done" (not `iterated`, which is a
     # cross-process handoff). The tracker closes the issue with the
     # provided reason ("completed" / "not planned" for GitHub).
@@ -272,7 +272,7 @@ class TrackerBackend(Protocol):
     def close_issue(self, issue_id: str, reason: str | None = None) -> None:
         """Close the issue on the tracker.
 
-        Called when an operation advances into a terminal state whose
+        Called when an operation advances into a closing state whose
         taxonomy means "done" (everything except `iterated`, which is a
         cross-process handoff). `reason` is a backend-specific hint —
         GitHub accepts `completed` or `not planned`; other backends may

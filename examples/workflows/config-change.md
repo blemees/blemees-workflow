@@ -21,11 +21,11 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_config_change` | resting | reversible-fast | — | config-change | — | — | — |
 | `applying_config_change` | working | — | incident-responder | config-change | clarify-scope, needs-security-review, blocked-on-data, general | — | — |
-| `config_applied` | terminal | reversible-fast | — | — | — | shipped | completed |
+| `config_applied` | resting | reversible-fast | — | — | — | shipped | completed |
 
 ## Transitions
 

@@ -69,7 +69,8 @@ def validate_state_machine(
     findings: list[ValidationFinding] = []
 
     findings.extend(_check_irreversible_destinations_gated(state_machine))
-    findings.extend(_check_terminal_taxonomy(state_machine))
+    findings.extend(_check_closing_states_are_sinks(state_machine))
+    findings.extend(_check_closes_exclusivity(state_machine))
     findings.extend(_check_reversibility_declared_on_legend_states(state_machine))
     findings.extend(_check_transition_type_compatibility(state_machine))
     findings.extend(_check_working_states_are_claim_destinations(state_machine))
@@ -164,17 +165,74 @@ def _check_irreversible_destinations_gated(
     return findings
 
 
-def _check_terminal_taxonomy(state_machine: StateMachine) -> list[ValidationFinding]:
+def _check_closing_states_are_sinks(
+    state_machine: StateMachine,
+) -> list[ValidationFinding]:
+    """A closing state (`closes`) is a sink — it must have no outgoing
+    transitions (ADR-0002). Previously implicit (no transition type accepted a
+    closing state source); explicit now that closing states are `resting` and an
+    EVENT is resting → resting."""
     findings: list[ValidationFinding] = []
-    for state in state_machine.states.values():
-        if state.state_class is StateClass.TERMINAL and state.terminal_taxonomy is None:
+    for t in state_machine.transitions:
+        source = state_machine.states.get(t.source)
+        if source is not None and source.closes is not None:
             findings.append(
                 ValidationFinding(
-                    severity=Severity.WARNING,
-                    principle_cite="state-machine-principles.md#8",
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#1",
                     message=(
-                        f"Terminal state {state.name!r} has no taxonomy tag. "
-                        "Add `terminal (<tag>)` to the sink transition or a note."
+                        f"Closing state {t.source!r} has an outgoing transition "
+                        f"({t.label!r}); closing states are sinks (no further "
+                        "transitions)."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+    return findings
+
+
+def _check_closes_exclusivity(
+    state_machine: StateMachine,
+) -> list[ValidationFinding]:
+    """A closing state (`closes`) is an unowned sink, so it cannot also be an
+    external entry, a collector, a handoff interface, or hold `issue_types`;
+    and a spawn on a closing state cannot carry `advance_on` (ADR-0002)."""
+    findings: list[ValidationFinding] = []
+    cite = "state-machine-principles.md#1"
+    for state in state_machine.states.values():
+        if state.closes is None:
+            continue
+        conflicts: list[str] = []
+        if state.is_initial:
+            conflicts.append("is_initial")
+        if state.collects is not None:
+            conflicts.append("collects")
+        if state.handoff:
+            conflicts.append("handoff")
+        if state.issue_types:
+            conflicts.append("issue_types")
+        for field_name in conflicts:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite=cite,
+                    message=(
+                        f"State {state.name!r} has both `closes` and "
+                        f"`{field_name}` — a closing state is an unowned sink; "
+                        "these are mutually exclusive."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+        if any(sp.advance_on for sp in state.spawns):
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite=cite,
+                    message=(
+                        f"State {state.name!r}: a spawn on a closing state "
+                        "cannot carry `advance_on` (the parent is already "
+                        "closed)."
                     ),
                     location=state_machine.source_path,
                 )
@@ -388,11 +446,11 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
     source/destination state-class rules:
 
     - CLAIM: resting → working
-    - ADVANCE: working → resting | terminal
-    - EVENT: resting → resting | terminal
+    - ADVANCE: working → resting | closing state
+    - EVENT: resting → resting | closing state
 
     `[*]` endpoints are no longer authored as transition endpoints —
-    entries are declared via `State.is_initial` and terminal sinks are
+    entries are declared via `State.is_initial` and closing state sinks are
     implicit. Source/destination are real state names here. ERROR-level
     — these are hard structural rules. Cross-process relationships are
     not transitions (see `State.handoff` and `State.spawns` for the data
@@ -432,7 +490,7 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
                     )
                 )
 
-        # ADVANCE: working → resting | terminal
+        # ADVANCE: working → resting | closing state
         elif t.transition_type is TransitionType.ADVANCE:
             if src_state is not None and src_state.state_class is not StateClass.WORKING:
                 findings.append(
@@ -455,14 +513,14 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
                         principle_cite="state-machine-principles.md#2",
                         message=(
                             f"Role-action transition {t.source!r} → {t.destination!r} "
-                            f"({t.label!r}) must land in a RESTING or TERMINAL state; "
+                            f"({t.label!r}) must land in a RESTING state (closing states are resting); "
                             f"destination is {dst_state.state_class.value}."
                         ),
                         location=state_machine.source_path,
                     )
                 )
 
-        # EVENT: resting → resting | terminal (system / time trigger).
+        # EVENT: resting → resting | closing state (system / time trigger).
         elif t.transition_type is TransitionType.EVENT:
             if src_state is not None and src_state.state_class is not StateClass.RESTING:
                 findings.append(
@@ -484,7 +542,7 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
                         principle_cite="state-machine-principles.md#2",
                         message=(
                             f"Event transition {t.source!r} → {t.destination!r} "
-                            f"({t.label!r}) must land in a RESTING or TERMINAL state; "
+                            f"({t.label!r}) must land in a RESTING state (closing states are resting); "
                             f"destination is {dst_state.state_class.value}."
                         ),
                         location=state_machine.source_path,
@@ -673,7 +731,7 @@ def _check_spawns(
     - issue_type must be in the target's accepted_issue_types.
     - initial_state must exist on the target and be RESTING.
     - Working / resting-state spawns: each advance_on key must be a
-      terminal on the target; each value must be a state on this
+      closing state on the target; each value must be a state on this
       process. Resting-state advance_on values must be non-working.
     - Within a single state, no two spawns may share
       (issue_type, initial_state) — that pair is the runtime
@@ -860,19 +918,19 @@ def _check_spawns(
                 )
 
             # advance_on checks per rule. A spawned child's lifecycle
-            # can cross processes via handoff, so the terminal can live
+            # can cross processes via handoff, so the closing state can live
             # on any sibling process — not necessarily the spawn target.
             # Example: mitigation spawns a hotfix into inner-loop, but
-            # the hotfix's terminal (`shipped`) is in release because
+            # the hotfix's closing state (`shipped`) is in release because
             # `inner-loop.staged` is a handoff to release.
-            if state.state_class is not StateClass.TERMINAL and sp.advance_on:
-                global_terminals: set[str] = set()
+            if not state.is_closing and sp.advance_on:
+                global_closing_states: set[str] = set()
                 for sibling in sibling_machines.values():
                     for s in sibling.states.values():
-                        if s.state_class is StateClass.TERMINAL:
-                            global_terminals.add(s.name)
-                declared_terminals = {k for k, _ in sp.advance_on}
-                unknown = declared_terminals - global_terminals
+                        if s.is_closing:
+                            global_closing_states.add(s.name)
+                declared_closing_states = {k for k, _ in sp.advance_on}
+                unknown = declared_closing_states - global_closing_states
                 if unknown:
                     findings.append(
                         ValidationFinding(
@@ -881,7 +939,7 @@ def _check_spawns(
                             message=(
                                 f"State {state.name!r}: `spawns.advance_on` "
                                 f"references state(s) {sorted(unknown)} that "
-                                f"aren't terminals on any known process."
+                                f"aren't closing states on any known process."
                             ),
                             location=state_machine.source_path,
                         )
@@ -917,7 +975,7 @@ def _check_spawns(
                                     f"working state, bypassing the "
                                     f"claim-before-working invariant. "
                                     f"Auto-advance must land on a resting or "
-                                    f"terminal state."
+                                    f"closing state."
                                 ),
                                 location=state_machine.source_path,
                             )
@@ -935,7 +993,7 @@ def _check_collects(
       here for cross-artifact consistency).
     - Source process must exist in the sibling machines map.
     - Every `from_states` entry must exist on the source process AND be
-      resting or terminal (collecting from a working state would conflict
+      resting or closing state (collecting from a working state would conflict
       with that state's claim).
     """
     findings: list[ValidationFinding] = []
@@ -1045,7 +1103,7 @@ def _check_collects(
                             f"State {state.name!r}: `collects.from_states` "
                             f"entry {from_state_name!r} is a working state "
                             f"on {resolved_process!r}. Collect only from "
-                            f"resting or terminal states (working-state "
+                            f"resting or closing states (working-state "
                             f"items are already claimed)."
                         ),
                         location=state_machine.source_path,
@@ -1073,7 +1131,7 @@ def _check_collects(
                 )
 
         # `advance_on` keys must be declared states on THIS process (the
-        # collector); values must be declared resting or terminal states
+        # collector); values must be declared resting or closing states
         # on the source process (no auto-enter into working).
         for rule in collects.advance_on:
             if rule.collector_state not in state_machine.states:
@@ -1090,7 +1148,7 @@ def _check_collects(
                     )
                 )
             # Validate every target (default + per-type) — each must
-            # exist on the source process and be resting/terminal. Also
+            # exist on the source process and be resting/closing state. Also
             # validate per-type keys are real issue types accepted by
             # the source process.
             targets: list[tuple[str, str]] = []  # (label, target_state)
@@ -1142,7 +1200,7 @@ def _check_collects(
                                 f"[{rule.collector_state!r}]"
                                 f"[{label!r}]` → {target_state!r} on "
                                 f"{resolved_process!r} must be resting or "
-                                f"terminal — auto-advancing contributors into "
+                                f"closing state — auto-advancing contributors into "
                                 f"a working state would bypass the "
                                 f"claim-before-working invariant."
                             ),

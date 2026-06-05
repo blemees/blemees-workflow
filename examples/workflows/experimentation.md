@@ -46,16 +46,16 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `measuring` | resting | reversible-slow | — | experiment | — | — | — |
 | `measurement_complete` | resting | reversible-fast | — | experiment | — | — | — |
 | `analyzing` | working | — | product-owner | experiment | blocked-on-data, needs-ux-input, general | — | — |
 | `aborting` | working | — | product-owner | experiment | general | — | — |
-| `promoted` | terminal | reversible-slow | — | — | — | shipped | completed |
-| `killed` | terminal | reversible-slow | — | — | — | abandoned | not planned |
-| `iterated` | terminal | reversible-fast | — | — | — | superseded | not planned |
-| `aborted` | terminal | reversible-fast | — | — | — | abandoned | not planned |
+| `promoted` | resting | reversible-slow | — | — | — | shipped | completed |
+| `killed` | resting | reversible-slow | — | — | — | abandoned | not planned |
+| `iterated` | resting | reversible-fast | — | — | — | superseded | not planned |
+| `aborted` | resting | reversible-fast | — | — | — | abandoned | not planned |
 
 ## Transitions
 

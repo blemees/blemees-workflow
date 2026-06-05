@@ -23,13 +23,13 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_data_change` | resting | reversible-fast | — | data-change | — | — | — |
 | `creating_backup` | working | — | incident-responder | data-change | blocked-on-data, general | — | — |
 | `backup_ready` | resting | reversible-slow | — | data-change | — | — | — |
 | `applying_data_change` | working | — | incident-responder | data-change | clarify-scope, needs-security-review, blocked-on-data, general | — | — |
-| `data_change_applied` | terminal | reversible-slow | — | — | — | shipped | completed |
+| `data_change_applied` | resting | reversible-slow | — | — | — | shipped | completed |
 
 ## Transitions
 

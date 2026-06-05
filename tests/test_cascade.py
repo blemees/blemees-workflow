@@ -14,6 +14,8 @@ from workflow.core.cascade import (
     cascade_after_state_change,
 )
 from workflow.core.model.state_machine import (
+    Closes,
+    ClosureTaxonomy,
     CollectAdvanceRule,
     Collects,
     ReversibilityClass,
@@ -21,7 +23,6 @@ from workflow.core.model.state_machine import (
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
 )
 
 
@@ -133,10 +134,9 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
     )
     mitigation.states["mitigated"] = State(
         name="mitigated",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
 
     # inner-loop
@@ -153,10 +153,9 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
     )
     inner.states["shipped"] = State(
         name="shipped",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
 
     # release
@@ -175,10 +174,9 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
     )
     release.states["released"] = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
 
     registry = _MockRegistry(
@@ -279,10 +277,8 @@ def test_cascade_collect_advance_propagates_to_contributors():
     state_def = registry.processes_by_name["release"].state_machine.states["released"]
     state_def = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-        close_reason="completed",
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
@@ -290,6 +286,7 @@ def test_cascade_collect_advance_propagates_to_contributors():
                 CollectAdvanceRule(collector_state="released", default_target="shipped"),
             ),
         ),
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     registry.processes_by_name["release"].state_machine.states["released"] = state_def
 
@@ -360,10 +357,8 @@ def test_cascade_multi_hop_chain():
     # Wire `released` as a collect-advance trigger like the earlier test.
     state_def = State(
         name="released",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-        close_reason="completed",
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
@@ -371,12 +366,13 @@ def test_cascade_multi_hop_chain():
                 CollectAdvanceRule(collector_state="released", default_target="shipped"),
             ),
         ),
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
     registry.processes_by_name["release"].state_machine.states["released"] = state_def
 
     # Three issues in a chain. Release ships → inner-loop hotfix
-    # advances to `shipped` (terminal) → mitigation parent advances to
-    # `mitigated` (terminal) → incident grandparent advances to
+    # advances to `shipped` (closing state) → mitigation parent advances to
+    # `mitigated` (closing state) → incident grandparent advances to
     # `needs_verification`.
     backend.issues["INC-2"] = IssueState(
         issue_id="INC-2",
@@ -441,7 +437,7 @@ def test_cascade_cycle_guard_visits_state_pair_once():
             process="c",
             issue_type="x",
             initial_state="resting_c",
-            # Child terminal "done_c" → parent advances to "resting_p".
+            # Child closing state "done_c" → parent advances to "resting_p".
             advance_on=(("done_c", "resting_p"),),
         ),),
     )
@@ -459,10 +455,9 @@ def test_cascade_cycle_guard_visits_state_pair_once():
     )
     sm_c.states["done_c"] = State(
         name="done_c",
-        state_class=StateClass.TERMINAL,
+        state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_FAST,
-        terminal_taxonomy=TerminalTaxonomy.RESOLVED,
-        close_reason="completed",
+        closes=Closes(taxonomy=ClosureTaxonomy.RESOLVED, reason="completed"),
     )
 
     registry = _MockRegistry(
@@ -502,7 +497,7 @@ def test_cascade_cycle_guard_visits_state_pair_once():
 def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
     """With multiple spawn rules on the parent, the wait-for-all cascade
     holds the parent until EVERY sibling reaches one of its rule's
-    advance_on terminals. One satisfied + one unsatisfied → no advance."""
+    advance_on closing states. One satisfied + one unsatisfied → no advance."""
     # parent.working spawns child issues of two kinds; both must finish
     # before the parent advances to parent.done.
     parent_sm = StateMachine(name="parent")
@@ -533,18 +528,17 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
     )
 
     kid_sm = StateMachine(name="kid")
-    for s, terminal_name in (("ready_a", "done_a"), ("ready_b", "done_b")):
+    for s, closing_name in (("ready_a", "done_a"), ("ready_b", "done_b")):
         kid_sm.states[s] = State(
             name=s,
             state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.REVERSIBLE_FAST,
         )
-        kid_sm.states[terminal_name] = State(
-            name=terminal_name,
-            state_class=StateClass.TERMINAL,
-            terminal_taxonomy=TerminalTaxonomy.SHIPPED,
-            close_reason="completed",
-        )
+        kid_sm.states[closing_name] = State(
+            name=closing_name,
+            state_class=StateClass.RESTING,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    )
 
     registry = _MockRegistry(
         processes_by_name={
@@ -582,7 +576,7 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
     assert apps == []
     assert backend.issues["P"].state == "working"
 
-    # Now KB also reaches its rule's terminal — parent advances.
+    # Now KB also reaches its rule's closing state — parent advances.
     backend.issues["KB"] = replace(backend.issues["KB"], state="done_b")
     apps = cascade_after_state_change(registry, backend, "KB", backend.issues["KB"])
     assert len(apps) == 1

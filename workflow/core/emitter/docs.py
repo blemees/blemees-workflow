@@ -50,9 +50,9 @@ class InboundSpawn:
 
 @dataclass(frozen=True)
 class OutboundFeedback:
-    """This process's terminal triggers a parent spawn's `advance_on` rule."""
+    """This process's closing state triggers a parent spawn's `advance_on` rule."""
 
-    child_terminal: str
+    child_closing_state: str
     parent_process: str
     parent_state: str
     parent_next: str
@@ -64,7 +64,7 @@ class OutboundCollect:
     """A sibling process's collector gathers contributors from this process.
 
     The mirror of the collector (inbound) side: `source_state` is a
-    resting/terminal state on *this* process that appears in another
+    resting/closing state on *this* process that appears in another
     process's `collects.from_states`, so issues resting here can be pulled
     into that process's collector.
     """
@@ -105,12 +105,12 @@ def spawn_sources_from_inbound(
     return {state: sorted(parents) for state, parents in sorted(grouped.items())}
 
 
-def feedback_terminals_from_outbound(
+def closing_states_from_outbound(
     outbound_feedback: tuple[OutboundFeedback, ...] | None,
 ) -> frozenset[str]:
     if not outbound_feedback:
         return frozenset()
-    return frozenset(row.child_terminal for row in outbound_feedback)
+    return frozenset(row.child_closing_state for row in outbound_feedback)
 
 
 def emit_process_doc(inputs: ProcessDocInput) -> str:
@@ -282,7 +282,7 @@ def emit_process_map(processes: list[Any]) -> str:
 
     - `▶ <state>`           — entry: `[*] --> process` (where new issues land)
     - `■ <state>`           — exit: `process --> [*]` (where issues close;
-      excludes feedback terminals — those are drawn separately).
+      excludes feedback closing states — those are drawn separately).
     - `⊙ <state>`           — handoff: process → process, shared resting
       state. Bidirectional handoffs (each side both sends and receives)
       emit two edges in opposite directions.
@@ -367,54 +367,54 @@ def emit_process_map(processes: list[Any]) -> str:
             return state_to_process.get(c.from_states[0])
         return None
 
-    # A terminal that's named as a `spawn.advance_on` key on some other
-    # process is a "feedback terminal" — the spawn child closes here,
+    # A closing state that's named as a `spawn.advance_on` key on some other
+    # process is a "feedback closing state" — the spawn child closes here,
     # then the parent process advances. From the workflow flow's
     # perspective the work continues in the parent; that's a feedback
     # signal, not a true workflow exit. Build the set so we can skip
     # exit edges for these.
     #
-    # Same logic applies to a collector's own terminals: a `collects`
-    # declaration names `advance_on` keys (collector terminals that fan
+    # Same logic applies to a collector's own closing states: a `collects`
+    # declaration names `advance_on` keys (collector closing states that fan
     # contributors forward) and `release_on` entries (collector
-    # terminals that release contributors back to candidacy). Both kinds
+    # closing states that release contributors back to candidacy). Both kinds
     # cascade work into the contributor process — they aren't "the
     # workflow ends here," they're "the collection now propagates."
-    feedback_terminals_by_process: dict[str, set[str]] = {}
+    feedback_closing_states_by_process: dict[str, set[str]] = {}
     for p in sorted_processes:
         for s in p.state_machine.states.values():
             for sp in s.spawns:
                 target_proc = _spawn_process(sp)
                 if target_proc is None:
                     continue
-                for child_terminal, _parent_next in sp.advance_on:
-                    feedback_terminals_by_process.setdefault(
+                for child_closing_state, _parent_next in sp.advance_on:
+                    feedback_closing_states_by_process.setdefault(
                         target_proc, set()
-                    ).add(child_terminal)
+                    ).add(child_closing_state)
             if s.collects is not None:
                 # Collector lives on THIS process; its advance_on /
                 # release_on keys are this process's own states (the
-                # collector's terminals/restings that trigger fan-out
+                # collector's closing states/restings that trigger fan-out
                 # to the contributor process).
                 for rule in s.collects.advance_on:
-                    feedback_terminals_by_process.setdefault(
+                    feedback_closing_states_by_process.setdefault(
                         p.process_name, set()
                     ).add(rule.collector_state)
                 for collector_state in s.collects.release_on:
-                    feedback_terminals_by_process.setdefault(
+                    feedback_closing_states_by_process.setdefault(
                         p.process_name, set()
                     ).add(collector_state)
 
     # Identify external entry / exit.
     entry_edges: list[tuple[str, str]] = []  # (process_name, destination_state)
-    exit_edges: list[tuple[str, str]] = []  # (process_name, terminal_state)
+    exit_edges: list[tuple[str, str]] = []  # (process_name, closing_state)
     for p in sorted_processes:
-        feedback_terminals = feedback_terminals_by_process.get(p.process_name, set())
+        feedback_closing_states = feedback_closing_states_by_process.get(p.process_name, set())
         for s in p.state_machine.states.values():
             if s.is_initial:
                 entry_edges.append((p.process_name, s.name))
-            if s.state_class is StateClass.TERMINAL and s.name not in feedback_terminals:
-                # A terminal that spawns a follow-up issue isn't really an
+            if s.is_closing and s.name not in feedback_closing_states:
+                # A closing state that spawns a follow-up issue isn't really an
                 # exit — the work is superseded by the child item, not
                 # closed off. The spawn edge (drawn elsewhere as
                 # `process → target: ᐉ <state>`) already communicates the
@@ -529,7 +529,7 @@ def emit_process_map(processes: list[Any]) -> str:
     # Feedback edges — the inverse of a spawn. When the child terminates
     # at a state listed in the spawn's `advance_on`, the parent
     # auto-advances. The feedback edge is sourced from the process that
-    # actually owns the triggering child terminal — which can differ
+    # actually owns the triggering child closing state — which can differ
     # from the spawn target when the child's lifecycle crosses
     # processes via handoff (e.g., mitigation spawns a hotfix into
     # inner-loop, but the hotfix is shipped via release, so the
@@ -541,9 +541,9 @@ def emit_process_map(processes: list[Any]) -> str:
                 spawn_target_proc = _spawn_process(sp)
                 if spawn_target_proc is None:
                     continue
-                for child_terminal, parent_next in sp.advance_on:
+                for child_closing_state, parent_next in sp.advance_on:
                     feedback_source = state_to_process.get(
-                        child_terminal, spawn_target_proc
+                        child_closing_state, spawn_target_proc
                     )
                     if feedback_source == p.process_name:
                         # Self-feedback would be a no-op cross-process
@@ -583,9 +583,9 @@ def emit_process_map(processes: list[Any]) -> str:
         )
     for src, dst, label in sorted(cross_edges):
         lines.append(f"    {_node_id(src)} --> {_node_id(dst)}: {label}")
-    for process_name, terminal_state in exit_edges:
+    for process_name, closing_state in exit_edges:
         lines.append(
-            f"    {_node_id(process_name)} --> [*]: {SYMBOL_EXIT} {terminal_state}"
+            f"    {_node_id(process_name)} --> [*]: {SYMBOL_EXIT} {closing_state}"
         )
 
     return "\n".join(lines) + "\n"
@@ -634,13 +634,13 @@ def emit_index_doc(
             "(top) and external exit (bottom). The diagram reads "
             "top-to-bottom: new issues flow from `[*]`, through "
             "processes (handoffs and spawns between them), and back to "
-            "`[*]` as each terminal state is reached.",
+            "`[*]` as each closing state is reached.",
             "",
             "Edge labels carry a symbol prefix indicating the relationship "
             "kind:",
             "",
             "- **`▶ <state>`** — entry: a new external issue materializes at the labelled state.",
-            "- **`■ <state>`** — exit: an issue closes at the labelled terminal **and** no parent process has it listed as a spawn feedback target. Terminals named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.",
+            "- **`■ <state>`** — exit: an issue closes at the labelled closing state **and** no parent process has it listed as a spawn feedback target. Closing states named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.",
             "- **`⊙ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.",
             "- **`ᐉ <parent_state>`** — spawn: the source process creates a child issue on the destination process. The label names only the parent state where the spawn fires; check the destination's own diagram for the child's initial state.",
             "- **`ꘜ <collector_state>`** — collect: the destination process (authored via `collects`) gathers contributors from another process. The label names only the collector state; the source's `from_states` are visible on the source process's own diagram.",
@@ -810,7 +810,7 @@ def _section_states(sm: StateMachine) -> list[str]:
     out = ["## States", ""]
     out.append(
         "| Name | Class | Reversibility | Roles | Issue types | "
-        "Human inputs | Terminal taxonomy | Close reason |"
+        "Human inputs | Closure taxonomy | Close reason |"
     )
     out.append("|---|---|---|---|---|---|---|---|")
     for name, st in sm.states.items():
@@ -819,8 +819,8 @@ def _section_states(sm: StateMachine) -> list[str]:
         roles = ", ".join(st.roles) if st.roles else "—"
         types = ", ".join(st.issue_types) if st.issue_types else "—"
         human_inputs = ", ".join(st.human_inputs) if st.human_inputs else "—"
-        tax = st.terminal_taxonomy.value if st.terminal_taxonomy else "—"
-        close = st.close_reason or "—"
+        tax = st.closes.taxonomy.value if st.closes else "—"
+        close = st.closes.reason if st.closes else "—"
         out.append(
             f"| `{name}` | {cls} | {rev} | {roles} | {types} | {human_inputs} | {tax} | {close} |"
         )
@@ -952,12 +952,12 @@ def _section_cross_process(
     for s in sm.states.values():
         for sp in s.spawns:
             counterpart_proc = _proc_link(sp.process) if sp.process else "_(derived)_"
-            for child_terminal, parent_next in sp.advance_on:
+            for child_closing_state, parent_next in sp.advance_on:
                 inbound.append(
                     (
                         parent_next,
                         f"{SYMBOL_FEEDBACK} feedback",
-                        f"{counterpart_proc} · `{child_terminal}`",
+                        f"{counterpart_proc} · `{child_closing_state}`",
                         f"child terminates → advance (spawned from `{s.name}`, "
                         f"`{sp.issue_type}`)",
                     )
@@ -973,12 +973,12 @@ def _section_cross_process(
         inbound.append((s.name, f"{SYMBOL_COLLECT} collect", source, _collect_detail(c)))
 
     # ----- outbound -----
-    # Outbound feedback — this process is the *child*: a terminal here advances
+    # Outbound feedback — this process is the *child*: a closing state here advances
     # a parent on another process.
     for row in outbound_feedback or ():
         outbound.append(
             (
-                row.child_terminal,
+                row.child_closing_state,
                 f"{SYMBOL_FEEDBACK} feedback",
                 _proc_link(row.parent_process),
                 f"advances parent to `{row.parent_next}` (spawn from "
@@ -1042,20 +1042,19 @@ def _section_cross_process(
             )
         )
 
-    # Bare terminals — true workflow exits: terminals with no feedback, spawn,
-    # or handoff role. Feedback terminals (named in some parent's
+    # Bare closing states — true workflow exits: closing states with no feedback, spawn,
+    # or handoff role. Feedback closing states (named in some parent's
     # `spawn.advance_on`) continue work in the parent, so they're excluded.
-    feedback_terminals = {row.child_terminal for row in outbound_feedback or ()}
+    feedback_closing_states = {row.child_closing_state for row in outbound_feedback or ()}
     for s in sm.states.values():
-        if not s.is_terminal:
+        if not s.is_closing:
             continue
-        if s.name in feedback_terminals or s.spawns or s.handoff:
+        if s.name in feedback_closing_states or s.spawns or s.handoff:
             continue
         bits: list[str] = []
-        if s.terminal_taxonomy is not None:
-            bits.append(s.terminal_taxonomy.value)
-        if s.close_reason:
-            bits.append(f"closes `{s.close_reason}`")
+        if s.closes is not None:
+            bits.append(s.closes.taxonomy.value)
+            bits.append(f"closes `{s.closes.reason}`")
         detail = "; ".join(bits) if bits else "workflow exit"
         outbound.append((s.name, f"{SYMBOL_EXIT} exit", "— (closes)", detail))
 

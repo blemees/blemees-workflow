@@ -12,13 +12,14 @@ from workflow.core.model.human_gate import (
 )
 from workflow.core.model.role import Role, RoleDirectory
 from workflow.core.model.state_machine import (
+    Closes,
+    ClosureTaxonomy,
     Collects,
     ReversibilityClass,
     Spawn,
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
     Transition,
     TransitionType,
 )
@@ -30,7 +31,8 @@ __all__ = [
     "ReversibilityClass",
     "State",
     "StateClass",
-    "TerminalTaxonomy",
+    "Closes",
+    "ClosureTaxonomy",
     "Transition",
     "TransitionType",
     "Spawn",

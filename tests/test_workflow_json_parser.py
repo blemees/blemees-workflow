@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from workflow.core.model.state_machine import (
+    ClosureTaxonomy,
     ReversibilityClass,
     StateClass,
-    TerminalTaxonomy,
     TransitionType,
 )
 from workflow.core.parser.state_machine import parse_state_machine
@@ -32,10 +32,9 @@ def _minimal() -> dict:
                 "issue_types": ["bug"],
             },
             "c": {
-                "class": "terminal",
+                "class": "resting",
                 "reversibility": "reversible-fast",
-                "terminal_taxonomy": "shipped",
-                "close_reason": "completed",
+                "closes": {"taxonomy": "shipped", "reason": "completed"},
             },
         },
         "transitions": [
@@ -52,19 +51,61 @@ def test_parses_minimal_workflow() -> None:
     assert workflow.states["a"].roles == ()
     assert workflow.states["b"].state_class is StateClass.WORKING
     assert workflow.states["b"].roles == ("product-manager",)
-    assert workflow.states["c"].state_class is StateClass.TERMINAL
-    assert workflow.states["c"].terminal_taxonomy is TerminalTaxonomy.SHIPPED
+    assert workflow.states["c"].state_class is StateClass.RESTING
+    assert workflow.states["c"].is_closing is True
+    assert workflow.states["c"].closes.taxonomy is ClosureTaxonomy.SHIPPED
     assert workflow.states["a"].is_initial is True
     assert workflow.states["a"].initial_label == "in"
     assert len(workflow.transitions) == 2
     assert workflow.transitions[0].transition_type is TransitionType.CLAIM
 
 
-def test_terminal_requires_taxonomy() -> None:
-    bad = _minimal()
-    bad["states"]["c"] = {"class": "terminal", "reversibility": "reversible-fast"}
-    with pytest.raises(ParseError, match="terminal_taxonomy"):
-        parse_state_machine(json.dumps(bad))
+def test_parses_closing_state() -> None:
+    """A resting state with `closes: {taxonomy, reason}` is a closing state:
+    `is_closing` is true, the taxonomy/reason are exposed, and (unlike an
+    ordinary resting state) it does not require `issue_types`."""
+    spec = _minimal()
+    spec["states"]["c"] = {
+        "class": "resting",
+        "reversibility": "reversible-fast",
+        "closes": {"taxonomy": "shipped", "reason": "completed"},
+    }
+    workflow = parse_state_machine(json.dumps(spec))
+    c = workflow.states["c"]
+    assert c.state_class is StateClass.RESTING
+    assert c.is_closing is True
+    assert c.closes is not None
+    assert c.closes.taxonomy is ClosureTaxonomy.SHIPPED
+    assert c.closes.reason == "completed"
+
+
+def test_closes_requires_taxonomy() -> None:
+    spec = _minimal()
+    spec["states"]["c"] = {
+        "class": "resting",
+        "reversibility": "reversible-fast",
+        "closes": {"reason": "completed"},
+    }
+    with pytest.raises(ParseError, match="closes.taxonomy"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_closes_requires_reason() -> None:
+    spec = _minimal()
+    spec["states"]["c"] = {
+        "class": "resting",
+        "reversibility": "reversible-fast",
+        "closes": {"taxonomy": "shipped"},
+    }
+    with pytest.raises(ParseError, match="closes.reason"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_closes_forbidden_on_working_state() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["closes"] = {"taxonomy": "shipped", "reason": "completed"}
+    with pytest.raises(ParseError, match="only valid on resting"):
+        parse_state_machine(json.dumps(spec))
 
 
 def test_resting_state_requires_reversibility() -> None:
@@ -74,7 +115,7 @@ def test_resting_state_requires_reversibility() -> None:
         parse_state_machine(json.dumps(bad))
 
 
-def test_terminal_state_requires_reversibility() -> None:
+def test_closing_state_requires_reversibility() -> None:
     bad = _minimal()
     del bad["states"]["c"]["reversibility"]
     with pytest.raises(ParseError, match="reversibility.*required"):
@@ -85,13 +126,6 @@ def test_working_state_rejects_reversibility() -> None:
     bad = _minimal()
     bad["states"]["b"]["reversibility"] = "reversible-fast"
     with pytest.raises(ParseError, match="not valid on working"):
-        parse_state_machine(json.dumps(bad))
-
-
-def test_non_terminal_rejects_taxonomy() -> None:
-    bad = _minimal()
-    bad["states"]["a"]["terminal_taxonomy"] = "shipped"
-    with pytest.raises(ParseError, match="only valid for"):
         parse_state_machine(json.dumps(bad))
 
 
@@ -141,7 +175,7 @@ def test_human_gate_alone_makes_transition_gated() -> None:
 def test_cross_process_transition_type_rejected() -> None:
     """The `cross_process` transition type was removed in favor of
     `handoff: true` on resting states and `spawns: {...}` on working /
-    terminal states. The parser rejects authored `cross_process`
+    closing states. The parser rejects authored `cross_process`
     transitions with a clear migration hint."""
     bad = _minimal()
     bad["transitions"].append(
@@ -226,31 +260,6 @@ def test_spawns_accepts_array_of_rules() -> None:
     assert rules[1].issue_type == "feature"
 
 
-def test_legacy_on_terminal_rejected() -> None:
-    """The renamed-from `on_terminal` is rejected with a migration hint."""
-    spec = _minimal()
-    spec["states"]["b"]["spawns"] = {
-        "process": "other",
-        "issue_type": "bug",
-        "initial_state": "queue",
-        "on_terminal": {"done": "raw"},
-    }
-    with pytest.raises(ParseError, match="renamed to.*advance_on"):
-        parse_state_machine(json.dumps(spec))
-
-
-def test_spawns_on_terminal_forbids_advance_on() -> None:
-    spec = _minimal()
-    spec["states"]["c"]["spawns"] = {
-        "process": "other",
-        "issue_type": "bug",
-        "initial_state": "queue",
-        "advance_on": {"done": "raw"},
-    }
-    with pytest.raises(ParseError, match="advance_on.*not valid on terminal"):
-        parse_state_machine(json.dumps(spec))
-
-
 def test_spawns_allowed_on_resting() -> None:
     """Resting-state spawns are valid: the parent waits in this state
     while the child runs."""
@@ -292,13 +301,6 @@ def test_initial_false_or_absent_is_default() -> None:
 def test_initial_forbidden_on_working() -> None:
     spec = _minimal()
     spec["states"]["b"]["initial"] = True
-    with pytest.raises(ParseError, match="initial.*only valid on resting"):
-        parse_state_machine(json.dumps(spec))
-
-
-def test_initial_forbidden_on_terminal() -> None:
-    spec = _minimal()
-    spec["states"]["c"]["initial"] = True
     with pytest.raises(ParseError, match="initial.*only valid on resting"):
         parse_state_machine(json.dumps(spec))
 
@@ -375,9 +377,9 @@ def test_collects_forbidden_on_working() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_collects_forbidden_on_terminal() -> None:
+def test_collects_forbidden_on_working() -> None:
     spec = _minimal()
-    spec["states"]["c"]["collects"] = {  # c is terminal
+    spec["states"]["b"]["collects"] = {  # b is working
         "process": "pr",
         "from_states": ["staged"],
     }
@@ -405,10 +407,10 @@ def test_collects_rejects_duplicate_from_states() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_mark_pr_ready_forbidden_on_terminal() -> None:
+def test_mark_pr_ready_forbidden_on_closing() -> None:
     spec = _minimal()
-    spec["states"]["c"]["mark_pr_ready"] = True
-    with pytest.raises(ParseError, match="mark_pr_ready.*not valid on terminal"):
+    spec["states"]["c"]["mark_pr_ready"] = True  # c is a closing state
+    with pytest.raises(ParseError, match="mark_pr_ready.*not valid on closing"):
         parse_state_machine(json.dumps(spec))
 
 
@@ -469,13 +471,6 @@ def test_working_state_requires_roles() -> None:
         parse_state_machine(json.dumps(bad))
 
 
-def test_terminal_state_requires_close_reason() -> None:
-    bad = _minimal()
-    del bad["states"]["c"]["close_reason"]
-    with pytest.raises(ParseError, match="close_reason.*required on terminal"):
-        parse_state_machine(json.dumps(bad))
-
-
 def test_label_auto_generated_for_claim_transition() -> None:
     spec = _minimal()
     # transitions[0] is the CLAIM (a→b).
@@ -530,7 +525,7 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     assert impl.spawns[0].process == "pr"
     assert impl.spawns[0].issue_type == "pr"
     assert impl.spawns[0].initial_state == "draft"
-    # PR terminal `merged` → parent inner-loop resting state `staged`.
-    # (PR's terminal was renamed from `staged` to `merged` so state names
+    # PR closing state `merged` → parent inner-loop resting state `staged`.
+    # (PR's closing state was renamed from `staged` to `merged` so state names
     # don't collide across processes.)
     assert impl.spawns[0].advance_on == (("merged", "staged"),)

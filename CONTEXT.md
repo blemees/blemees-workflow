@@ -33,17 +33,16 @@ A node in a state machine. Every state is exactly one of:
 
 - **Resting** — work item parked; no agent actively owns it. Pollable queue.
 - **Working** — claimed by an agent who is actively progressing the work.
-- **Terminal** — final; no further transitions. Carries a taxonomy tag.
 
-Per `docs/state-machine-principles.md` §1.
+Per `docs/state-machine-principles.md` §1. Two ownership classes. **Closing** is not a class — it's a `closes: {taxonomy, reason}` annotation on a resting state that makes it a sink closing the issue on entry (ADR-0002).
 
 ## Transition
 
 A directed edge from one state to another, with a typed label. Four types:
 
 - **Claim** — resting → working (e.g., `developer claims ready_for_dev`).
-- **Role action** — working → resting | terminal (e.g., `developer opens PR`).
-- **External** — resting → resting | terminal, driven by system event (e.g., `PR merged (external)`).
+- **Role action** — working → resting (e.g., `developer opens PR`); landing in a closing state closes the issue.
+- **External** — resting → resting, driven by system event (e.g., `PR merged (external)`).
 - **Cross-process** — resting ↔ `[*]`, with handoff metadata pointing at the other process.
 
 Per `docs/state-machine-principles.md` §2.
@@ -96,7 +95,7 @@ Lives in `trust-grants/<process>/<gate>.json`. Per the upstream trust-grant-sche
 
 Every single-item command (`view-issue`, `create-issue`, `claim-issue`, `release-issue`, `advance-issue`, `request-input`, `post-comment`) ends its human-readable output with a `Next actions:` block describing what the agent could do next from the current state. The data behind it lives in `workflow.core.inspector.available_transitions` — a read-only function that walks the state machine's outgoing transitions and enriches each with the relevant human-gate row and any active trust grant. The block is informational on read-only commands and best-effort (silent on failure) so commands that don't strictly need workflow context still work outside a known workflow.
 
-For each gated transition the block surfaces: gate name, default vs effective level (so trust-grant relaxations are visible), triggering role, destination class + reversibility + terminal taxonomy, and the path to the `agent_prepares` template the agent should attach via `--packet-from`. For resting states, the block emits a `claim-issue` suggestion (auto-resolved when unambiguous). For working states with a `wip_from` marker, it also surfaces `release-issue` and where it returns to.
+For each gated transition the block surfaces: gate name, default vs effective level (so trust-grant relaxations are visible), triggering role, destination class + reversibility + closure taxonomy, and the path to the `agent_prepares` template the agent should attach via `--packet-from`. For resting states, the block emits a `claim-issue` suggestion (auto-resolved when unambiguous). For working states with a `wip_from` marker, it also surfaces `release-issue` and where it returns to.
 
 This means the agent does not have to consult the process documentation to figure out the next command — every operation that surfaces an issue's state surfaces its options too.
 
@@ -108,7 +107,7 @@ Per-process markdown (`<name>.md`) contains everything an agent needs to operate
 
 ## Issue type
 
-Issue types are declared at the **working-state** level. Every working state lists which types it accepts via `issue_types: [...]`; the field is required there and forbidden on resting / terminal states. The process's overall accepted set is derived as the union of every working state's `issue_types` (`StateMachine.accepted_issue_types`).
+Issue types are declared at the **working-state** level. Every working state lists which types it accepts via `issue_types: [...]`; the field is required there and forbidden on resting / closing states. The process's overall accepted set is derived as the union of every working state's `issue_types` (`StateMachine.accepted_issue_types`).
 
 The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).
 
@@ -176,9 +175,9 @@ Provisions both org Issue Types and repo labels:
 
 ## Closing the tracker's issue
 
-Every terminal state declares a `close_reason` in `<name>-states.json` — the literal string the backend hands to the tracker (GitHub: `"completed"` or `"not planned"`). The field is **required on terminals** (parser-enforced) and forbidden elsewhere. Advancing into a terminal state closes the tracker's issue with that reason as part of the same atomic apply step.
+Every closing state carries `closes: {taxonomy, reason}` in `<name>-states.json` — `reason` is the literal string the backend hands to the tracker (GitHub: `"completed"` or `"not planned"`). Both fields are **required inside `closes`** (parser-enforced); `closes` itself is only valid on resting states. Advancing into a closing state closes the tracker's issue with that reason as part of the same atomic apply step.
 
-There is no "open-after-terminal" mode: a terminal always closes the issue. Work that *continues* under a different process keeps the same issue open via a **shared resting state** (cross-process `kind: shared`), not via a terminal. Work that **spawns a follow-up issue** terminates the original (taxonomy `superseded`, close_reason `completed`) and creates a new issue on the receiving process (`kind: spawn`).
+There is no "open-after-close" mode: entering a closing state always closes the issue. Work that *continues* under a different process keeps the same issue open via a **shared resting state** (cross-process `kind: shared`), not a closing state. Work that **spawns a follow-up issue** closes the original (taxonomy `superseded`, reason `completed`) and creates a new issue on the receiving process (`kind: spawn`).
 
 Authoring lives in JSON, not in code. Projects map taxonomies to reasons however they want without changing the framework — typical pairings: `shipped`/`resolved`/`reverted`/`superseded` → `completed`; `abandoned`/`deduplicated` → `not planned`.
 
@@ -186,9 +185,9 @@ Authoring lives in JSON, not in code. Projects map taxonomies to reasons however
 
 Per upstream principle 8 (updated), `superseded` means *"work continues on a follow-up issue"* — the original work item terminates and a new one is created to continue. Covers both same-process iteration (a failed experiment ticket terminates as `superseded`; a fresh experiment ticket is opened with a revised hypothesis) and cross-process spawn (incident `stabilized` → new postmortem ticket).
 
-This is **not** the same as a cross-process *handoff* (per principle 9), where the **same** work item continues on another process's diagram. Handoffs are modelled as shared resting states, not as terminals.
+This is **not** the same as a cross-process *handoff* (per principle 9), where the **same** work item continues on another process's diagram. Handoffs are modelled as shared resting states, not as closing states.
 
-Our example's `bounced_back` in inner-loop is currently labeled `terminal_taxonomy: superseded`, which is a known misuse — the bounce-back is a handoff (same issue continues in refinement), not supersession. Because close behavior is driven by `close_reason` (absent for `bounced_back`), the tracker issue correctly stays open, but the taxonomy tag is wrong. A proper fix would restructure `bounced_back` as a shared resting state declared in both processes; that's a follow-up that requires resolving the registry's first-load-wins routing.
+A bounce-back (e.g. inner-loop → refinement) is a handoff: the same issue continues elsewhere, so it must be a plain **shared resting state**, never a closing state. ADR-0002 makes the old "mark it superseded but keep it open" mislabel structurally impossible — a closing state always closes (`closes.reason` is required), so there's no way to tag a state as closing-superseded yet leave the issue open. Continuation is a shared resting state declared in both processes.
 
 ## Origin marker (`wip-from`)
 
@@ -196,7 +195,7 @@ When `claim-issue` fires, the backend records `wip-from:<source-state>` alongsid
 
 A working state can have multiple incoming CLAIM transitions (e.g., `implementing` is claimed from both `ready_for_dev` initially and `staged` for revisions). The marker disambiguates without requiring user input.
 
-Whenever an issue leaves a working state (advance, approve, record-action, release), both `wip:<role>` and `wip-from:<source>` are cleared atomically. Per principle 1, working = exactly one role owns the item; once the issue is resting or terminal, no role owns it.
+Whenever an issue leaves a working state (advance, approve, record-action, release), both `wip:<role>` and `wip-from:<source>` are cleared atomically. Per principle 1, working = exactly one role owns the item; once the issue is resting (incl. closing), no role owns it.
 
 If the marker drifts (no CLAIM transition from `wip_from` → current state), `release-issue` errors rather than corrupting state.
 

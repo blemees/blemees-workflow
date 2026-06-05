@@ -19,7 +19,7 @@ file you author for in-editor feedback:
 
 Or rely on the workspace-wide `.vscode/settings.json` mapping that ships
 in this repo. The schema covers enum / type / required-field checks; the
-deeper cross-field rules (terminal-needs-taxonomy, role/issue_types placement,
+deeper cross-field rules (closes-needs-taxonomy, closing-state-is-a-sink, role/issue_types placement,
 cross_process metadata, etc.) remain enforced by the Python parser and
 surface via `workflow validate-workflow`.
 
@@ -35,10 +35,9 @@ surface via `workflow validate-workflow`.
       "issue_types": ["bug"]
     },
     "done": {
-      "class": "terminal",
+      "class": "resting",
       "reversibility": "reversible-fast",
-      "terminal_taxonomy": "shipped",
-      "close_reason": "completed"
+      "closes": {"taxonomy": "shipped", "reason": "completed"}
     }
   },
   "transitions": [
@@ -49,7 +48,7 @@ surface via `workflow validate-workflow`.
 ```
 
 This parses, validates clean, and renders to a four-state mermaid diagram
-with a terminal sink and a `note left of raw: claim-role=product-manager`.
+with a closing-state sink and a `note left of raw: claim-role=product-manager`.
 
 ## Schema reference
 
@@ -69,43 +68,42 @@ The human-gate catalog path follows the same convention as
 
 | Field | Type | Required | Allowed values |
 |---|---|---|---|
-| `class` | string | yes | `"resting"`, `"working"`, `"terminal"` |
-| `reversibility` | string | required on resting / terminal; forbidden on working | `"irreversible"`, `"reversible-fast"`, `"reversible-slow"` — how reversible landing in this state is. |
-| `terminal_taxonomy` | string | required when `class=terminal` | `"shipped"`, `"resolved"`, `"reverted"`, `"abandoned"`, `"deduplicated"`, `"superseded"` |
-| `roles` | array of strings | required on working states, forbidden on resting/terminal | Role ids permitted to occupy this state. Non-empty. Resting / terminal states must NOT carry this field. |
-| `issue_types` | array of strings | required on working states, forbidden on resting/terminal | Issue type ids this working state accepts. Checked at claim time: the issue's type must be in this set. The process's overall accepted set is derived as the union of every working state's `issue_types` — there is no separate process-level field. |
-| `close_reason` | string | required on terminal states, forbidden elsewhere | Backend close-reason. For GitHub: `"completed"` or `"not planned"`. Every terminal closes the tracker's issue with this reason. |
+| `class` | string | yes | `"resting"`, `"working"` |
+| `reversibility` | string | required on resting; forbidden on working | `"irreversible"`, `"reversible-fast"`, `"reversible-slow"` — how reversible landing in this state is. |
+| `closes` | object | optional, resting states only | Marks the state as a **closing state** — a sink that closes the tracker's issue on entry. Shape: `{"taxonomy": <tag>, "reason": <close reason>}`. `taxonomy` is one of `"shipped"`, `"resolved"`, `"reverted"`, `"abandoned"`, `"deduplicated"`, `"superseded"`; `reason` is the backend close-reason (GitHub: `"completed"` or `"not planned"`). Mutually exclusive with `is_initial` / `collects` / `handoff` / `issue_types`; a closing state must have no outgoing transitions. |
+| `roles` | array of strings | required on working states, forbidden on resting | Role ids permitted to occupy this state. Non-empty. Resting states (incl. closing) must NOT carry this field. |
+| `issue_types` | array of strings | required on working AND non-closing resting states; forbidden on closing | Issue type ids this state accepts. Checked at claim time: the issue's type must be in this set. The process's overall accepted set is derived as the union of every working state's `issue_types` — there is no separate process-level field. A closing state holds nothing, so it forbids the field. |
 | `handoff` | bool | optional, resting states only | Marks the state as a cross-process handover. The same state name must appear in at least one other process (also with `handoff: true`). Replaces the old `cross_process` kind:`shared` transitions. |
 | `initial` | bool or string | optional, resting states only | Marks the state as an **external entry point** — new issues materialize here from outside the workflow (manual `create-issue`, webhook, scheduled job). `true` is a bare marker; a string adds a trigger label (e.g., `"issue created"`, `"alert / report triggers incident"`). Mutually exclusive with `collects` and with being a spawn target. Replaces the legacy `{source: "[*]", destination: <state>, type: "event"}` transition shape. |
 | `collects` | object | optional, resting states only | Fan-in contract — issues created here gather contributors from another process. See "Collects" below. |
-| `spawns` | object | optional, working / resting / terminal states | Subprocess / spawn contract. See "Spawns" below. |
-| `mark_pr_ready` | bool | optional, not on terminal | When advancing into this state, the backend flips the underlying PR from draft to ready-for-review (`gh pr ready` on GitHub). No-op on non-PR issues. PRs are always created as drafts; this is the only way to flip them. |
+| `spawns` | object | optional, working / resting / closing states | Subprocess / spawn contract. See "Spawns" below. |
+| `mark_pr_ready` | bool | optional, not on closing states | When advancing into this state, the backend flips the underlying PR from draft to ready-for-review (`gh pr ready` on GitHub). No-op on non-PR issues. PRs are always created as drafts; this is the only way to flip them. |
 | `human_inputs` | array of strings | optional, working states only | Ids from the shared `human-inputs.json` that agents may invoke `request-input` on at this state. Empty / absent = `request-input` is forbidden here. Each id must resolve in the directory (cross-checked by the validator). |
 | `notes` | list of strings | optional | Free prose for the emitter to render. Not parsed for semantics. |
 
 The parser fails loud on:
 - Unknown class / reversibility / taxonomy tokens.
-- Terminal state without taxonomy.
-- Non-terminal state with taxonomy.
+- A `closes` block missing `taxonomy` or `reason`.
+- `closes` on a working state.
 
 ### Transition spec
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `source` | string | yes | State id. `"[*]"` is no longer authored — use the `initial` field on a resting state to declare external entry. |
-| `destination` | string | yes | State id. Terminal sinks are implicit; the emitter generates them from each terminal state's `terminal_taxonomy`. |
+| `destination` | string | yes | State id. Closing-state sinks are implicit; the emitter generates them from each closing state's `closes`. |
 | `type` | string | yes | `"claim"`, `"advance"`, `"event"` |
 | `label` | string | optional except on `event` | Human-readable transition label. When absent (and the type isn't `event`), the parser auto-generates a structural label: `{role(s)} claims {source}` for claim, `{role(s)} → {destination}` for advance, `{to\|from} process {other}` for cross-process. Override when the structural default reads awkwardly. |
 | `human_gate` | string | optional | The human-gate catalog's `gate_name` for this gate. **Presence of `human_gate` marks the transition as HITL-gated**; absence means ungated. (Replaces the old separate `hitl` boolean.) |
 
-Terminal sinks (`state → [*]: terminal (X)`) are **implicit**: the parser
+Closing-state sinks (`state → [*]: ■ (X)`) are **implicit**: the parser
 expects them not to be authored. The emitter generates them from each
-terminal state's `terminal_taxonomy`.
+closing state's `closes`.
 
 ## Spawns
 
-A working, resting, or terminal state can declare a `spawns` object to
-create a child issue on another process:
+A working or resting state (including a closing state) can declare a
+`spawns` object to create a child issue on another process:
 
 ```json
 "implementing": {
@@ -123,10 +121,10 @@ create a child issue on another process:
 
 **Working-state spawn** (subprocess): the parent agent stays in the
 working state while the child runs. `advance_on` is optional and
-**selective** — when the child reaches a terminal listed in the map, the
-framework auto-advances the parent to the mapped state. Child terminals
-not in the map keep the parent in its current state (the agent handles
-the advance manually).
+**selective** — when the child reaches a closing state listed in the map,
+the framework auto-advances the parent to the mapped state. Child closing
+states not in the map keep the parent in its current state (the agent
+handles the advance manually).
 
 **Resting-state spawn** (waiting queue): the parent waits in a resting
 state while the child runs. Same selective `advance_on` semantic, but
@@ -135,10 +133,10 @@ non-working — auto-advancing into a working state would bypass the
 claim-before-working invariant. Typical use: a refinement state spawns
 a spike on inner-loop and waits for findings.
 
-**Terminal-state spawn** (independent): the parent closes when it reaches
-this terminal, then a fresh child issue is created on the target process.
-`advance_on` is FORBIDDEN (the parent has nothing left to advance to).
-Typical use: incident `stabilized` terminal spawns a postmortem.
+**Closing-state spawn** (independent): the parent closes when it reaches
+this closing state, then a fresh child issue is created on the target
+process. `advance_on` is FORBIDDEN (the parent has nothing left to advance
+to). Typical use: incident `stabilized` closing state spawns a postmortem.
 
 The child issue carries a `parent-of:<parent-id>` label and a `Refs
 #<parent-id>` body footer. The parent carries `subprocess:<child-id>`.
@@ -148,10 +146,10 @@ Use `workflow spawn-issue --issue <parent>` to create the child explicitly.
 
 | Principle | Check | Severity |
 |---|---|---|
-| 1 (state classes) | Every state declares one of the three classes; ambiguous values rejected at parse time. | parse error |
-| 2 (transition types) | Claim must be resting → working. Role-action must originate in working and land in resting or terminal. External must originate in resting (or `[*]`) and land in resting or terminal (or `[*]`). Cross-process must touch a resting state on the non-`[*]` side. | ERROR |
+| 1 (state classes) | Every state declares one of the two classes; ambiguous values rejected at parse time. A closing state (`closes`) is a sink with no outgoing transitions, mutually exclusive with `is_initial`/`collects`/`handoff`/`issue_types`. | parse error + ERROR (sink/exclusivity in validator) |
+| 2 (transition types) | Claim must be resting → working. Role-action must originate in working and land in resting. External must originate in resting (or `[*]`) and land in resting (or `[*]`). Cross-process must touch a resting state on the non-`[*]` side. | ERROR |
 | 3 (claim before working) | Every working state is the destination of at least one CLAIM transition; otherwise the working state is unreachable via the documented protocol. | ERROR |
-| 8 (terminal taxonomy) | Every terminal state has a taxonomy tag. Without it, the terminal is incomplete. | parse error (terminal taxonomy is required in JSON) |
+| 8 (closure taxonomy) | Every closing state's `closes.taxonomy` is set. | parse error (taxonomy is required inside `closes`) |
 | 9 (cross-process interfaces) | Shared handovers use `handoff: true` on the resting state; spawns use `spawns: {...}`. The legacy `cross_process` transition type is rejected with a migration hint. | parse error |
 | 11.1 (irreversible needs a gate) | Transitions landing on an irreversible destination must declare a `human_gate`. | WARNING |
 | 11.2 (legend ↔ catalog) | The gate names on gated transitions match the human-gate catalog's gate_names. | WARNING |
@@ -248,8 +246,8 @@ The emitter:
   destination states' reversibility.
 - Emits each transition in JSON order. `[hitl]` is appended to gated
   transition labels.
-- Auto-generates `state --> [*]: terminal (taxonomy)` sinks for any
-  terminal state without an authored outgoing transition.
+- Auto-generates `state --> [*]: ■ (taxonomy)` sinks for any closing
+  state without an authored outgoing transition.
 - Emits notes for states with `roles`, free-form `notes`, or
   reversibility not already covered by the HITL legend.
 

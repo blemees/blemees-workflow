@@ -52,7 +52,7 @@ stateDiagram-v2
 
 ## States
 
-| Name | Class | Reversibility | Roles | Issue types | Human inputs | Terminal taxonomy | Close reason |
+| Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_dev` | resting | reversible-slow | — | bug, feature, chore, experiment | — | — | — |
 | `ready_for_spike` | resting | reversible-slow | — | spike | — | — | — |
@@ -60,7 +60,7 @@ stateDiagram-v2
 | `implementing` | working | — | developer | bug, feature, chore, experiment, hotfix | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
 | `implementing_spike` | working | — | developer | spike | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
 | `staged` | resting | reversible-slow | — | bug, feature, chore, experiment, hotfix | — | — | — |
-| `spike_completed` | terminal | reversible-fast | — | — | — | resolved | completed |
+| `spike_completed` | resting | reversible-fast | — | — | — | resolved | completed |
 | `ready_bounced` | resting | reversible-fast | — | bug, feature, chore, experiment | — | — | — |
 
 ## Transitions
