@@ -84,9 +84,7 @@ def parse_human_input_directory(source: str | Path) -> HumanInputDirectory:
     directory = HumanInputDirectory(source_path=source_path)
     for human_input_id, entry in entries_raw.items():
         if not isinstance(human_input_id, str) or not human_input_id:
-            raise ParseError(
-                f"Human-input id must be a non-empty string (got {human_input_id!r})."
-            )
+            raise ParseError(f"Human-input id must be a non-empty string (got {human_input_id!r}).")
         if not isinstance(entry, dict):
             raise ParseError(
                 f"Human input {human_input_id!r}: entry must be an object "
@@ -121,9 +119,7 @@ def _parse_entry(human_input_id: str, entry: dict[str, Any]) -> HumanInput:
         agent_prepares = agent_prepares.strip()
 
     rationale = entry.get("rationale")
-    if rationale is not None and (
-        not isinstance(rationale, str) or not rationale.strip()
-    ):
+    if rationale is not None and (not isinstance(rationale, str) or not rationale.strip()):
         raise ParseError(
             f"Human input {human_input_id!r}: `rationale` must be a non-empty string if present."
         )

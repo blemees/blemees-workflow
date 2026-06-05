@@ -12,7 +12,8 @@ transitions in the output follows the JSON's order.
 
 from __future__ import annotations
 
-from typing import Protocol, Sequence
+from collections.abc import Sequence
+from typing import Protocol
 
 from workflow.core.model.state_machine import (
     Spawn,
@@ -110,9 +111,7 @@ def emit_mermaid(
             continue
         feedback_edges.add((row.child_closing_state, row.parent_next))
     for child_closing_state, parent_next in sorted(feedback_edges):
-        lines.append(
-            f"    {child_closing_state} --> [*]: {SYMBOL_FEEDBACK} {parent_next}"
-        )
+        lines.append(f"    {child_closing_state} --> [*]: {SYMBOL_FEEDBACK} {parent_next}")
 
     lines.extend(_emit_collect_advance_edges(state_machine))
 
@@ -125,15 +124,12 @@ def emit_mermaid(
     # (local advance in AND local claim out) is fully internal — no
     # handoff arrows needed beyond its in-process transitions.
     claims_out_of: set[str] = {
-        t.source
-        for t in state_machine.transitions
-        if t.transition_type is TransitionType.CLAIM
+        t.source for t in state_machine.transitions if t.transition_type is TransitionType.CLAIM
     }
     advances_into: set[str] = {
         t.destination
         for t in state_machine.transitions
-        if t.transition_type
-        in (TransitionType.ADVANCE, TransitionType.EVENT)
+        if t.transition_type in (TransitionType.ADVANCE, TransitionType.EVENT)
     }
     for state in state_machine.states.values():
         if not state.handoff:
@@ -153,9 +149,7 @@ def emit_mermaid(
         if target_state not in state_machine.states:
             continue
         for parent_state in sorted(spawn_sources[target_state]):
-            lines.append(
-                f"    [*] --> {target_state}: {SYMBOL_SPAWN} {parent_state}"
-            )
+            lines.append(f"    [*] --> {target_state}: {SYMBOL_SPAWN} {parent_state}")
 
     # Collect entry arrows. States declaring `collects` are entered via
     # `create-issue --to <state>` (with the contributor refs); the
@@ -164,13 +158,9 @@ def emit_mermaid(
     for state in state_machine.states.values():
         if state.collects is not None:
             type_suffix = (
-                f" [{','.join(state.collects.issue_types)}]"
-                if state.collects.issue_types
-                else ""
+                f" [{','.join(state.collects.issue_types)}]" if state.collects.issue_types else ""
             )
-            lines.append(
-                f"    [*] --> {state.name}: {SYMBOL_COLLECT} {state.name}{type_suffix}"
-            )
+            lines.append(f"    [*] --> {state.name}: {SYMBOL_COLLECT} {state.name}{type_suffix}")
 
     interface_notes = _emit_interface_notes(state_machine)
     if interface_notes:
@@ -267,9 +257,8 @@ def _emit_interface_notes(state_machine: StateMachine) -> list[str]:
 
     lines: list[str] = []
     for state in state_machine.states.values():
-        note_lines = (
-            spawn_by_state.get(state.name, [])
-            + inbound_feedback_by_state.get(state.name, [])
+        note_lines = spawn_by_state.get(state.name, []) + inbound_feedback_by_state.get(
+            state.name, []
         )
         if note_lines:
             lines.extend(_emit_state_note(state.name, note_lines))
@@ -308,5 +297,3 @@ def _emit_transition(t: Transition, state_machine: StateMachine) -> str:
     if body:
         return f"{t.source} --> {t.destination}: {body}"
     return f"{t.source} --> {t.destination}"
-
-

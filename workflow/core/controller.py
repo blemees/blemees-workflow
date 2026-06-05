@@ -72,7 +72,7 @@ class Controller:
     # cascade-advance after each successful state change so cross-process
     # `advance_on` chains propagate. Without it, the primary operation
     # still runs but cascades are skipped (the user sees a debug log).
-    registry: "Workflow | None" = None
+    registry: Workflow | None = None
 
     def execute(self, request: OperationRequest) -> OperationResult:
         try:
@@ -150,9 +150,7 @@ class Controller:
                 actor=request.actor,
             )
         else:
-            logger.debug(
-                "controller: no registry attached; skipping cross-process cascade pass."
-            )
+            logger.debug("controller: no registry attached; skipping cross-process cascade pass.")
 
         return OperationResult(
             operation=request.operation,

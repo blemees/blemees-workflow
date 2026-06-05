@@ -56,16 +56,9 @@ def test_missing_description_rejected() -> None:
 
 
 def test_parses_real_example_directory() -> None:
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "examples"
-        / "workflows"
-        / "human-inputs.json"
-    )
+    path = Path(__file__).resolve().parents[1] / "examples" / "workflows" / "human-inputs.json"
     directory = parse_human_input_directory(path)
-    assert {"general", "clarify-scope", "needs-arch-review"} <= set(
-        directory.entries.keys()
-    )
+    assert {"general", "clarify-scope", "needs-arch-review"} <= set(directory.entries.keys())
 
 
 def test_missing_file_returns_empty(tmp_path: Path) -> None:

@@ -635,8 +635,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="refs",
         action="append",
         required=True,
-        help="Contributor issue id(s). Repeat for multiple "
-        "(e.g., --refs 101 --refs 102).",
+        help="Contributor issue id(s). Repeat for multiple (e.g., --refs 101 --refs 102).",
     )
     p_collect.add_argument(
         "--force",
@@ -676,7 +675,9 @@ def build_parser() -> argparse.ArgumentParser:
             "marker. For the agent's own work, use `view-inbox` instead."
         ),
     )
-    p_search_issues.add_argument("--state", default=None, help="Filter by state (e.g., ready_for_dev).")
+    p_search_issues.add_argument(
+        "--state", default=None, help="Filter by state (e.g., ready_for_dev)."
+    )
     p_search_issues.add_argument(
         "--claim",
         dest="claim_role",
@@ -750,9 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_edit_issue.add_argument("--issue", required=True)
-    p_edit_issue.add_argument(
-        "--title", default=None, help="New title for the issue."
-    )
+    p_edit_issue.add_argument("--title", default=None, help="New title for the issue.")
     _add_body_args(p_edit_issue, required=False)
     p_edit_issue.set_defaults(func=_do_edit_issue)
 
@@ -1101,6 +1100,7 @@ def _build_controller(context: Process, dry_run: bool) -> Controller:
     # spawn / collect definitions. Discover it the same way we discover
     # the per-process context.
     from workflow.config import build_registry
+
     registry = build_registry(
         agent_home=context.agent_home,
         workflow_dir=context.workflow_dir,
@@ -1144,9 +1144,7 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
                     a.destination_reversibility.value if a.destination_reversibility else None
                 ),
                 "destination_closure_taxonomy": (
-                    a.destination_closure_taxonomy.value
-                    if a.destination_closure_taxonomy
-                    else None
+                    a.destination_closure_taxonomy.value if a.destination_closure_taxonomy else None
                 ),
                 "destination_roles": list(a.destination_roles),
             }
@@ -1190,6 +1188,7 @@ def _print_next_actions(
     advance_actions = [a for a in actions if a.transition_type is not TransitionType.CLAIM]
 
     if claim_actions and not advance_actions:
+
         def _roles_suffix(a: Any) -> str:
             if a.destination_roles:
                 return f" (roles: {', '.join(a.destination_roles)})"
@@ -1223,9 +1222,7 @@ def _print_next_actions(
                 print(f"    triggering role(s): {', '.join(a.triggering_roles)}")
             if a.agent_prepares_path:
                 kind = "required" if a.effective_level is HumanGateLevel.BLOCK else "optional"
-                print(
-                    f"    --body-from <{a.agent_prepares_path}>  ({kind})"
-                )
+                print(f"    --body-from <{a.agent_prepares_path}>  ({kind})")
         dst_bits: list[str] = []
         if a.destination_reversibility is not None:
             dst_bits.append(a.destination_reversibility.value)
@@ -1239,7 +1236,7 @@ def _print_next_actions(
 
     if human_inputs:
         print(
-            f"  request-input --topic <id> --body \"...\"  # ask the human operator; "
+            f'  request-input --topic <id> --body "..."  # ask the human operator; '
             f"topics: {', '.join(human_inputs)}"
         )
     if last_state is not None:
@@ -1319,7 +1316,9 @@ def _print_result(
             if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, last_state=state.last_state,
+                    actions,
+                    current_state=state.state,
+                    last_state=state.last_state,
                     human_inputs=_human_inputs_for(context.state_machine, state.state),
                 )
 
@@ -1393,9 +1392,7 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
         return 2
 
 
-def _propagate_to_parent_on_closing(
-    ctx: dict, child_id: str, child_destination: str
-) -> None:
+def _propagate_to_parent_on_closing(ctx: dict, child_id: str, child_destination: str) -> None:
     """If the child issue advanced to a closing state AND has a parent link,
     auto-advance the parent per `spawns.advance_on` — but only when the
     child's closing state is in that map. Unmapped closing states leave the parent
@@ -1438,14 +1435,20 @@ def _propagate_to_parent_on_closing(
         if parent_id is None:
             try:
                 raw = backend._gh(
-                    "issue", "view", str(child_id),
-                    "--repo", backend.repo, "--json", "labels",
+                    "issue",
+                    "view",
+                    str(child_id),
+                    "--repo",
+                    backend.repo,
+                    "--json",
+                    "labels",
                 )
                 import json as _j
-                for lbl in (_j.loads(raw).get("labels") or []):
+
+                for lbl in _j.loads(raw).get("labels") or []:
                     name = lbl.get("name", "")
                     if name.startswith("parent-of:"):
-                        parent_id = name[len("parent-of:"):]
+                        parent_id = name[len("parent-of:") :]
                         break
             except Exception:
                 pass
@@ -1602,15 +1605,12 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
 
         parent_process = registry.find_process_for_state(parent_state.state)
         if parent_process is None:
-            raise ConfigError(
-                f"State {parent_state.state!r} is not declared in any process."
-            )
+            raise ConfigError(f"State {parent_state.state!r} is not declared in any process.")
         parent_ctx = registry.get_process(parent_process)
         sm_state = parent_ctx.state_machine.states.get(parent_state.state)
         if sm_state is None or not sm_state.spawns:
             raise ConfigError(
-                f"State {parent_state.state!r} has no `spawns` config; "
-                f"nothing to spawn from here."
+                f"State {parent_state.state!r} has no `spawns` config; nothing to spawn from here."
             )
         # Pick the spawn rule. With one rule it's unambiguous. With
         # multiple, the author must disambiguate via --issue-type and,
@@ -1647,9 +1647,7 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
         # Resolve process — author may have omitted it. Derive from
         # initial_state via registry (every state belongs to exactly
         # one process).
-        spawn_process_name = spawn.process or registry.find_process_for_state(
-            spawn.initial_state
-        )
+        spawn_process_name = spawn.process or registry.find_process_for_state(spawn.initial_state)
         if spawn_process_name is None:
             raise ConfigError(
                 f"State {parent_state.state!r}: spawn's `initial_state` "
@@ -1666,12 +1664,10 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
             except KeyError:
                 raise ConfigError(
                     f"Child issue type {spawn.issue_type!r} not in issue-types.json."
-                )
+                ) from None
         is_pr = type_entry is not None and type_entry.github_entity == "pull_request"
         if is_pr and not args.head:
-            raise ConfigError(
-                "--head is required for pr-typed spawns (PRs need a source branch)."
-            )
+            raise ConfigError("--head is required for pr-typed spawns (PRs need a source branch).")
 
         title = args.title or f"{parent_state.state} follow-up for #{args.issue}"
         user_body = _resolve_body(args) or ""
@@ -1726,19 +1722,28 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
         )
         backend.ensure_label(f"subprocess:{child_id}")
         backend._gh(
-            "issue", "edit", str(args.issue),
-            "--repo", backend.repo,
-            "--add-label", f"subprocess:{child_id}",
+            "issue",
+            "edit",
+            str(args.issue),
+            "--repo",
+            backend.repo,
+            "--add-label",
+            f"subprocess:{child_id}",
         )
 
         if ctx["json_output"]:
-            print(_json.dumps({
-                "parent": args.issue,
-                "child": child_id,
-                "process": spawn_process_name,
-                "issue_type": spawn.issue_type,
-                "initial_state": spawn.initial_state,
-            }, indent=2))
+            print(
+                _json.dumps(
+                    {
+                        "parent": args.issue,
+                        "child": child_id,
+                        "process": spawn_process_name,
+                        "issue_type": spawn.issue_type,
+                        "initial_state": spawn.initial_state,
+                    },
+                    indent=2,
+                )
+            )
         else:
             print(
                 f"Spawned child #{child_id} on process {spawn_process_name!r} "
@@ -2112,9 +2117,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     if collects is not None:
         collects_process = collects.process
         if collects_process is None and collects.from_states:
-            collects_process = registry.find_process_for_state(
-                collects.from_states[0]
-            )
+            collects_process = registry.find_process_for_state(collects.from_states[0])
 
     # PR-specific flag gating. --head/--base/--refs are valid only when the
     # resolved type maps to pull-requests; conversely, PR creates require
@@ -2133,9 +2136,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             return 2
         if not args.head:
             _handle_workflow_error(
-                ConfigError(
-                    "--head BRANCH is required when creating a pull request."
-                )
+                ConfigError("--head BRANCH is required when creating a pull request.")
             )
             return 2
         if not args.refs:
@@ -2157,9 +2158,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     elif collects is not None:
         if args.head or args.base:
             _handle_workflow_error(
-                ConfigError(
-                    "--head / --base are only valid when creating pull requests."
-                )
+                ConfigError("--head / --base are only valid when creating pull requests.")
             )
             return 2
         # Exactly one of --refs, --all-candidates, --none must be provided
@@ -2272,9 +2271,12 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 payload["collects"] = {
                     "process": collects_process,
                     "from_states": list(collects.from_states),
-                    "contributors": contributor_ids if not args.all_candidates else "(all candidates)",
+                    "contributors": contributor_ids
+                    if not args.all_candidates
+                    else "(all candidates)",
                     "mode": (
-                        "refs" if args.refs
+                        "refs"
+                        if args.refs
                         else ("all-candidates" if args.all_candidates else "none")
                     ),
                 }
@@ -2319,6 +2321,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     if collects is not None and not args.collect_none:
         candidates: list[str] = []
         from workflow.backends.base import IssueFilters
+
         for from_state in collects.from_states:
             try:
                 rows = backend.list_issues(IssueFilters(state=from_state, limit=200))
@@ -2411,6 +2414,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
         # contributor so the relationship is queryable from either side.
         if contributor_ids:
             from workflow.backends.base import MarkerChange
+
             for cid in contributor_ids:
                 try:
                     backend.apply_marker_change(
@@ -2465,10 +2469,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     final_state = args.initial_state
     if claim_result and claim_result.post_state and claim_result.post_state.state:
         final_state = claim_result.post_state.state
-    print(
-        f"Created issue #{new_id} in {process_name!r} workflow, "
-        f"state {final_state!r}{suffix}."
-    )
+    print(f"Created issue #{new_id} in {process_name!r} workflow, state {final_state!r}{suffix}.")
 
     # Show next actions for the agent's convenience. Use the post-claim
     # state when --claim was used; otherwise show actions from the initial
@@ -2487,7 +2488,9 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             if actions or post.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=post.state, last_state=post.last_state,
+                    actions,
+                    current_state=post.state,
+                    last_state=post.last_state,
                     human_inputs=_human_inputs_for(claim_context.state_machine, post.state),
                 )
     else:
@@ -2540,9 +2543,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
         return 2
     if collector_state_obj.state is None:
         _handle_workflow_error(
-            ConfigError(
-                f"Issue #{args.issue} has no `state:` label; cannot resolve `collects`."
-            )
+            ConfigError(f"Issue #{args.issue} has no `state:` label; cannot resolve `collects`.")
         )
         return 2
     collector_state_def = collector_ctx.state_machine.states.get(collector_state_obj.state)
@@ -2551,9 +2552,16 @@ def _do_collect_into(args: argparse.Namespace) -> int:
     if collects is not None:
         collects_process = collects.process
         if collects_process is None and collects.from_states:
-            collects_process = registry.find_process_for_state(
-                collects.from_states[0]
+            from workflow.config import build_registry
+
+            registry = build_registry(
+                agent_home=ctx.get("agent_home"),
+                workflow_dir=ctx.get("workflow_dir"),
+                backend=backend,
+                grants_dir=ctx.get("grants_dir"),
             )
+            if registry is not None:
+                collects_process = registry.find_process_for_state(collects.from_states[0])
     if collects is None:
         _handle_workflow_error(
             ConfigError(
@@ -2591,11 +2599,16 @@ def _do_collect_into(args: argparse.Namespace) -> int:
     # 3. Dry-run path.
     if ctx["dry_run"]:
         if ctx["json_output"]:
-            print(_json.dumps({
-                "collector": str(args.issue),
-                "contributors": contributor_ids,
-                "dry_run": True,
-            }, indent=2))
+            print(
+                _json.dumps(
+                    {
+                        "collector": str(args.issue),
+                        "contributors": contributor_ids,
+                        "dry_run": True,
+                    },
+                    indent=2,
+                )
+            )
         else:
             print(f"[dry-run] would add {len(contributor_ids)} contributor(s) to #{args.issue}:")
             for cid in contributor_ids:
@@ -2608,9 +2621,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
         backend.apply_marker_change(
             str(args.issue),
             MarkerChange(add_collects=tuple(contributor_ids)),
-            audit_comment=(
-                f"Collected " + ", ".join(f"#{c}" for c in contributor_ids) + "."
-            ),
+            audit_comment=("Collected " + ", ".join(f"#{c}" for c in contributor_ids) + "."),
         )
     except BackendError as exc:
         _handle_workflow_error(exc)
@@ -2631,10 +2642,15 @@ def _do_collect_into(args: argparse.Namespace) -> int:
             return 2
 
     if ctx["json_output"]:
-        print(_json.dumps({
-            "collector": str(args.issue),
-            "contributors": contributor_ids,
-        }, indent=2))
+        print(
+            _json.dumps(
+                {
+                    "collector": str(args.issue),
+                    "contributors": contributor_ids,
+                },
+                indent=2,
+            )
+        )
     else:
         refs_str = ", ".join(f"#{c}" for c in contributor_ids)
         print(f"Added {refs_str} as contributor(s) to #{args.issue}.")
@@ -2829,7 +2845,9 @@ def _do_post_comment(args: argparse.Namespace) -> int:
             if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, last_state=state.last_state,
+                    actions,
+                    current_state=state.state,
+                    last_state=state.last_state,
                     human_inputs=_human_inputs_for(context.state_machine, state.state),
                 )
     except (BackendError, WorkflowError) as exc:
@@ -2851,9 +2869,7 @@ def _do_edit_issue(args: argparse.Namespace) -> int:
 
     if title is None and body is None:
         _handle_workflow_error(
-            ConfigError(
-                "edit requires at least one of --title, --body, --body-from."
-            )
+            ConfigError("edit requires at least one of --title, --body, --body-from.")
         )
         return 2
 
@@ -2909,7 +2925,9 @@ def _do_edit_issue(args: argparse.Namespace) -> int:
             if actions or state.last_state is not None:
                 print("")
                 _print_next_actions(
-                    actions, current_state=state.state, last_state=state.last_state,
+                    actions,
+                    current_state=state.state,
+                    last_state=state.last_state,
                     human_inputs=_human_inputs_for(context.state_machine, state.state),
                 )
     except (BackendError, WorkflowError) as exc:
@@ -3008,7 +3026,12 @@ def _do_view_issue(args: argparse.Namespace) -> int:
 
     if actions or state.last_state is not None:
         print("")
-        _print_next_actions(actions, current_state=state.state, last_state=state.last_state, human_inputs=_human_inputs_for(context.state_machine, state.state))
+        _print_next_actions(
+            actions,
+            current_state=state.state,
+            last_state=state.last_state,
+            human_inputs=_human_inputs_for(context.state_machine, state.state),
+        )
 
     if comments:
         print("")
@@ -3060,10 +3083,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
     )
     if registry is None:
         _handle_workflow_error(
-            ConfigError(
-                "No workflows directory found. Pass --workflow-dir or set "
-                "WORKFLOW_DIR."
-            )
+            ConfigError("No workflows directory found. Pass --workflow-dir or set WORKFLOW_DIR.")
         )
         return 2
 
@@ -3181,13 +3201,9 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         inbound_spawns_raw = inbound_spawns_by_process.get(wf_name)
         inbound_spawns = tuple(inbound_spawns_raw) if inbound_spawns_raw else None
         outbound_feedback_raw = outbound_feedback_by_process.get(wf_name)
-        outbound_feedback = (
-            tuple(outbound_feedback_raw) if outbound_feedback_raw else None
-        )
+        outbound_feedback = tuple(outbound_feedback_raw) if outbound_feedback_raw else None
         outbound_collects_raw = outbound_collects_by_process.get(wf_name)
-        outbound_collects = (
-            tuple(outbound_collects_raw) if outbound_collects_raw else None
-        )
+        outbound_collects = tuple(outbound_collects_raw) if outbound_collects_raw else None
         spawn_sources = spawn_sources_from_inbound(inbound_spawns)
 
         if workflow_dir is None:
@@ -3244,9 +3260,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         sms = [p.state_machine for p in processes_loaded]
         if role_directory is not None:
             roles_path = workflow_dir / "roles.md"
-            roles_path.write_text(
-                emit_roles_doc(role_directory, sms), encoding="utf-8"
-            )
+            roles_path.write_text(emit_roles_doc(role_directory, sms), encoding="utf-8")
             written.append(str(roles_path))
         if issue_type_directory is not None:
             types_path = workflow_dir / "issue-types.md"
@@ -3325,9 +3339,7 @@ def _do_validate_workflow(args: argparse.Namespace) -> int:
                 handoff_index.setdefault(state.name, set()).add(wf_name)
 
     # Sibling-machine index for cross-process spawn validation.
-    sibling_machines = {
-        name: ctx.state_machine for name, ctx in contexts.items()
-    }
+    sibling_machines = {name: ctx.state_machine for name, ctx in contexts.items()}
 
     results: list[tuple[str, Any, Any, list]] = []
     for wf_name, wf_context in contexts.items():
@@ -3569,10 +3581,7 @@ def _do_init_agent(args: argparse.Namespace) -> int:
             print(f"  workflows:     {workflows_path}/")
             print(f"  trust grants:  {grants_path}/")
             if init_workflow_dir:
-                print(
-                    f"  workflow-dir:  {init_workflow_dir} (override, "
-                    f"recorded in config)"
-                )
+                print(f"  workflow-dir:  {init_workflow_dir} (override, recorded in config)")
             print("")
             print("Config that would be written:")
             for line in _json.dumps(config, indent=2).splitlines():
@@ -3740,9 +3749,7 @@ def _provision_labels(
     return 1 if failed else 0
 
 
-def _resolve_encoding(
-    ctx: dict, backend: Any, *, force_probe: bool = False
-) -> str:
+def _resolve_encoding(ctx: dict, backend: Any, *, force_probe: bool = False) -> str:
     """Resolve the encoding for the current (host, owner), consulting the cache.
 
     - Manual entries are returned as-is (unless `force_probe=True`).
@@ -3968,9 +3975,7 @@ def _do_capabilities(args: argparse.Namespace) -> int:
         host, owner = _host_and_owner(backend)
         cache.set(host, owner, args.set_encoding, manual=True)
         cache.save()
-        print(
-            f"Pinned {host}/{owner} encoding to {args.set_encoding!r} (manual)."
-        )
+        print(f"Pinned {host}/{owner} encoding to {args.set_encoding!r} (manual).")
         return 0
 
     if args.refresh:

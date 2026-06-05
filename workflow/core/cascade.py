@@ -59,7 +59,7 @@ class CascadeApplication:
 
 
 def cascade_after_state_change(
-    registry: "Workflow",
+    registry: Workflow,
     backend: TrackerBackend,
     issue_id: str,
     post_state: IssueState,
@@ -102,7 +102,7 @@ def cascade_after_state_change(
 
 
 def _apply_spawn_parent_cascade(
-    registry: "Workflow",
+    registry: Workflow,
     backend: TrackerBackend,
     child_id: str,
     child_state: IssueState,
@@ -127,9 +127,7 @@ def _apply_spawn_parent_cascade(
     try:
         parent_state = backend.read_issue(parent_id)
     except BackendError as exc:
-        logger.warning(
-            "cascade: cannot read parent %s of %s: %s", parent_id, child_id, exc
-        )
+        logger.warning("cascade: cannot read parent %s of %s: %s", parent_id, child_id, exc)
         return None
     if parent_state.state is None:
         return None
@@ -151,8 +149,7 @@ def _apply_spawn_parent_cascade(
     # state and pick by advance_on containing the child's closing state.
     if child_state.issue_type is not None:
         candidate_rules = [
-            sp for sp in parent_state_def.spawns
-            if sp.issue_type == child_state.issue_type
+            sp for sp in parent_state_def.spawns if sp.issue_type == child_state.issue_type
         ]
         if not candidate_rules:
             return None
@@ -175,7 +172,9 @@ def _apply_spawn_parent_cascade(
         except BackendError as exc:
             logger.warning(
                 "cascade: cannot read sibling %s of parent %s: %s",
-                sibling_id, parent_id, exc,
+                sibling_id,
+                parent_id,
+                exc,
             )
             # Treat unreadable siblings as not-satisfied (conservative).
             return None
@@ -183,8 +182,7 @@ def _apply_spawn_parent_cascade(
             return None
         if sibling.issue_type is not None:
             sibling_rules = [
-                sp for sp in parent_state_def.spawns
-                if sp.issue_type == sibling.issue_type
+                sp for sp in parent_state_def.spawns if sp.issue_type == sibling.issue_type
             ]
             if not sibling_rules:
                 # Sibling out-of-band (no matching rule) — treat as
@@ -210,7 +208,9 @@ def _apply_spawn_parent_cascade(
             logger.warning(
                 "cascade: parent %s spawn rules disagree on target "
                 "(%s vs %s) — skipping auto-advance.",
-                parent_id, target_state, parent_next,
+                parent_id,
+                target_state,
+                parent_next,
             )
             return None
 
@@ -233,7 +233,9 @@ def _apply_spawn_parent_cascade(
     except BackendError as exc:
         logger.error(
             "cascade: failed to advance parent %s to %r: %s",
-            parent_id, target_state, exc,
+            parent_id,
+            target_state,
+            exc,
         )
         return None
     applications.append(
@@ -253,7 +255,7 @@ def _apply_spawn_parent_cascade(
 
 
 def _apply_collector_cascade(
-    registry: "Workflow",
+    registry: Workflow,
     backend: TrackerBackend,
     collector_id: str,
     collector_state: IssueState,

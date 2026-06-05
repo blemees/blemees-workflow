@@ -6,11 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-import pytest
-
 from workflow.backends.base import IssueFilters, IssueState, MarkerChange
 from workflow.core.cascade import (
-    CascadeApplication,
     cascade_after_state_change,
 )
 from workflow.core.model.state_machine import (
@@ -73,13 +70,13 @@ class _MockBackend:
 class _MockRegistry:
     """Tiny registry stub with just the calls cascade makes."""
 
-    processes_by_name: dict[str, "_MockProcess"] = field(default_factory=dict)
+    processes_by_name: dict[str, _MockProcess] = field(default_factory=dict)
     state_to_process: dict[str, str] = field(default_factory=dict)
 
     def find_process_for_state(self, state_name: str) -> str | None:
         return self.state_to_process.get(state_name)
 
-    def get_process(self, name: str) -> "_MockProcess":
+    def get_process(self, name: str) -> _MockProcess:
         return self.processes_by_name[name]
 
 
@@ -105,12 +102,14 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
         state_class=StateClass.WORKING,
         roles=("incident-commander",),
         issue_types=("incident",),
-        spawns=(Spawn(
-            process="mitigation",
-            issue_type="incident",
-            initial_state="ready_for_mitigation",
-            advance_on=(("mitigated", "needs_verification"),),
-        ),),
+        spawns=(
+            Spawn(
+                process="mitigation",
+                issue_type="incident",
+                initial_state="ready_for_mitigation",
+                advance_on=(("mitigated", "needs_verification"),),
+            ),
+        ),
     )
     incident.states["needs_verification"] = State(
         name="needs_verification",
@@ -125,12 +124,14 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
         state_class=StateClass.WORKING,
         roles=("incident-responder",),
         issue_types=("incident",),
-        spawns=(Spawn(
-            process="inner-loop",
-            issue_type="hotfix",
-            initial_state="ready_for_hotfix",
-            advance_on=(("shipped", "mitigated"),),
-        ),),
+        spawns=(
+            Spawn(
+                process="inner-loop",
+                issue_type="hotfix",
+                initial_state="ready_for_hotfix",
+                advance_on=(("shipped", "mitigated"),),
+            ),
+        ),
     )
     mitigation.states["mitigated"] = State(
         name="mitigated",
@@ -167,9 +168,7 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
-            advance_on=(
-                CollectAdvanceRule(collector_state="released", default_target="shipped"),
-            ),
+            advance_on=(CollectAdvanceRule(collector_state="released", default_target="shipped"),),
         ),
     )
     release.states["released"] = State(
@@ -282,9 +281,7 @@ def test_cascade_collect_advance_propagates_to_contributors():
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
-            advance_on=(
-                CollectAdvanceRule(collector_state="released", default_target="shipped"),
-            ),
+            advance_on=(CollectAdvanceRule(collector_state="released", default_target="shipped"),),
         ),
         closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
@@ -362,9 +359,7 @@ def test_cascade_multi_hop_chain():
         collects=Collects(
             process="inner-loop",
             from_states=("staged",),
-            advance_on=(
-                CollectAdvanceRule(collector_state="released", default_target="shipped"),
-            ),
+            advance_on=(CollectAdvanceRule(collector_state="released", default_target="shipped"),),
         ),
         closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
     )
@@ -433,13 +428,15 @@ def test_cascade_cycle_guard_visits_state_pair_once():
         state_class=StateClass.WORKING,
         roles=("a",),
         issue_types=("x",),
-        spawns=(Spawn(
-            process="c",
-            issue_type="x",
-            initial_state="resting_c",
-            # Child closing state "done_c" → parent advances to "resting_p".
-            advance_on=(("done_c", "resting_p"),),
-        ),),
+        spawns=(
+            Spawn(
+                process="c",
+                issue_type="x",
+                initial_state="resting_c",
+                # Child closing state "done_c" → parent advances to "resting_p".
+                advance_on=(("done_c", "resting_p"),),
+            ),
+        ),
     )
     sm_p.states["resting_p"] = State(
         name="resting_p",
@@ -537,8 +534,8 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
         kid_sm.states[closing_name] = State(
             name=closing_name,
             state_class=StateClass.RESTING,
-        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
-    )
+            closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+        )
 
     registry = _MockRegistry(
         processes_by_name={
@@ -563,12 +560,18 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
         subprocess_children=("KA", "KB"),
     )
     backend.issues["KA"] = IssueState(
-        issue_id="KA", state="done_a", agent_claim=None,
-        issue_type="kind_a", parent_of="P",
+        issue_id="KA",
+        state="done_a",
+        agent_claim=None,
+        issue_type="kind_a",
+        parent_of="P",
     )
     backend.issues["KB"] = IssueState(
-        issue_id="KB", state="ready_b", agent_claim=None,
-        issue_type="kind_b", parent_of="P",
+        issue_id="KB",
+        state="ready_b",
+        agent_claim=None,
+        issue_type="kind_b",
+        parent_of="P",
     )
 
     # Only KA is satisfied; KB still resting. Parent must stay put.

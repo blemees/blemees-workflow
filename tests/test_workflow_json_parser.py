@@ -179,8 +179,14 @@ def test_cross_process_transition_type_rejected() -> None:
     transitions with a clear migration hint."""
     bad = _minimal()
     bad["transitions"].append(
-        {"source": "a", "destination": "b", "type": "cross_process",
-         "label": "to x", "kind": "shared", "process": "x"}
+        {
+            "source": "a",
+            "destination": "b",
+            "type": "cross_process",
+            "label": "to x",
+            "kind": "shared",
+            "process": "x",
+        }
     )
     with pytest.raises(ParseError, match="cross_process.*removed"):
         parse_state_machine(json.dumps(bad))
@@ -377,16 +383,6 @@ def test_collects_forbidden_on_working() -> None:
         parse_state_machine(json.dumps(spec))
 
 
-def test_collects_forbidden_on_working() -> None:
-    spec = _minimal()
-    spec["states"]["b"]["collects"] = {  # b is working
-        "process": "pr",
-        "from_states": ["staged"],
-    }
-    with pytest.raises(ParseError, match="collects.*only valid on resting"):
-        parse_state_machine(json.dumps(spec))
-
-
 def test_collects_requires_from_states_non_empty() -> None:
     spec = _minimal()
     spec["states"]["a"]["collects"] = {
@@ -495,9 +491,7 @@ def test_label_required_on_event() -> None:
     spec = _minimal()
     # _minimal() has no event transitions (entry is now via `initial`);
     # add an a→c event transition without a label to drive the rule.
-    spec["transitions"].append(
-        {"source": "a", "destination": "c", "type": "event"}
-    )
+    spec["transitions"].append({"source": "a", "destination": "c", "type": "event"})
     with pytest.raises(ParseError, match="event transitions"):
         parse_state_machine(json.dumps(spec))
 

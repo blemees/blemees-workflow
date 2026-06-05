@@ -33,7 +33,6 @@ from workflow.core.model.role import RoleDirectory
 from workflow.core.model.state_machine import (
     StateClass,
     StateMachine,
-    TransitionType,
 )
 from workflow.core.model.trust_grant import TrustGrant
 
@@ -265,10 +264,7 @@ def emit_human_inputs_doc(
             out.append(f"- **Rationale**: {t.rationale}")
         places = sorted(declared_on.get(human_input_id, []))
         if places:
-            out.append(
-                f"- **Declared on**: {', '.join(f'`{p}`' for p in places)} "
-                f"_(derived)_"
-            )
+            out.append(f"- **Declared on**: {', '.join(f'`{p}`' for p in places)} _(derived)_")
         out.append("")
     return "\n".join(out).rstrip() + "\n"
 
@@ -328,14 +324,12 @@ def emit_process_map(processes: list[Any]) -> str:
         # their own — but inside a composite we still need an explicit
         # declaration so Mermaid scopes the node into the block.
         if "-" in p.process_name:
-            lines.append(
-                f"{indent}state \"{p.process_name}\" as {_node_id(p.process_name)}"
-            )
+            lines.append(f'{indent}state "{p.process_name}" as {_node_id(p.process_name)}')
         else:
             lines.append(f"{indent}{_node_id(p.process_name)}")
 
     for group_name, members in grouped.items():
-        lines.append(f"    state \"{group_name}\" as {_node_id(group_name)} {{")
+        lines.append(f'    state "{group_name}" as {_node_id(group_name)} {{')
         for p in members:
             _emit_alias(p, "        ")
         lines.append("    }")
@@ -343,9 +337,7 @@ def emit_process_map(processes: list[Any]) -> str:
         # Preserve the previous behaviour for ungrouped processes: only
         # emit an explicit declaration when the name needs an alias.
         if "-" in p.process_name:
-            lines.append(
-                f"    state \"{p.process_name}\" as {_node_id(p.process_name)}"
-            )
+            lines.append(f'    state "{p.process_name}" as {_node_id(p.process_name)}')
 
     if not sorted_processes:
         return "\n".join(lines) + "\n"
@@ -388,22 +380,22 @@ def emit_process_map(processes: list[Any]) -> str:
                 if target_proc is None:
                     continue
                 for child_closing_state, _parent_next in sp.advance_on:
-                    feedback_closing_states_by_process.setdefault(
-                        target_proc, set()
-                    ).add(child_closing_state)
+                    feedback_closing_states_by_process.setdefault(target_proc, set()).add(
+                        child_closing_state
+                    )
             if s.collects is not None:
                 # Collector lives on THIS process; its advance_on /
                 # release_on keys are this process's own states (the
                 # collector's closing states/restings that trigger fan-out
                 # to the contributor process).
                 for rule in s.collects.advance_on:
-                    feedback_closing_states_by_process.setdefault(
-                        p.process_name, set()
-                    ).add(rule.collector_state)
+                    feedback_closing_states_by_process.setdefault(p.process_name, set()).add(
+                        rule.collector_state
+                    )
                 for collector_state in s.collects.release_on:
-                    feedback_closing_states_by_process.setdefault(
-                        p.process_name, set()
-                    ).add(collector_state)
+                    feedback_closing_states_by_process.setdefault(p.process_name, set()).add(
+                        collector_state
+                    )
 
     # Identify external entry / exit.
     entry_edges: list[tuple[str, str]] = []  # (process_name, destination_state)
@@ -514,11 +506,7 @@ def emit_process_map(processes: list[Any]) -> str:
         for s in p.state_machine.states.values():
             if s.collects is None:
                 continue
-            type_suffix = (
-                f" [{','.join(s.collects.issue_types)}]"
-                if s.collects.issue_types
-                else ""
-            )
+            type_suffix = f" [{','.join(s.collects.issue_types)}]" if s.collects.issue_types else ""
             label = f"{SYMBOL_COLLECT} {s.name}{type_suffix}"
             source_proc = s.collects.process or _collects_source_process(s.collects)
             if source_proc is None or source_proc == p.process_name:
@@ -542,9 +530,7 @@ def emit_process_map(processes: list[Any]) -> str:
                 if spawn_target_proc is None:
                     continue
                 for child_closing_state, parent_next in sp.advance_on:
-                    feedback_source = state_to_process.get(
-                        child_closing_state, spawn_target_proc
-                    )
+                    feedback_source = state_to_process.get(child_closing_state, spawn_target_proc)
                     if feedback_source == p.process_name:
                         # Self-feedback would be a no-op cross-process
                         # edge; skip.
@@ -578,15 +564,11 @@ def emit_process_map(processes: list[Any]) -> str:
     # Entry edges first (top), cross-process middle, exit edges last
     # (bottom) — preserves top-to-bottom flow in the v2 renderer.
     for process_name, dest_state in entry_edges:
-        lines.append(
-            f"    [*] --> {_node_id(process_name)}: {SYMBOL_ENTRY} {dest_state}"
-        )
+        lines.append(f"    [*] --> {_node_id(process_name)}: {SYMBOL_ENTRY} {dest_state}")
     for src, dst, label in sorted(cross_edges):
         lines.append(f"    {_node_id(src)} --> {_node_id(dst)}: {label}")
     for process_name, closing_state in exit_edges:
-        lines.append(
-            f"    {_node_id(process_name)} --> [*]: {SYMBOL_EXIT} {closing_state}"
-        )
+        lines.append(f"    {_node_id(process_name)} --> [*]: {SYMBOL_EXIT} {closing_state}")
 
     return "\n".join(lines) + "\n"
 
@@ -621,49 +603,51 @@ def emit_index_doc(
         "",
     ]
     if process_map_mermaid is not None:
-        out.extend([
-            "## Process map",
-            "",
-            "Auto-generated overview of every process in this workflow and the "
-            "handoffs between them. The canonical source is each "
-            "`<process>-states.json`; the diagram is regenerated from those.",
-            "",
-            "Rendered as a `stateDiagram-v2` so it shares the visual "
-            "language of the per-process state diagrams. Nodes are "
-            "processes; the built-in `[*]` sentinel marks external entry "
-            "(top) and external exit (bottom). The diagram reads "
-            "top-to-bottom: new issues flow from `[*]`, through "
-            "processes (handoffs and spawns between them), and back to "
-            "`[*]` as each closing state is reached.",
-            "",
-            "Edge labels carry a symbol prefix indicating the relationship "
-            "kind:",
-            "",
-            "- **`▶ <state>`** — entry: a new external issue materializes at the labelled state.",
-            "- **`■ <state>`** — exit: an issue closes at the labelled closing state **and** no parent process has it listed as a spawn feedback target. Closing states named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.",
-            "- **`⊙ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.",
-            "- **`ᐉ <parent_state>`** — spawn: the source process creates a child issue on the destination process. The label names only the parent state where the spawn fires; check the destination's own diagram for the child's initial state.",
-            "- **`ꘜ <collector_state>`** — collect: the destination process (authored via `collects`) gathers contributors from another process. The label names only the collector state; the source's `from_states` are visible on the source process's own diagram.",
-            "- **`⊡ <state>`** — feedback: for a spawn's `advance_on`, the parent's next state after the child terminates. For a collect's `advance_on`, the collector's state that triggers contributor movement. Pairs with the originating `ᐉ`/`ꘜ` edge to show the round-trip; the trigger / target counterpart is visible on the relevant process's own diagram.",
-            "- **`⧄ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.",
-            "",
-            "Edge labels name the state involved — the shared resting state for "
-            "handoffs, or the originating → destination state pair for spawns.",
-            "",
-            "```mermaid",
-            process_map_mermaid.rstrip(),
-            "```",
-            "",
-            "> Raw mermaid source in: "
-            "[`process-map.mermaid`](./process-map.mermaid).",
-            "",
-        ])
+        out.extend(
+            [
+                "## Process map",
+                "",
+                "Auto-generated overview of every process in this workflow and the "
+                "handoffs between them. The canonical source is each "
+                "`<process>-states.json`; the diagram is regenerated from those.",
+                "",
+                "Rendered as a `stateDiagram-v2` so it shares the visual "
+                "language of the per-process state diagrams. Nodes are "
+                "processes; the built-in `[*]` sentinel marks external entry "
+                "(top) and external exit (bottom). The diagram reads "
+                "top-to-bottom: new issues flow from `[*]`, through "
+                "processes (handoffs and spawns between them), and back to "
+                "`[*]` as each closing state is reached.",
+                "",
+                "Edge labels carry a symbol prefix indicating the relationship kind:",
+                "",
+                "- **`▶ <state>`** — entry: a new external issue materializes at the labelled state.",
+                "- **`■ <state>`** — exit: an issue closes at the labelled closing state **and** no parent process has it listed as a spawn feedback target. Closing states named in some sibling's `spawn.advance_on` are treated as feedback (the work continues in the parent) and don't render as workflow exits, even though the child issue itself closes.",
+                "- **`⊙ <state>`** — handoff: the same work item continues on the destination process. Bidirectional handoffs (each side both sends and receives) emit two edges in opposite directions.",
+                "- **`ᐉ <parent_state>`** — spawn: the source process creates a child issue on the destination process. The label names only the parent state where the spawn fires; check the destination's own diagram for the child's initial state.",
+                "- **`ꘜ <collector_state>`** — collect: the destination process (authored via `collects`) gathers contributors from another process. The label names only the collector state; the source's `from_states` are visible on the source process's own diagram.",
+                "- **`⊡ <state>`** — feedback: for a spawn's `advance_on`, the parent's next state after the child terminates. For a collect's `advance_on`, the collector's state that triggers contributor movement. Pairs with the originating `ᐉ`/`ꘜ` edge to show the round-trip; the trigger / target counterpart is visible on the relevant process's own diagram.",
+                "- **`⧄ <collector_state>`** — release: a collect's `release_on` entry. When the collector enters the labelled state, every contributor's `collected-by:<collector>` marker is cleared but no state change happens — the contributors are released back to candidacy and become eligible for a future collector.",
+                "",
+                "Edge labels name the state involved — the shared resting state for "
+                "handoffs, or the originating → destination state pair for spawns.",
+                "",
+                "```mermaid",
+                process_map_mermaid.rstrip(),
+                "```",
+                "",
+                "> Raw mermaid source in: [`process-map.mermaid`](./process-map.mermaid).",
+                "",
+            ]
+        )
     if state_machines:
         out.extend(_section_workflow_entry_points(state_machines))
-    out.extend([
-        "## Processes",
-        "",
-    ])
+    out.extend(
+        [
+            "## Processes",
+            "",
+        ]
+    )
     for name in sorted(processes):
         description = processes[name]
         tail = description.strip() if description else "state machine, human gates, handoffs"
@@ -738,9 +722,7 @@ def _interface_table(
 # ----- sections -----
 
 
-def _section_issue_types(
-    declared: list[str], directory: IssueTypeDirectory | None
-) -> list[str]:
+def _section_issue_types(declared: list[str], directory: IssueTypeDirectory | None) -> list[str]:
     out = ["## Issue types accepted", ""]
     for type_id in declared:
         if directory is not None and directory.has(type_id):
@@ -779,9 +761,7 @@ def _section_workflow_entry_points(state_machines: list[StateMachine]) -> list[s
     for process_name, state_name, label in entries:
         trigger = (label or "").strip()
         suffix = f" — {trigger}" if trigger else ""
-        out.append(
-            f"- [`{process_name}`](./{process_name}.md) · `{state_name}`{suffix}"
-        )
+        out.append(f"- [`{process_name}`](./{process_name}.md) · `{state_name}`{suffix}")
     out.append("")
     return out
 
@@ -890,15 +870,12 @@ def _section_human_gates(
         )
         if triggering:
             out.append(
-                f"- **Triggering role(s)**: "
-                f"{', '.join(f'`{r}`' for r in triggering)} _(derived)_"
+                f"- **Triggering role(s)**: {', '.join(f'`{r}`' for r in triggering)} _(derived)_"
             )
         out.append(f"- **HumanGate type**: {gate.gate_type.value}")
         if rev is not None:
             out.append(f"- **Destination reversibility**: {rev.value} _(derived, worst-case)_")
-        out.append(
-            f"- **Allowed levels**: {', '.join(lvl.value for lvl in gate.allowed_levels)}"
-        )
+        out.append(f"- **Allowed levels**: {', '.join(lvl.value for lvl in gate.allowed_levels)}")
         out.append(f"- **Default level**: {gate.default_level.value}")
         if gate.agent_prepares_path:
             out.append(f"- **Agent prepares**: `{gate.agent_prepares_path}`")
@@ -958,8 +935,7 @@ def _section_cross_process(
                         parent_next,
                         f"{SYMBOL_FEEDBACK} feedback",
                         f"{counterpart_proc} · `{child_closing_state}`",
-                        f"child terminates → advance (spawned from `{s.name}`, "
-                        f"`{sp.issue_type}`)",
+                        f"child terminates → advance (spawned from `{s.name}`, `{sp.issue_type}`)",
                     )
                 )
 
@@ -1007,9 +983,7 @@ def _section_cross_process(
     # The mirror of the collect (inbound) side, similar to outbound spawns.
     for row in outbound_collects or ():
         type_suffix = (
-            " — types " + ", ".join(f"`{t}`" for t in row.issue_types)
-            if row.issue_types
-            else ""
+            " — types " + ", ".join(f"`{t}`" for t in row.issue_types) if row.issue_types else ""
         )
         outbound.append(
             (
@@ -1079,9 +1053,7 @@ def _section_trust_grants(grants: list[TrustGrant]) -> list[str]:
     for g in grants:
         out.append(f"### `{g.control_point}` (team: {g.team})")
         out.append("")
-        out.append(
-            f"- **Effective level**: {g.current_level.value}"
-        )
+        out.append(f"- **Effective level**: {g.current_level.value}")
         out.append(f"- **Granted by**: {g.granted_by}")
         out.append(f"- **Granted at**: {g.granted_at.isoformat()}")
         out.append(f"- **Expires at**: {g.expires_at.isoformat()}")
@@ -1095,16 +1067,12 @@ def _section_trust_grants(grants: list[TrustGrant]) -> list[str]:
             out.append("")
             out.append("**Evidence**:")
             for e in g.evidence:
-                out.append(
-                    f"- {e.source}: {e.metric} ({e.window}) — {e.detail}"
-                )
+                out.append(f"- {e.source}: {e.metric} ({e.window}) — {e.detail}")
         out.append("")
     return out
 
 
-def _grants_for_process(
-    sm: StateMachine, grants: dict[str, TrustGrant] | None
-) -> list[TrustGrant]:
+def _grants_for_process(sm: StateMachine, grants: dict[str, TrustGrant] | None) -> list[TrustGrant]:
     """Return grants whose control_point matches a gate referenced in this process."""
     if not grants:
         return []

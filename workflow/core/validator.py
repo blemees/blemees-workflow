@@ -114,8 +114,7 @@ def validate_issue_markers(
                 severity=Severity.ERROR,
                 principle_cite="hitl-principles.md#6",
                 message=(
-                    "Multiple HITL queue markers active on the same issue: "
-                    + ", ".join(in_flight)
+                    "Multiple HITL queue markers active on the same issue: " + ", ".join(in_flight)
                 ),
                 location=state.issue_id,
             )
@@ -415,8 +414,7 @@ def _check_trust_grants(
                 )
             if (
                 grant.current_level is HumanGateLevel.AUDIT
-                and state_machine.gate_reversibility(gate)
-                is ReversibilityClass.IRREVERSIBLE
+                and state_machine.gate_reversibility(gate) is ReversibilityClass.IRREVERSIBLE
             ):
                 findings.append(
                     ValidationFinding(
@@ -821,10 +819,7 @@ def _check_spawns(
             elif sp.process is not None:
                 # Authored process must match resolution.
                 resolved_from_initial = state_to_process.get(sp.initial_state)
-                if (
-                    resolved_from_initial is not None
-                    and resolved_from_initial != sp.process
-                ):
+                if resolved_from_initial is not None and resolved_from_initial != sp.process:
                     findings.append(
                         ValidationFinding(
                             severity=Severity.ERROR,
@@ -896,10 +891,7 @@ def _check_spawns(
                         location=state_machine.source_path,
                     )
                 )
-            elif (
-                target_initial.issue_types
-                and sp.issue_type not in target_initial.issue_types
-            ):
+            elif target_initial.issue_types and sp.issue_type not in target_initial.issue_types:
                 findings.append(
                     ValidationFinding(
                         severity=Severity.ERROR,
@@ -1380,8 +1372,8 @@ def _check_process_reachable(
                 f"Process {state_machine.name!r} has no `initial` state, "
                 f"no `collects` declaration, no inbound spawn from any "
                 f"other process, and no shared handoff state. New issues "
-                f"cannot reach it. Mark an entry state with `\"initial\": "
-                f"true` (or `\"initial\": \"<label>\"`), declare "
+                f'cannot reach it. Mark an entry state with `"initial": '
+                f'true` (or `"initial": "<label>"`), declare '
                 f"`collects`, wire it as a spawn target, or share a "
                 f"handoff state."
             ),
