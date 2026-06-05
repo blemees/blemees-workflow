@@ -70,6 +70,8 @@ def validate_state_machine(
 
     findings.extend(_check_irreversible_destinations_gated(state_machine))
     findings.extend(_check_terminal_taxonomy(state_machine))
+    findings.extend(_check_closing_states_are_sinks(state_machine))
+    findings.extend(_check_closes_exclusivity(state_machine))
     findings.extend(_check_reversibility_declared_on_legend_states(state_machine))
     findings.extend(_check_transition_type_compatibility(state_machine))
     findings.extend(_check_working_states_are_claim_destinations(state_machine))
@@ -175,6 +177,81 @@ def _check_terminal_taxonomy(state_machine: StateMachine) -> list[ValidationFind
                     message=(
                         f"Terminal state {state.name!r} has no taxonomy tag. "
                         "Add `terminal (<tag>)` to the sink transition or a note."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+    return findings
+
+
+def _check_closing_states_are_sinks(
+    state_machine: StateMachine,
+) -> list[ValidationFinding]:
+    """A closing state (`closes`) is a sink — it must have no outgoing
+    transitions (ADR-0002). Previously implicit (no transition type accepted a
+    terminal source); explicit now that closing states are `resting` and an
+    EVENT is resting → resting."""
+    findings: list[ValidationFinding] = []
+    for t in state_machine.transitions:
+        source = state_machine.states.get(t.source)
+        if source is not None and source.closes is not None:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="state-machine-principles.md#1",
+                    message=(
+                        f"Closing state {t.source!r} has an outgoing transition "
+                        f"({t.label!r}); closing states are sinks (no further "
+                        "transitions)."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+    return findings
+
+
+def _check_closes_exclusivity(
+    state_machine: StateMachine,
+) -> list[ValidationFinding]:
+    """A closing state (`closes`) is an unowned sink, so it cannot also be an
+    external entry, a collector, a handoff interface, or hold `issue_types`;
+    and a spawn on a closing state cannot carry `advance_on` (ADR-0002)."""
+    findings: list[ValidationFinding] = []
+    cite = "state-machine-principles.md#1"
+    for state in state_machine.states.values():
+        if state.closes is None:
+            continue
+        conflicts: list[str] = []
+        if state.is_initial:
+            conflicts.append("is_initial")
+        if state.collects is not None:
+            conflicts.append("collects")
+        if state.handoff:
+            conflicts.append("handoff")
+        if state.issue_types:
+            conflicts.append("issue_types")
+        for field_name in conflicts:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite=cite,
+                    message=(
+                        f"State {state.name!r} has both `closes` and "
+                        f"`{field_name}` — a closing state is an unowned sink; "
+                        "these are mutually exclusive."
+                    ),
+                    location=state_machine.source_path,
+                )
+            )
+        if any(sp.advance_on for sp in state.spawns):
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite=cite,
+                    message=(
+                        f"State {state.name!r}: a spawn on a closing state "
+                        "cannot carry `advance_on` (the parent is already "
+                        "closed)."
                     ),
                     location=state_machine.source_path,
                 )

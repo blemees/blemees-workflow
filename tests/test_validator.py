@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from workflow.backends.base import IssueState
 from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel, HumanGateType
 from workflow.core.model.state_machine import (
+    Closes,
     Collects,
     ReversibilityClass,
     State,
@@ -55,6 +56,100 @@ def test_irreversible_destination_without_hitl_fires_warning() -> None:
     matches = [f for f in findings if f.principle_cite == "state-machine-principles.md#11"]
     assert matches, "Expected a finding for state-machine-principles.md#11"
     assert any("irreversible" in f.message.lower() and "released" in f.message for f in matches)
+
+
+def _closing_state(name: str) -> State:
+    return State(
+        name=name,
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    )
+
+
+def test_closing_state_with_outgoing_transition_errors() -> None:
+    """A closing state is a sink — an outgoing transition is an ERROR
+    (previously implicit; now explicit since closing states are resting)."""
+    sm = StateMachine(name="t")
+    sm.states["done"] = _closing_state("done")
+    sm.states["after"] = State(
+        name="after",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        issue_types=("bug",),
+    )
+    sm.transitions.append(
+        Transition(
+            source="done",
+            destination="after",
+            label="reopen (external)",
+            transition_type=TransitionType.EVENT,
+        )
+    )
+    findings = validate_state_machine(sm, catalog=None, grants={})
+    sink = [
+        f
+        for f in findings
+        if "closing state" in f.message.lower() and "sink" in f.message.lower()
+    ]
+    assert sink, "Expected a sink-invariant finding for the closing state"
+    assert all(f.severity is Severity.ERROR for f in sink)
+
+
+def test_closing_state_as_pure_sink_passes() -> None:
+    sm = StateMachine(name="t")
+    sm.states["done"] = _closing_state("done")
+    findings = validate_state_machine(sm, catalog=None, grants={})
+    assert not [
+        f for f in findings if "closing state" in f.message.lower() and "sink" in f.message.lower()
+    ]
+
+
+def test_closes_mutually_exclusive_with_other_annotations() -> None:
+    """A closing state can't also be an entry (`is_initial`), a collector
+    (`collects`), a handoff, or carry `issue_types` (ADR-0002)."""
+    from workflow.core.model.state_machine import Collects
+
+    cases = {
+        "is_initial": dict(is_initial=True),
+        "collects": dict(collects=Collects(from_states=("x",))),
+        "handoff": dict(handoff=True),
+        "issue_types": dict(issue_types=("bug",)),
+    }
+    for label, extra in cases.items():
+        sm = StateMachine(name="t")
+        sm.states["done"] = State(
+            name="done",
+            state_class=StateClass.RESTING,
+            reversibility=ReversibilityClass.IRREVERSIBLE,
+            closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+            **extra,
+        )
+        findings = validate_state_machine(sm, catalog=None, grants={})
+        excl = [f for f in findings if "closes" in f.message.lower() and label in f.message]
+        assert excl, f"Expected exclusivity finding for closes+{label}"
+        assert all(f.severity is Severity.ERROR for f in excl)
+
+
+def test_closes_forbids_spawn_advance_on() -> None:
+    """A spawn on a closing state can't carry `advance_on` — the parent is
+    already closed, so there's nothing to advance."""
+    from workflow.core.model.state_machine import Spawn
+
+    sm = StateMachine(name="t")
+    sm.states["done"] = State(
+        name="done",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SUPERSEDED, reason="completed"),
+        spawns=(
+            Spawn(issue_type="chore", initial_state="ready", advance_on=(("shipped", "next"),)),
+        ),
+    )
+    findings = validate_state_machine(sm, catalog=None, grants={})
+    excl = [f for f in findings if "advance_on" in f.message and "closing" in f.message.lower()]
+    assert excl, "Expected an advance_on-on-closing finding"
+    assert all(f.severity is Severity.ERROR for f in excl)
 
 
 def test_irreversible_destination_with_gate_passes() -> None:
