@@ -152,9 +152,7 @@ def _is_working_state(state_machine: StateMachine, name: str | None) -> bool:
     return state is not None and state.state_class is StateClass.WORKING
 
 
-def _closing_close_info(
-    state_machine: StateMachine, name: str | None
-) -> tuple[bool, str | None]:
+def _closing_close_info(state_machine: StateMachine, name: str | None) -> tuple[bool, str | None]:
     """Whether advancing into `name` should close the tracker's issue.
 
     Returns `(close_issue, close_reason)`. The decision is driven by whether
@@ -385,7 +383,9 @@ def _plan_advance(
         return _advance_audit_gated(request, state, transition, gate, state_machine)
 
 
-def _find_gate_for_transition(catalog: HumanGateCatalog | None, transition: Transition) -> HumanGate | None:
+def _find_gate_for_transition(
+    catalog: HumanGateCatalog | None, transition: Transition
+) -> HumanGate | None:
     """Find the HumanGate for the transition by looking up the gate name.
 
     Returns None when there's no catalog, the transition isn't gated, or
@@ -592,10 +592,7 @@ def _plan_release(
         clear_agent_claim=True,
         clear_last_state=True,
     )
-    audit = (
-        f"## release: agent {state.agent_claim!r} releases issue "
-        f"→ {state.last_state!r}"
-    )
+    audit = f"## release: agent {state.agent_claim!r} releases issue → {state.last_state!r}"
     return OperationPlan(
         operation=request.operation,
         change=change,
@@ -699,8 +696,7 @@ def _plan_approve(
     if not is_verdict_style:
         if not gate_destinations:
             raise OperationError(
-                f"Gate {gate.gate_name!r} has no destinations declared on the "
-                f"state machine."
+                f"Gate {gate.gate_name!r} has no destinations declared on the state machine."
             )
         only = gate_destinations[0]
         if destination is None:
@@ -802,9 +798,7 @@ def _plan_record_action(
                 f"Verdict-style audit gate {gate.gate_name!r} requires --destination."
             )
         if destination not in gate_destinations:
-            raise OperationError(
-                f"Destination {destination!r} is not in {gate_destinations!r}."
-            )
+            raise OperationError(f"Destination {destination!r} is not in {gate_destinations!r}.")
     if request.transition_label:
         transition = _find_transition(state_machine, state.state, request.transition_label)
         if transition.destination != destination:

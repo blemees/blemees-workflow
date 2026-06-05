@@ -76,9 +76,7 @@ def parse_human_gate_catalog(
     ):
         path = Path(source)
         if not path.exists():
-            logger.debug(
-                "Human-gate catalog not found at %s; returning empty catalog.", path
-            )
+            logger.debug("Human-gate catalog not found at %s; returning empty catalog.", path)
             return HumanGateCatalog(
                 process_name=process_name or _infer_process_name(path),
                 source_path=str(path),
@@ -137,14 +135,10 @@ def _parse_entry(entry: dict[str, Any], idx: int, source_path: str | None) -> Hu
 
     allowed_levels_raw = entry.get("allowed_levels")
     if not isinstance(allowed_levels_raw, list) or not allowed_levels_raw:
-        raise ParseError(
-            f"Human gate {gate_name!r}: `allowed_levels` must be a non-empty list."
-        )
+        raise ParseError(f"Human gate {gate_name!r}: `allowed_levels` must be a non-empty list.")
     allowed_levels = [_parse_level(lvl, gate_name=gate_name) for lvl in allowed_levels_raw]
 
-    default_level = _parse_level(
-        _require_str(entry, "default_level", idx), gate_name=gate_name
-    )
+    default_level = _parse_level(_require_str(entry, "default_level", idx), gate_name=gate_name)
     if default_level not in allowed_levels:
         raise ParseError(
             f"Human gate {gate_name!r}: `default_level` ({default_level.value}) is not in `allowed_levels`."
@@ -152,17 +146,13 @@ def _parse_entry(entry: dict[str, Any], idx: int, source_path: str | None) -> Hu
 
     agent_prepares = entry.get("agent_prepares")
     if agent_prepares is not None and not isinstance(agent_prepares, str):
-        raise ParseError(
-            f"Human gate {gate_name!r}: `agent_prepares` must be a string if present."
-        )
+        raise ParseError(f"Human gate {gate_name!r}: `agent_prepares` must be a string if present.")
     if isinstance(agent_prepares, str):
         agent_prepares = agent_prepares.strip() or None
 
     rationale = entry.get("rationale")
     if rationale is not None and not isinstance(rationale, str):
-        raise ParseError(
-            f"Human gate {gate_name!r}: `rationale` must be a string if present."
-        )
+        raise ParseError(f"Human gate {gate_name!r}: `rationale` must be a string if present.")
     if isinstance(rationale, str):
         rationale = rationale.strip() or None
 
@@ -222,9 +212,7 @@ def _parse_level(value: Any, gate_name: str) -> HumanGateLevel:
         return HumanGateLevel.BLOCK
     if lowered == "audit":
         return HumanGateLevel.AUDIT
-    raise ParseError(
-        f"Human gate {gate_name!r}: level must be 'block' or 'audit' (got {value!r})."
-    )
+    raise ParseError(f"Human gate {gate_name!r}: level must be 'block' or 'audit' (got {value!r}).")
 
 
 def _infer_process_name(path: Path) -> str:

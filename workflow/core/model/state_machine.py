@@ -105,7 +105,7 @@ class Spawn:
     # one process, so the initial_state determines the process). When
     # authored, the validator cross-checks the resolved process matches.
     process: str | None = None
-    issue_type: str = ""     # issue type to create on the target
+    issue_type: str = ""  # issue type to create on the target
     initial_state: str = ""  # initial state to create the child at
     advance_on: tuple[tuple[str, str], ...] = ()  # (child_closing_state, parent_next_state)
 

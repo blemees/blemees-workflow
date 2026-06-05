@@ -224,8 +224,7 @@ def test_emit_process_doc_lists_inbound_interfaces(workflow_dir: Path) -> None:
     # Inbound spawn lands as a row in the Inbound table.
     assert "### Inbound" in text
     assert (
-        "| `draft` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `implementing` "
-        "| `pr` issue |"
+        "| `draft` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `implementing` | `pr` issue |"
     ) in text
     # Outbound feedback lands as a row in the Outbound table.
     assert "### Outbound" in text

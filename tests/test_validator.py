@@ -94,9 +94,7 @@ def test_closing_state_with_outgoing_transition_errors() -> None:
     )
     findings = validate_state_machine(sm, catalog=None, grants={})
     sink = [
-        f
-        for f in findings
-        if "closing state" in f.message.lower() and "sink" in f.message.lower()
+        f for f in findings if "closing state" in f.message.lower() and "sink" in f.message.lower()
     ]
     assert sink, "Expected a sink-invariant finding for the closing state"
     assert all(f.severity is Severity.ERROR for f in sink)
@@ -186,25 +184,28 @@ def test_gate_with_multiple_source_states_errors() -> None:
         state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_FAST,
     )
-    workflow.transitions.extend([
-        Transition(
-            source="src_a",
-            destination="dst",
-            label="A fires shared gate",
-            transition_type=TransitionType.ADVANCE,
-            gate_name="shared",
-        ),
-        Transition(
-            source="src_b",
-            destination="dst",
-            label="B fires shared gate",
-            transition_type=TransitionType.ADVANCE,
-            gate_name="shared",
-        ),
-    ])
+    workflow.transitions.extend(
+        [
+            Transition(
+                source="src_a",
+                destination="dst",
+                label="A fires shared gate",
+                transition_type=TransitionType.ADVANCE,
+                gate_name="shared",
+            ),
+            Transition(
+                source="src_b",
+                destination="dst",
+                label="B fires shared gate",
+                transition_type=TransitionType.ADVANCE,
+                gate_name="shared",
+            ),
+        ]
+    )
     findings = validate_state_machine(workflow, catalog=None, grants={})
     multi_source = [
-        f for f in findings
+        f
+        for f in findings
         if f.severity is Severity.ERROR and "multiple source states" in f.message
     ]
     assert multi_source, "Expected error about multi-source gate sharing"
@@ -226,26 +227,26 @@ def test_gate_with_same_source_multiple_destinations_passes() -> None:
         state_class=StateClass.RESTING,
         reversibility=ReversibilityClass.REVERSIBLE_FAST,
     )
-    workflow.transitions.extend([
-        Transition(
-            source="src",
-            destination="a",
-            label="verdict → a",
-            transition_type=TransitionType.ADVANCE,
-            gate_name="verdict",
-        ),
-        Transition(
-            source="src",
-            destination="b",
-            label="verdict → b",
-            transition_type=TransitionType.ADVANCE,
-            gate_name="verdict",
-        ),
-    ])
-    findings = validate_state_machine(workflow, catalog=None, grants={})
-    assert not any(
-        "multiple source states" in f.message for f in findings
+    workflow.transitions.extend(
+        [
+            Transition(
+                source="src",
+                destination="a",
+                label="verdict → a",
+                transition_type=TransitionType.ADVANCE,
+                gate_name="verdict",
+            ),
+            Transition(
+                source="src",
+                destination="b",
+                label="verdict → b",
+                transition_type=TransitionType.ADVANCE,
+                gate_name="verdict",
+            ),
+        ]
     )
+    findings = validate_state_machine(workflow, catalog=None, grants={})
+    assert not any("multiple source states" in f.message for f in findings)
 
 
 def test_audit_with_irreversible_destination_errors() -> None:
@@ -407,8 +408,7 @@ def test_collects_unknown_process_errors() -> None:
         sibling_machines={"collector_proc": parent},
     )
     assert any(
-        "collects.process" in f.message and "not a known process" in f.message
-        for f in findings
+        "collects.process" in f.message and "not a known process" in f.message for f in findings
     )
 
 
@@ -421,8 +421,7 @@ def test_collects_unknown_from_state_errors() -> None:
         sibling_machines={"collector_proc": parent, "src_proc": src},
     )
     assert any(
-        "collects.from_states" in f.message and "not declared" in f.message
-        for f in findings
+        "collects.from_states" in f.message and "not declared" in f.message for f in findings
     )
 
 
@@ -440,9 +439,7 @@ def test_collects_working_from_state_errors() -> None:
         catalog=None,
         sibling_machines={"collector_proc": parent, "src_proc": src},
     )
-    assert any(
-        "Collect only from resting or closing state" in f.message for f in findings
-    )
+    assert any("Collect only from resting or closing state" in f.message for f in findings)
 
 
 def test_entry_with_collects_on_same_state_errors() -> None:
@@ -470,8 +467,7 @@ def test_entry_with_collects_on_same_state_errors() -> None:
         sibling_machines={"bad": sm, "src": src},
     )
     assert any(
-        f.severity is Severity.ERROR and "contradictory entry paths" in f.message
-        for f in findings
+        f.severity is Severity.ERROR and "contradictory entry paths" in f.message for f in findings
     )
 
 
@@ -494,21 +490,20 @@ def test_entry_with_inbound_spawn_target_errors() -> None:
         state_class=StateClass.WORKING,
         roles=("worker",),
         issue_types=("bug",),
-        spawns=(Spawn(
-            process="target",
-            issue_type="bug",
-            initial_state="queue",
-        ),),
+        spawns=(
+            Spawn(
+                process="target",
+                issue_type="bug",
+                initial_state="queue",
+            ),
+        ),
     )
     findings = validate_state_machine(
         target,
         catalog=None,
         sibling_machines={"target": target, "parent": parent},
     )
-    assert any(
-        f.severity is Severity.ERROR and "spawn target" in f.message
-        for f in findings
-    )
+    assert any(f.severity is Severity.ERROR and "spawn target" in f.message for f in findings)
 
 
 def test_orphan_process_warns() -> None:
@@ -525,10 +520,7 @@ def test_orphan_process_warns() -> None:
         catalog=None,
         sibling_machines={"orphan": orphan},
     )
-    assert any(
-        f.severity is Severity.WARNING and "cannot reach it" in f.message
-        for f in findings
-    )
+    assert any(f.severity is Severity.WARNING and "cannot reach it" in f.message for f in findings)
 
 
 def test_process_with_initial_state_does_not_warn() -> None:
@@ -563,11 +555,13 @@ def test_process_reached_via_spawn_does_not_warn() -> None:
         state_class=StateClass.WORKING,
         roles=("worker",),
         issue_types=("bug",),
-        spawns=(Spawn(
-            process="child_proc",
-            issue_type="bug",
-            initial_state="queue",
-        ),),
+        spawns=(
+            Spawn(
+                process="child_proc",
+                issue_type="bug",
+                initial_state="queue",
+            ),
+        ),
     )
     parent.states["entry"] = State(
         name="entry",
@@ -608,12 +602,14 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
         "waiting": State(
             name="waiting",
             state_class=StateClass.RESTING,
-            spawns=(Spawn(
-                process="child",
-                issue_type="bug",
-                initial_state="queue",
-                advance_on=(("done", "doing"),),
-            ),),
+            spawns=(
+                Spawn(
+                    process="child",
+                    issue_type="bug",
+                    initial_state="queue",
+                    advance_on=(("done", "doing"),),
+                ),
+            ),
         ),
         "doing": State(
             name="doing",
@@ -682,9 +678,7 @@ def test_multi_spawn_duplicate_issue_type_initial_state_errors() -> None:
         sibling_machines={"parent": parent, "target": target},
     )
     assert any(
-        f.severity is Severity.ERROR
-        and "two `spawns` entries share" in f.message
-        for f in findings
+        f.severity is Severity.ERROR and "two `spawns` entries share" in f.message for f in findings
     )
 
 

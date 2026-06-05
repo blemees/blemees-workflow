@@ -821,9 +821,7 @@ def test_create_with_claim_creates_then_claims(
             "workflow.backends.github.GitHubBackend.read_issue",
             side_effect=[raw_state, raw_state, refining_state],
         ),
-        mock.patch(
-            "workflow.backends.github.GitHubBackend.apply_marker_change"
-        ) as apply_mock,
+        mock.patch("workflow.backends.github.GitHubBackend.apply_marker_change") as apply_mock,
     ):
         rc = cli(
             [

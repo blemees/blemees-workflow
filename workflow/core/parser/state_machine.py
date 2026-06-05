@@ -192,8 +192,7 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
 
     if not isinstance(data, dict):
         raise ParseError(
-            f"StateMachine JSON must be a JSON object at the top level "
-            f"(got {type(data).__name__})."
+            f"StateMachine JSON must be a JSON object at the top level (got {type(data).__name__})."
         )
 
     # Process name is always derived — from the `name` arg (filename stem
@@ -241,8 +240,7 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
             raise ParseError(f"State id must be a non-empty string (got {state_id!r}).")
         if not isinstance(spec, dict):
             raise ParseError(
-                f"State {state_id!r}: spec must be an object "
-                f"(got {type(spec).__name__})."
+                f"State {state_id!r}: spec must be an object (got {type(spec).__name__})."
             )
         states[state_id] = _parse_state(state_id, spec)
 
@@ -250,9 +248,7 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
     transitions: list[Transition] = []
     for idx, spec in enumerate(transitions_raw):
         if not isinstance(spec, dict):
-            raise ParseError(
-                f"transitions[{idx}] must be an object (got {type(spec).__name__})."
-            )
+            raise ParseError(f"transitions[{idx}] must be an object (got {type(spec).__name__}).")
         transitions.append(_parse_transition(idx, spec, states))
 
     # Build the HITL gate legend (gate_name → destination reversibility).
@@ -314,7 +310,6 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"{sorted(_REVERSIBILITY.keys())})."
         )
 
-
     roles_raw = spec.get("roles", [])
     if not isinstance(roles_raw, list):
         raise ParseError(
@@ -325,14 +320,11 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
     for i, role in enumerate(roles_raw):
         if not isinstance(role, str) or not role.strip():
             raise ParseError(
-                f"State {state_id!r}: `roles[{i}]` must be a non-empty "
-                f"string (got {role!r})."
+                f"State {state_id!r}: `roles[{i}]` must be a non-empty string (got {role!r})."
             )
         cleaned = role.strip().strip("{}").strip()
         if cleaned in roles_parsed:
-            raise ParseError(
-                f"State {state_id!r}: duplicate role {cleaned!r} in `roles`."
-            )
+            raise ParseError(f"State {state_id!r}: duplicate role {cleaned!r} in `roles`.")
         roles_parsed.append(cleaned)
     if roles_parsed and state_class is not StateClass.WORKING:
         raise ParseError(
@@ -366,25 +358,18 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
     for i, t in enumerate(state_issue_types_raw):
         if not isinstance(t, str) or not t.strip():
             raise ParseError(
-                f"State {state_id!r}: `issue_types[{i}]` must be a non-empty "
-                f"string (got {t!r})."
+                f"State {state_id!r}: `issue_types[{i}]` must be a non-empty string (got {t!r})."
             )
         cleaned = t.strip()
         if cleaned in state_issue_types_parsed:
-            raise ParseError(
-                f"State {state_id!r}: duplicate type {cleaned!r} in `issue_types`."
-            )
+            raise ParseError(f"State {state_id!r}: duplicate type {cleaned!r} in `issue_types`.")
         state_issue_types_parsed.append(cleaned)
     if state_class is StateClass.WORKING and not state_issue_types_parsed:
         raise ParseError(
             f"State {state_id!r}: `issue_types` is required on working "
             f"states (declare which issue types this state accepts)."
         )
-    if (
-        state_class is StateClass.RESTING
-        and not state_issue_types_parsed
-        and closes is None
-    ):
+    if state_class is StateClass.RESTING and not state_issue_types_parsed and closes is None:
         # Closing states (resting + `closes`) hold nothing, so they're exempt
         # from the resting `issue_types` requirement; the validator enforces
         # that `closes` and `issue_types` are mutually exclusive.
@@ -412,9 +397,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
     spawns = _parse_spawns(state_id, state_class, spec.get("spawns"))
     collects = _parse_collects(state_id, state_class, spec.get("collects"))
 
-    is_initial, initial_label = _parse_initial(
-        state_id, state_class, spec.get("initial")
-    )
+    is_initial, initial_label = _parse_initial(state_id, state_class, spec.get("initial"))
 
     mark_pr_ready_raw = spec.get("mark_pr_ready", False)
     if not isinstance(mark_pr_ready_raw, bool):
@@ -438,14 +421,11 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
     for i, t in enumerate(human_inputs_raw):
         if not isinstance(t, str) or not t.strip():
             raise ParseError(
-                f"State {state_id!r}: `human_inputs[{i}]` must be a non-empty "
-                f"string (got {t!r})."
+                f"State {state_id!r}: `human_inputs[{i}]` must be a non-empty string (got {t!r})."
             )
         cleaned = t.strip()
         if cleaned in human_inputs_parsed:
-            raise ParseError(
-                f"State {state_id!r}: duplicate topic {cleaned!r} in `human_inputs`."
-            )
+            raise ParseError(f"State {state_id!r}: duplicate topic {cleaned!r} in `human_inputs`.")
         human_inputs_parsed.append(cleaned)
     if human_inputs_parsed and state_class is not StateClass.WORKING:
         raise ParseError(
@@ -457,15 +437,12 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
     if notes_raw is None:
         notes_raw = []
     if not isinstance(notes_raw, list):
-        raise ParseError(
-            f"State {state_id!r}: `notes` must be a list of strings if present."
-        )
+        raise ParseError(f"State {state_id!r}: `notes` must be a list of strings if present.")
     notes: list[str] = []
     for i, note in enumerate(notes_raw):
         if not isinstance(note, str):
             raise ParseError(
-                f"State {state_id!r}: `notes[{i}]` must be a string "
-                f"(got {type(note).__name__})."
+                f"State {state_id!r}: `notes[{i}]` must be a string (got {type(note).__name__})."
             )
         notes.append(note)
 
@@ -487,9 +464,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
     )
 
 
-def _parse_spawns(
-    state_id: str, state_class: StateClass, raw: Any
-) -> tuple[Spawn, ...]:
+def _parse_spawns(state_id: str, state_class: StateClass, raw: Any) -> tuple[Spawn, ...]:
     """Parse the optional `spawns` field on any non-`[*]` state.
 
     Accepts either:
@@ -523,19 +498,13 @@ def _parse_spawns(
             f"State {state_id!r}: `spawns` list is empty. Use omitted/null "
             f"to declare no spawns; an empty list is ambiguous."
         )
-    return tuple(
-        _parse_one_spawn(state_id, state_class, item, idx)
-        for idx, item in enumerate(raw)
-    )
+    return tuple(_parse_one_spawn(state_id, state_class, item, idx) for idx, item in enumerate(raw))
 
 
-def _parse_one_spawn(
-    state_id: str, state_class: StateClass, raw: Any, idx: int
-) -> Spawn:
+def _parse_one_spawn(state_id: str, state_class: StateClass, raw: Any, idx: int) -> Spawn:
     if not isinstance(raw, dict):
         raise ParseError(
-            f"State {state_id!r}: `spawns[{idx}]` must be an object "
-            f"(got {type(raw).__name__})."
+            f"State {state_id!r}: `spawns[{idx}]` must be an object (got {type(raw).__name__})."
         )
     process_raw = raw.get("process")
     process: str | None = None
@@ -549,8 +518,7 @@ def _parse_one_spawn(
     issue_type = raw.get("issue_type")
     if not isinstance(issue_type, str) or not issue_type.strip():
         raise ParseError(
-            f"State {state_id!r}: `spawns[{idx}].issue_type` is required "
-            f"(child issue type)."
+            f"State {state_id!r}: `spawns[{idx}].issue_type` is required (child issue type)."
         )
     initial_state = raw.get("initial_state")
     if not isinstance(initial_state, str) or not initial_state.strip():
@@ -592,9 +560,7 @@ def _parse_one_spawn(
     )
 
 
-def _parse_collects(
-    state_id: str, state_class: StateClass, raw: Any
-) -> Collects | None:
+def _parse_collects(state_id: str, state_class: StateClass, raw: Any) -> Collects | None:
     """Parse the optional `collects` field. Only valid on resting states.
 
     Cross-process validation (`process` resolves, `from_states` are
@@ -605,8 +571,7 @@ def _parse_collects(
         return None
     if not isinstance(raw, dict):
         raise ParseError(
-            f"State {state_id!r}: `collects` must be an object "
-            f"(got {type(raw).__name__})."
+            f"State {state_id!r}: `collects` must be an object (got {type(raw).__name__})."
         )
     if state_class is not StateClass.RESTING:
         raise ParseError(
@@ -627,15 +592,13 @@ def _parse_collects(
         process = process_raw.strip()
     else:
         raise ParseError(
-            f"State {state_id!r}: `collects.process`, if present, must be a "
-            f"non-empty string."
+            f"State {state_id!r}: `collects.process`, if present, must be a non-empty string."
         )
 
     from_states_raw = raw.get("from_states")
     if not isinstance(from_states_raw, list) or not from_states_raw:
         raise ParseError(
-            f"State {state_id!r}: `collects.from_states` must be a non-empty "
-            f"list of state names."
+            f"State {state_id!r}: `collects.from_states` must be a non-empty list of state names."
         )
     from_states: list[str] = []
     for i, s in enumerate(from_states_raw):
@@ -647,8 +610,7 @@ def _parse_collects(
         cleaned = s.strip()
         if cleaned in from_states:
             raise ParseError(
-                f"State {state_id!r}: duplicate state {cleaned!r} in "
-                f"`collects.from_states`."
+                f"State {state_id!r}: duplicate state {cleaned!r} in `collects.from_states`."
             )
         from_states.append(cleaned)
 
@@ -670,8 +632,7 @@ def _parse_collects(
             cleaned = t.strip()
             if cleaned in issue_types:
                 raise ParseError(
-                    f"State {state_id!r}: duplicate type {cleaned!r} in "
-                    f"`collects.issue_types`."
+                    f"State {state_id!r}: duplicate type {cleaned!r} in `collects.issue_types`."
                 )
             issue_types.append(cleaned)
 
@@ -770,8 +731,7 @@ def _parse_collects(
             cleaned = s.strip()
             if cleaned in release_on:
                 raise ParseError(
-                    f"State {state_id!r}: duplicate state {cleaned!r} in "
-                    f"`collects.release_on`."
+                    f"State {state_id!r}: duplicate state {cleaned!r} in `collects.release_on`."
                 )
             release_on.append(cleaned)
 
@@ -793,9 +753,7 @@ def _parse_collects(
     )
 
 
-def _parse_closes(
-    state_id: str, state_class: StateClass, raw: Any
-) -> Closes | None:
+def _parse_closes(state_id: str, state_class: StateClass, raw: Any) -> Closes | None:
     """Parse the optional `closes` annotation (ADR-0002).
 
     Shape: `{ "taxonomy": <closure tag>, "reason": <close reason> }`. Only
@@ -831,9 +789,7 @@ def _parse_closes(
     return Closes(taxonomy=_CLOSURE_TAX[tax_raw], reason=reason_raw.strip())
 
 
-def _parse_initial(
-    state_id: str, state_class: StateClass, raw: Any
-) -> tuple[bool, str | None]:
+def _parse_initial(state_id: str, state_class: StateClass, raw: Any) -> tuple[bool, str | None]:
     """Parse the optional `initial` field.
 
     Accepts:
@@ -884,19 +840,17 @@ def _parse_initial(
     )
 
 
-def _parse_transition(
-    idx: int, spec: dict[str, Any], states: dict[str, State]
-) -> Transition:
+def _parse_transition(idx: int, spec: dict[str, Any], states: dict[str, State]) -> Transition:
     source = _require_endpoint(spec, "source", idx)
     destination = _require_endpoint(spec, "destination", idx)
     if source == "[*]":
         raise ParseError(
             f"transitions[{idx}]: `[*]→state` transitions are no longer "
-            f"authored. Mark the destination state with `\"initial\": true` "
-            f"(or `\"initial\": \"<label>\"`) instead. Example: move "
-            f"`{{\"source\": \"[*]\", \"destination\": {destination!r}, "
-            f"\"type\": \"event\", \"label\": \"<label>\"}}` to the "
-            f"{destination!r} state spec as `\"initial\": \"<label>\"`."
+            f'authored. Mark the destination state with `"initial": true` '
+            f'(or `"initial": "<label>"`) instead. Example: move '
+            f'`{{"source": "[*]", "destination": {destination!r}, '
+            f'"type": "event", "label": "<label>"}}` to the '
+            f'{destination!r} state spec as `"initial": "<label>"`.'
         )
     if destination == "[*]":
         raise ParseError(
@@ -905,9 +859,7 @@ def _parse_transition(
             f"`closes`. Remove this transition."
         )
     if source not in states:
-        raise ParseError(
-            f"transitions[{idx}]: source {source!r} is not a declared state."
-        )
+        raise ParseError(f"transitions[{idx}]: source {source!r} is not a declared state.")
     if destination not in states:
         raise ParseError(
             f"transitions[{idx}]: destination {destination!r} is not a declared state."
@@ -1036,7 +988,6 @@ def _require_endpoint(spec: dict[str, Any], field: str, idx: int) -> str:
     value = spec.get(field)
     if not isinstance(value, str) or not value.strip():
         raise ParseError(
-            f"transitions[{idx}]: `{field}` must be a non-empty string "
-            f"(state id or `[*]`)."
+            f"transitions[{idx}]: `{field}` must be a non-empty string (state id or `[*]`)."
         )
     return value.strip()

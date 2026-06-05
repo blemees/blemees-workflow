@@ -42,8 +42,8 @@ def _build() -> tuple[StateMachine, HumanGateCatalog]:
             name="wont_fix",
             state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.REVERSIBLE_FAST,
-        closes=Closes(taxonomy=ClosureTaxonomy.ABANDONED, reason="completed"),
-    ),
+            closes=Closes(taxonomy=ClosureTaxonomy.ABANDONED, reason="completed"),
+        ),
     }
     sm.transitions = [
         Transition(
@@ -130,9 +130,7 @@ def test_trust_grant_relaxes_effective_level() -> None:
         granted_at=today - timedelta(days=1),
         expires_at=today + timedelta(days=30),
     )
-    actions = available_transitions(
-        sm, catalog, {"ready_for_dev": grant}, source_state="refining"
-    )
+    actions = available_transitions(sm, catalog, {"ready_for_dev": grant}, source_state="refining")
     by_dest = {a.destination: a for a in actions}
     ready = by_dest["ready_for_dev"]
     assert ready.default_level is HumanGateLevel.BLOCK

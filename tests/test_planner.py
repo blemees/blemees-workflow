@@ -56,14 +56,14 @@ def _build_workflow() -> StateMachine:
             name="promoted",
             state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.IRREVERSIBLE,
-        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
-    ),
+            closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+        ),
         "killed": State(
             name="killed",
             state_class=StateClass.RESTING,
             reversibility=ReversibilityClass.IRREVERSIBLE,
-        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
-    ),
+            closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+        ),
         "implementing": State(
             name="implementing",
             state_class=StateClass.WORKING,
@@ -189,7 +189,9 @@ def test_plan_claim_already_claimed_errors() -> None:
 
 def test_plan_release() -> None:
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", last_state="raw")
+    state = IssueState(
+        issue_id="1", state="refining", agent_claim="product-manager", last_state="raw"
+    )
     plan = plan_operation(
         OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"),
         state,
@@ -203,7 +205,9 @@ def test_plan_release() -> None:
 def test_plan_release_without_last_state_errors() -> None:
     """A working state with no origin marker can't determine where to return."""
     workflow = _build_workflow()
-    state = IssueState(issue_id="1", state="refining", agent_claim="product-manager", last_state=None)
+    state = IssueState(
+        issue_id="1", state="refining", agent_claim="product-manager", last_state=None
+    )
     with pytest.raises(OperationError, match="last-state"):
         plan_operation(
             OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"),
@@ -233,9 +237,7 @@ def test_closing_advance_closes_issue_as_completed() -> None:
         issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
     )
     plan = plan_operation(
-        OperationRequest(
-            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="merged"
-        ),
+        OperationRequest(operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="merged"),
         state,
         workflow,
     )
@@ -267,9 +269,7 @@ def test_advance_into_non_closing_state_does_not_close_issue() -> None:
         issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
     )
     plan = plan_operation(
-        OperationRequest(
-            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="bounced"
-        ),
+        OperationRequest(operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="bounced"),
         state,
         workflow,
     )
@@ -296,9 +296,7 @@ def test_abandoned_closing_closes_as_not_planned() -> None:
         issue_id="1", state="implementing", agent_claim="developer", last_state="ready_for_dev"
     )
     plan = plan_operation(
-        OperationRequest(
-            operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="wont"
-        ),
+        OperationRequest(operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="wont"),
         state,
         workflow,
     )
@@ -776,7 +774,9 @@ def test_plan_resolve(tmp_path: Path) -> None:
         (
             Operation.CLAIM_ISSUE,
             lambda lc, cat, paths: (
-                OperationRequest(operation=Operation.CLAIM_ISSUE, issue_id="1", role="product-manager"),
+                OperationRequest(
+                    operation=Operation.CLAIM_ISSUE, issue_id="1", role="product-manager"
+                ),
                 IssueState(issue_id="1", state="raw", agent_claim=None),
             ),
         ),
@@ -889,7 +889,6 @@ def test_advance_on_audit_gated_transition_dispatches_to_record_action(
         HumanGateType,
     )
     from workflow.core.model.state_machine import (
-        ReversibilityClass,
         State,
         StateClass,
         StateMachine,
@@ -1017,9 +1016,7 @@ def test_claim_rejects_wrong_issue_type_for_destination_state() -> None:
         ),
     ]
     # A bug-typed issue tries to claim into the experiment-only state.
-    state = IssueState(
-        issue_id="1", state="ready", agent_claim=None, issue_type="bug"
-    )
+    state = IssueState(issue_id="1", state="ready", agent_claim=None, issue_type="bug")
 
     with pytest.raises(OperationError, match="not accepted by working state"):
         plan_operation(
@@ -1058,9 +1055,7 @@ def test_claim_allows_matching_issue_type() -> None:
             transition_type=TransitionType.CLAIM,
         ),
     ]
-    state = IssueState(
-        issue_id="1", state="ready", agent_claim=None, issue_type="experiment"
-    )
+    state = IssueState(issue_id="1", state="ready", agent_claim=None, issue_type="experiment")
 
     plan = plan_operation(
         OperationRequest(operation=Operation.CLAIM_ISSUE, issue_id="1", role="developer"),

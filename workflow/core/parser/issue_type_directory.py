@@ -81,8 +81,7 @@ def parse_issue_type_directory(source: str | Path) -> IssueTypeDirectory:
     types_raw = data.get("types", {})
     if not isinstance(types_raw, dict):
         raise ParseError(
-            f"Issue type directory `types` must be an object "
-            f"(got {type(types_raw).__name__})."
+            f"Issue type directory `types` must be an object (got {type(types_raw).__name__})."
         )
 
     directory = IssueTypeDirectory(source_path=source_path)
@@ -91,8 +90,7 @@ def parse_issue_type_directory(source: str | Path) -> IssueTypeDirectory:
             raise ParseError(f"Issue type id must be a non-empty string (got {type_id!r}).")
         if not isinstance(entry, dict):
             raise ParseError(
-                f"Issue type {type_id!r}: entry must be an object "
-                f"(got {type(entry).__name__})."
+                f"Issue type {type_id!r}: entry must be an object (got {type(entry).__name__})."
             )
         directory.types[type_id] = _parse_type(type_id, entry)
 
