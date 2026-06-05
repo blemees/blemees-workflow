@@ -33,7 +33,7 @@ class ReversibilityClass(Enum):
     REVERSIBLE_SLOW = "reversible-slow"
 
 
-class TerminalTaxonomy(Enum):
+class ClosureTaxonomy(Enum):
     """Per state-machine-principles.md principle 8.
 
     Every terminal state must carry one of these tags. A terminal without a tag
@@ -215,6 +215,20 @@ class Collects:
 
 
 @dataclass(frozen=True)
+class Closes:
+    """Closing annotation on a resting state (per ADR-0002).
+
+    Presence of `closes` makes a resting state a closing state — a sink that
+    closes the tracker's issue on entry. `taxonomy` tags the outcome (per
+    principle 8) and `reason` is the backend close reason (GitHub:
+    "completed" / "not planned"). Replaces the former `terminal` state class.
+    """
+
+    taxonomy: ClosureTaxonomy
+    reason: str
+
+
+@dataclass(frozen=True)
 class State:
     """A node on the workflow diagram.
 
@@ -244,7 +258,7 @@ class State:
     name: str
     state_class: StateClass
     reversibility: ReversibilityClass | None = None
-    terminal_taxonomy: TerminalTaxonomy | None = None
+    terminal_taxonomy: ClosureTaxonomy | None = None
     roles: tuple[str, ...] = ()
     issue_types: tuple[str, ...] = ()
     # Handover contract — `handoff: true` on a resting state declares it as
@@ -289,11 +303,16 @@ class State:
     # and working states. Cross-process handoffs that keep the same issue
     # open use shared resting states, not terminals.
     close_reason: str | None = None
+    # Closing annotation (ADR-0002). When set, this resting state is a sink
+    # that closes the issue on entry; see `Closes` and `is_closing`.
+    closes: Closes | None = None
     notes: list[str] = field(default_factory=list, hash=False, compare=False)
 
     @property
-    def is_terminal(self) -> bool:
-        return self.state_class is StateClass.TERMINAL
+    def is_closing(self) -> bool:
+        # During the terminal→closes migration both forms are recognised;
+        # after the cutover only `closes` remains.
+        return self.closes is not None or self.state_class is StateClass.TERMINAL
 
     @property
     def is_irreversible(self) -> bool:

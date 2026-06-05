@@ -10,7 +10,7 @@ import pytest
 from workflow.core.model.state_machine import (
     ReversibilityClass,
     StateClass,
-    TerminalTaxonomy,
+    ClosureTaxonomy,
     TransitionType,
 )
 from workflow.core.parser.state_machine import parse_state_machine
@@ -53,11 +53,59 @@ def test_parses_minimal_workflow() -> None:
     assert workflow.states["b"].state_class is StateClass.WORKING
     assert workflow.states["b"].roles == ("product-manager",)
     assert workflow.states["c"].state_class is StateClass.TERMINAL
-    assert workflow.states["c"].terminal_taxonomy is TerminalTaxonomy.SHIPPED
+    assert workflow.states["c"].terminal_taxonomy is ClosureTaxonomy.SHIPPED
     assert workflow.states["a"].is_initial is True
     assert workflow.states["a"].initial_label == "in"
     assert len(workflow.transitions) == 2
     assert workflow.transitions[0].transition_type is TransitionType.CLAIM
+
+
+def test_parses_closing_state() -> None:
+    """A resting state with `closes: {taxonomy, reason}` is a closing state:
+    `is_closing` is true, the taxonomy/reason are exposed, and (unlike an
+    ordinary resting state) it does not require `issue_types`."""
+    spec = _minimal()
+    spec["states"]["c"] = {
+        "class": "resting",
+        "reversibility": "reversible-fast",
+        "closes": {"taxonomy": "shipped", "reason": "completed"},
+    }
+    workflow = parse_state_machine(json.dumps(spec))
+    c = workflow.states["c"]
+    assert c.state_class is StateClass.RESTING
+    assert c.is_closing is True
+    assert c.closes is not None
+    assert c.closes.taxonomy is ClosureTaxonomy.SHIPPED
+    assert c.closes.reason == "completed"
+
+
+def test_closes_requires_taxonomy() -> None:
+    spec = _minimal()
+    spec["states"]["c"] = {
+        "class": "resting",
+        "reversibility": "reversible-fast",
+        "closes": {"reason": "completed"},
+    }
+    with pytest.raises(ParseError, match="closes.taxonomy"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_closes_requires_reason() -> None:
+    spec = _minimal()
+    spec["states"]["c"] = {
+        "class": "resting",
+        "reversibility": "reversible-fast",
+        "closes": {"taxonomy": "shipped"},
+    }
+    with pytest.raises(ParseError, match="closes.reason"):
+        parse_state_machine(json.dumps(spec))
+
+
+def test_closes_forbidden_on_working_state() -> None:
+    spec = _minimal()
+    spec["states"]["b"]["closes"] = {"taxonomy": "shipped", "reason": "completed"}
+    with pytest.raises(ParseError, match="only valid on resting"):
+        parse_state_machine(json.dumps(spec))
 
 
 def test_terminal_requires_taxonomy() -> None:

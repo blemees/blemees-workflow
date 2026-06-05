@@ -11,7 +11,7 @@ from workflow.core.model.state_machine import (
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
+    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -36,7 +36,7 @@ def _build() -> tuple[StateMachine, HumanGateCatalog]:
             name="wont_fix",
             state_class=StateClass.TERMINAL,
             reversibility=ReversibilityClass.REVERSIBLE_FAST,
-            terminal_taxonomy=TerminalTaxonomy.ABANDONED,
+            terminal_taxonomy=ClosureTaxonomy.ABANDONED,
         ),
     }
     sm.transitions = [
@@ -107,7 +107,7 @@ def test_available_transitions_from_working_returns_hitl_actions() -> None:
 
     wont = by_dest["wont_fix"]
     assert wont.default_level is HumanGateLevel.AUDIT
-    assert wont.destination_terminal_taxonomy is TerminalTaxonomy.ABANDONED
+    assert wont.destination_terminal_taxonomy is ClosureTaxonomy.ABANDONED
 
 
 def test_trust_grant_relaxes_effective_level() -> None:

@@ -17,7 +17,7 @@ from workflow.core.model.state_machine import (
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
+    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -219,7 +219,7 @@ def test_terminal_advance_closes_issue_as_completed() -> None:
     workflow.states["merged"] = State(
         name="merged",
         state_class=StateClass.TERMINAL,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
     )
     state = IssueState(
@@ -252,7 +252,7 @@ def test_terminal_without_close_reason_does_not_close_issue() -> None:
     workflow.states["bounced"] = State(
         name="bounced",
         state_class=StateClass.TERMINAL,
-        terminal_taxonomy=TerminalTaxonomy.SUPERSEDED,
+        terminal_taxonomy=ClosureTaxonomy.SUPERSEDED,
         # No close_reason — handoff terminal, issue stays open.
     )
     state = IssueState(
@@ -282,7 +282,7 @@ def test_abandoned_terminal_closes_as_not_planned() -> None:
     workflow.states["wont"] = State(
         name="wont",
         state_class=StateClass.TERMINAL,
-        terminal_taxonomy=TerminalTaxonomy.ABANDONED,
+        terminal_taxonomy=ClosureTaxonomy.ABANDONED,
         close_reason="not planned",
     )
     state = IssueState(

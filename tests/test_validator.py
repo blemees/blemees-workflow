@@ -12,7 +12,7 @@ from workflow.core.model.state_machine import (
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
+    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -307,7 +307,7 @@ def _source_workflow_with_terminal_staged() -> StateMachine:
         name="staged",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
     )
     return sm
@@ -376,7 +376,7 @@ def test_entry_with_collects_on_same_state_errors() -> None:
         name="staged",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
     )
     findings = validate_state_machine(
@@ -554,8 +554,8 @@ def test_resting_spawn_cannot_advance_into_working() -> None:
             name="done",
             state_class=StateClass.TERMINAL,
             terminal_taxonomy=__import__(
-                "workflow.core.model.state_machine", fromlist=["TerminalTaxonomy"]
-            ).TerminalTaxonomy.SHIPPED,
+                "workflow.core.model.state_machine", fromlist=["ClosureTaxonomy"]
+            ).ClosureTaxonomy.SHIPPED,
             close_reason="completed",
         ),
     }

@@ -19,7 +19,7 @@ from workflow.core.model.state_machine import (
     ReversibilityClass,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
+    ClosureTaxonomy,
     TransitionType,
 )
 from workflow.core.model.trust_grant import TrustGrant
@@ -50,7 +50,7 @@ class AvailableTransition:
     # Destination state info (None when destination is `[*]`)
     destination_state_class: StateClass | None = None
     destination_reversibility: ReversibilityClass | None = None
-    destination_terminal_taxonomy: TerminalTaxonomy | None = None
+    destination_terminal_taxonomy: ClosureTaxonomy | None = None
     # Roles permitted to occupy the destination state. Empty when the
     # destination is unrestricted, isn't a working state, or is `[*]`.
     destination_roles: tuple[str, ...] = ()

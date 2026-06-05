@@ -21,7 +21,7 @@ from workflow.core.model.state_machine import (
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
+    ClosureTaxonomy,
 )
 
 
@@ -135,7 +135,7 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
         name="mitigated",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
     )
 
@@ -155,7 +155,7 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
         name="shipped",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
     )
 
@@ -177,7 +177,7 @@ def _build_release_chain() -> tuple[_MockBackend, _MockRegistry]:
         name="released",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
     )
 
@@ -281,7 +281,7 @@ def test_cascade_collect_advance_propagates_to_contributors():
         name="released",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
         collects=Collects(
             process="inner-loop",
@@ -362,7 +362,7 @@ def test_cascade_multi_hop_chain():
         name="released",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_SLOW,
-        terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+        terminal_taxonomy=ClosureTaxonomy.SHIPPED,
         close_reason="completed",
         collects=Collects(
             process="inner-loop",
@@ -461,7 +461,7 @@ def test_cascade_cycle_guard_visits_state_pair_once():
         name="done_c",
         state_class=StateClass.TERMINAL,
         reversibility=ReversibilityClass.REVERSIBLE_FAST,
-        terminal_taxonomy=TerminalTaxonomy.RESOLVED,
+        terminal_taxonomy=ClosureTaxonomy.RESOLVED,
         close_reason="completed",
     )
 
@@ -542,7 +542,7 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
         kid_sm.states[terminal_name] = State(
             name=terminal_name,
             state_class=StateClass.TERMINAL,
-            terminal_taxonomy=TerminalTaxonomy.SHIPPED,
+            terminal_taxonomy=ClosureTaxonomy.SHIPPED,
             close_reason="completed",
         )
 

@@ -108,6 +108,7 @@ from pathlib import Path
 from typing import Any
 
 from workflow.core.model.state_machine import (
+    Closes,
     CollectAdvanceRule,
     Collects,
     ReversibilityClass,
@@ -115,7 +116,7 @@ from workflow.core.model.state_machine import (
     State,
     StateClass,
     StateMachine,
-    TerminalTaxonomy,
+    ClosureTaxonomy,
     Transition,
     TransitionType,
 )
@@ -136,7 +137,7 @@ _REVERSIBILITY = {
     "reversible-slow": ReversibilityClass.REVERSIBLE_SLOW,
 }
 
-_TERMINAL_TAX = {tax.value: tax for tax in TerminalTaxonomy}
+_TERMINAL_TAX = {tax.value: tax for tax in ClosureTaxonomy}
 
 _TRANSITION_TYPE = {
     "claim": TransitionType.CLAIM,
@@ -309,7 +310,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"{sorted(_REVERSIBILITY.keys())})."
         )
 
-    terminal_taxonomy: TerminalTaxonomy | None = None
+    terminal_taxonomy: ClosureTaxonomy | None = None
     tax_raw = spec.get("terminal_taxonomy")
     if tax_raw is not None:
         if not isinstance(tax_raw, str) or tax_raw not in _TERMINAL_TAX:
@@ -369,6 +370,8 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         )
     roles = tuple(roles_parsed)
 
+    closes = _parse_closes(state_id, state_class, spec.get("closes"))
+
     state_issue_types_raw = spec.get("issue_types", [])
     if not isinstance(state_issue_types_raw, list):
         raise ParseError(
@@ -398,7 +401,14 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
             f"State {state_id!r}: `issue_types` is required on working "
             f"states (declare which issue types this state accepts)."
         )
-    if state_class is StateClass.RESTING and not state_issue_types_parsed:
+    if (
+        state_class is StateClass.RESTING
+        and not state_issue_types_parsed
+        and closes is None
+    ):
+        # Closing states (resting + `closes`) hold nothing, so they're exempt
+        # from the resting `issue_types` requirement; the validator enforces
+        # that `closes` and `issue_types` are mutually exclusive.
         raise ParseError(
             f"State {state_id!r}: `issue_types` is required on resting "
             f"states (declare which issue types may sit in this state). "
@@ -514,6 +524,7 @@ def _parse_state(state_id: str, spec: dict[str, Any]) -> State:
         collects=collects,
         mark_pr_ready=mark_pr_ready_raw,
         human_inputs=tuple(human_inputs_parsed),
+        closes=closes,
         notes=notes,
     )
 
@@ -836,6 +847,44 @@ def _parse_collects(
         advance_on=tuple(advance_on),
         release_on=tuple(release_on),
     )
+
+
+def _parse_closes(
+    state_id: str, state_class: StateClass, raw: Any
+) -> Closes | None:
+    """Parse the optional `closes` annotation (ADR-0002).
+
+    Shape: `{ "taxonomy": <closure tag>, "reason": <close reason> }`. Only
+    valid on resting states — a closing state is an unowned sink, so it can't
+    be a working state. Mutual exclusion with `is_initial` / `collects` /
+    `handoff` / `issue_types` is enforced by the validator.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ParseError(
+            f"State {state_id!r}: `closes` must be an object "
+            f"`{{taxonomy, reason}}` (got {type(raw).__name__})."
+        )
+    if state_class is not StateClass.RESTING:
+        raise ParseError(
+            f"State {state_id!r}: `closes` is only valid on resting states "
+            f"(state class is {state_class.value!r}); a closing state is an "
+            f"unowned sink."
+        )
+    tax_raw = raw.get("taxonomy")
+    if not isinstance(tax_raw, str) or tax_raw not in _TERMINAL_TAX:
+        raise ParseError(
+            f"State {state_id!r}: `closes.taxonomy` must be one of "
+            f"{sorted(_TERMINAL_TAX.keys())} (got {tax_raw!r})."
+        )
+    reason_raw = raw.get("reason")
+    if not isinstance(reason_raw, str) or not reason_raw.strip():
+        raise ParseError(
+            f"State {state_id!r}: `closes.reason` is required and must be a "
+            f"non-empty string (for GitHub, 'completed' or 'not planned')."
+        )
+    return Closes(taxonomy=_TERMINAL_TAX[tax_raw], reason=reason_raw.strip())
 
 
 def _parse_initial(

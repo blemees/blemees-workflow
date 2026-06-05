@@ -1047,7 +1047,7 @@ def _section_cross_process(
     # `spawn.advance_on`) continue work in the parent, so they're excluded.
     feedback_terminals = {row.child_terminal for row in outbound_feedback or ()}
     for s in sm.states.values():
-        if not s.is_terminal:
+        if not s.is_closing:
             continue
         if s.name in feedback_terminals or s.spawns or s.handoff:
             continue
