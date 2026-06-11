@@ -1376,7 +1376,12 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
             issue_id=args.issue,
             destination=args.destination,
             body_text=_resolve_body(args),
-            actor=context.agent_role,
+            # CLAIM-crossing advances need the acting role (#11): explicit
+            # flag/env wins (same normalization as _resolve_agent_role),
+            # else the context's already-loaded agent-config role — no
+            # second config read.
+            actor=(str(ctx["agent_role"]).strip("{}").strip() if ctx.get("agent_role") else None)
+            or context.agent_role,
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
 
