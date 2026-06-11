@@ -130,11 +130,16 @@ def test_plan_advance() -> None:
             operation=Operation.ADVANCE_ISSUE,
             issue_id="1",
             destination="refining",
+            actor="product-manager",
         ),
         state,
         workflow,
     )
     assert plan.change.set_state == "refining"
+    # raw → refining is a CLAIM transition: advance carries claim semantics
+    # (#11) so the working state is never entered unowned.
+    assert plan.change.set_agent_claim == "product-manager"
+    assert plan.change.set_last_state == "raw"
     assert "state advance" in plan.audit_comment
 
 
@@ -767,6 +772,7 @@ def test_plan_resolve(tmp_path: Path) -> None:
                     operation=Operation.ADVANCE_ISSUE,
                     issue_id="1",
                     destination="refining",
+                    actor="product-manager",
                 ),
                 IssueState(issue_id="1", state="raw", agent_claim="product-manager"),
             ),
@@ -866,15 +872,20 @@ def test_advance_on_ungated_transition_changes_state() -> None:
             operation=Operation.ADVANCE_ISSUE,
             issue_id="1",
             destination="refining",
+            actor="product-manager",
         ),
         state,
         workflow,
         catalog,
     )
 
-    # No HumanGate — the planner returns a straightforward advance.
+    # No HumanGate — the planner returns a straightforward advance. raw →
+    # refining is a CLAIM transition, so the advance carries claim semantics
+    # (#11): ownership + origin marker, never an unowned working state.
     assert plan.operation is Operation.ADVANCE_ISSUE
     assert plan.change.set_state == "refining"
+    assert plan.change.set_agent_claim == "product-manager"
+    assert plan.change.set_last_state == "raw"
     assert plan.change.set_awaiting_gate is None
 
 
@@ -1163,4 +1174,21 @@ def test_advance_to_gated_destination_requires_role_match() -> None:
             state,
             workflow,
             catalog,
+        )
+
+
+def test_advance_over_claim_without_actor_errors() -> None:
+    # Entering a working state without an owner is the #11 bug — the planner
+    # must refuse rather than produce an unowned working state.
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="raw", agent_claim=None)
+    with pytest.raises(OperationError, match="acting role"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.ADVANCE_ISSUE,
+                issue_id="1",
+                destination="refining",
+            ),
+            state,
+            workflow,
         )

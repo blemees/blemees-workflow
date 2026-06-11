@@ -308,7 +308,17 @@ def _plan_advance(
         # Ungated direct advance. If it's a claim transition, validate the
         # actor's role and the issue's type against the destination working
         # state's `roles` / `issue_types`.
-        if transition.transition_type is TransitionType.CLAIM:
+        is_claim = transition.transition_type is TransitionType.CLAIM
+        if is_claim:
+            # Advancing over a CLAIM transition behaves exactly like a claim
+            # (#11): the issue enters a working state, so per principle 1 it
+            # must leave with exactly one owning role and an origin marker —
+            # otherwise a later release fails with "no last-state marker".
+            if not request.actor:
+                raise OperationError(
+                    "Advancing over a claim transition requires an acting role "
+                    "(pass the agent role, or use claim-issue)."
+                )
             dest_state = state_machine.states.get(transition.destination)
             if dest_state is not None:
                 if dest_state.roles:
@@ -338,6 +348,9 @@ def _plan_advance(
             set_awaiting_input=False,
             clear_agent_claim=leaving_working,
             clear_last_state=leaving_working,
+            # Claim semantics for CLAIM transitions (#11): ownership + origin.
+            set_agent_claim=request.actor if is_claim else None,
+            set_last_state=transition.source if is_claim else None,
             close_issue=close,
             close_reason=reason,
             set_pr_ready=bool(dest and dest.mark_pr_ready),
