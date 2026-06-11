@@ -319,6 +319,11 @@ def _plan_advance(
                     "Advancing over a claim transition requires an acting role "
                     "(pass the agent role, or use claim-issue)."
                 )
+            if state.agent_claim and state.agent_claim != request.actor:
+                raise OperationError(
+                    f"Issue already claimed by {state.agent_claim!r}; "
+                    f"cannot advance-claim as {request.actor!r}."
+                )
             dest_state = state_machine.states.get(transition.destination)
             if dest_state is not None:
                 if dest_state.roles:

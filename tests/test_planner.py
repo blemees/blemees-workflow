@@ -1192,3 +1192,21 @@ def test_advance_over_claim_without_actor_errors() -> None:
             state,
             workflow,
         )
+
+
+def test_advance_over_claim_with_conflicting_claim_errors() -> None:
+    # Mirrors _plan_claim: an existing claim by a different agent must not
+    # be silently overwritten by an advance-claim (review feedback on #28).
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="raw", agent_claim="designer")
+    with pytest.raises(OperationError, match="already claimed"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.ADVANCE_ISSUE,
+                issue_id="1",
+                destination="refining",
+                actor="product-manager",
+            ),
+            state,
+            workflow,
+        )
