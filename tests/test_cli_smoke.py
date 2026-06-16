@@ -79,6 +79,10 @@ def test_advance_dry_run_does_not_call_backend(
                 "owner/test",
                 "--workflow-dir",
                 str(workflow_dir),
+                # raw → refining is a CLAIM transition: advance now carries
+                # claim semantics and requires an acting role (#11).
+                "--agent-role",
+                "product-manager",
                 "advance-issue",
                 "--to",
                 "refining",
