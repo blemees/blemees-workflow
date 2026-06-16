@@ -393,9 +393,23 @@ class Workflow:
             agent_home=self.agent_home,
         )
         self._contexts[name] = context
-        # Update state-to-workflow index.
-        for state_name in context.state_machine.states:
-            self._state_to_process.setdefault(state_name, name)
+        # Update state-to-workflow index. Duplicate state names are only
+        # allowed for explicit handoff interfaces; otherwise routing by state
+        # name is ambiguous and depends on load order.
+        for state_name, state in context.state_machine.states.items():
+            existing_name = self._state_to_process.get(state_name)
+            if existing_name is None:
+                self._state_to_process[state_name] = name
+                continue
+            existing_context = self._contexts[existing_name]
+            existing_state = existing_context.state_machine.states[state_name]
+            if not (existing_state.handoff and state.handoff):
+                raise ConfigError(
+                    f"State {state_name!r} is declared by both "
+                    f"{existing_name!r} and {name!r}. Duplicate state names "
+                    "are only allowed when every declaration is marked "
+                    "`handoff: true`."
+                )
         return context
 
     def find_process_for_state(self, state_name: str) -> str | None:

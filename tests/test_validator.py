@@ -249,6 +249,61 @@ def test_gate_with_same_source_multiple_destinations_passes() -> None:
     assert not any("multiple source states" in f.message for f in findings)
 
 
+def test_duplicate_non_handoff_state_names_error() -> None:
+    first = StateMachine(name="first")
+    first.states["shared"] = State(
+        name="shared",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+    )
+    second = StateMachine(name="second")
+    second.states["shared"] = State(
+        name="shared",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        handoff=True,
+    )
+
+    findings = validate_state_machine(
+        first,
+        catalog=None,
+        sibling_machines={"first": first, "second": second},
+    )
+
+    assert any(
+        f.severity is Severity.ERROR
+        and "State name 'shared' is declared by multiple processes" in f.message
+        and "handoff: true" in f.message
+        for f in findings
+    )
+
+
+def test_duplicate_handoff_state_names_pass() -> None:
+    first = StateMachine(name="first")
+    first.states["shared"] = State(
+        name="shared",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        handoff=True,
+    )
+    second = StateMachine(name="second")
+    second.states["shared"] = State(
+        name="shared",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        handoff=True,
+    )
+
+    findings = validate_state_machine(
+        first,
+        catalog=None,
+        sibling_machines={"first": first, "second": second},
+        handoff_index={"shared": {"first", "second"}},
+    )
+
+    assert not any("declared by multiple processes" in f.message for f in findings)
+
+
 def test_audit_with_irreversible_destination_errors() -> None:
     """Audit-default-level on a gate that lands on an irreversible state.
     Reversibility is derived from the destination state via the gated

@@ -760,6 +760,64 @@ def test_registry_find_workflow_for_state(workflow_dir) -> None:
     assert found == "refinement", f"expected refinement, got {found!r}"
 
 
+def test_registry_rejects_non_handoff_state_name_collision(tmp_path) -> None:
+    from workflow.config import build_registry
+    from workflow.errors import ConfigError
+
+    workflow_a = {
+        "states": {
+            "shared": {
+                "class": "resting",
+                "reversibility": "reversible-fast",
+                "issue_types": ["bug"],
+            },
+            "working_a": {
+                "class": "working",
+                "roles": ["developer"],
+                "issue_types": ["bug"],
+            },
+        },
+        "transitions": [
+            {
+                "source": "shared",
+                "destination": "working_a",
+                "type": "claim",
+                "label": "developer claims shared",
+            }
+        ],
+    }
+    workflow_b = {
+        "states": {
+            "shared": {
+                "class": "resting",
+                "reversibility": "reversible-fast",
+                "issue_types": ["bug"],
+            },
+            "working_b": {
+                "class": "working",
+                "roles": ["developer"],
+                "issue_types": ["bug"],
+            },
+        },
+        "transitions": [
+            {
+                "source": "shared",
+                "destination": "working_b",
+                "type": "claim",
+                "label": "developer claims shared",
+            }
+        ],
+    }
+    (tmp_path / "a-states.json").write_text(json.dumps(workflow_a), encoding="utf-8")
+    (tmp_path / "b-states.json").write_text(json.dumps(workflow_b), encoding="utf-8")
+
+    registry = build_registry(workflow_dir=tmp_path)
+    assert registry is not None
+    registry.get_process("a")
+    with pytest.raises(ConfigError, match="Duplicate state names|Duplicate state name|declared by both"):
+        registry.get_process("b")
+
+
 def test_discover_workflows_dir_uses_agent_home(tmp_path) -> None:
     """Discovery returns `<agent-home>/.workflow/workflows/` when it exists."""
     from workflow.config import discover_workflows_dir

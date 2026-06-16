@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from workflow.backends.base import IssueState, MarkerChange, TrackerBackend
+from workflow.core.model.state_machine import StateMachine
 from workflow.errors import BackendError
 
 if TYPE_CHECKING:
@@ -56,6 +57,21 @@ class CascadeApplication:
     affected_issue: str
     from_state: str | None
     to_state: str | None
+
+
+def _destination_lifecycle_change(
+    state_machine: StateMachine,
+    destination: str | None,
+) -> tuple[bool, str | None, bool]:
+    """Return tracker lifecycle effects for an auto-advance destination."""
+    if destination is None or destination == "[*]":
+        return False, None, False
+    state = state_machine.states.get(destination)
+    if state is None:
+        return False, None, False
+    close_issue = state.closes is not None
+    close_reason = state.closes.reason if state.closes is not None else None
+    return close_issue, close_reason, state.mark_pr_ready
 
 
 def cascade_after_state_change(
@@ -217,10 +233,17 @@ def _apply_spawn_parent_cascade(
     if target_state is None:
         return None
 
+    close_issue, close_reason, set_pr_ready = _destination_lifecycle_change(
+        parent_process.state_machine,
+        target_state,
+    )
     change = MarkerChange(
         set_state=target_state,
         clear_agent_claim=parent_state.agent_claim is not None,
         clear_last_state=parent_state.last_state is not None,
+        close_issue=close_issue,
+        close_reason=close_reason,
+        set_pr_ready=set_pr_ready,
     )
     audit = (
         f"## cascade: spawn-parent advance\n\n"
@@ -318,9 +341,32 @@ def _apply_collector_cascade(
         if matching_rule is not None:
             contributor_target = matching_rule.target_for(contributor.issue_type)
         if contributor_target is not None:
+            contributor_process_name = registry.find_process_for_state(contributor_target)
+            if contributor_process_name is not None:
+                try:
+                    contributor_process = registry.get_process(contributor_process_name)
+                except Exception as exc:  # pragma: no cover
+                    logger.warning(
+                        "cascade: cannot load contributor process %s: %s",
+                        contributor_process_name,
+                        exc,
+                    )
+                    contributor_process = None
+            else:
+                contributor_process = None
+            if contributor_process is None:
+                close_issue, close_reason, set_pr_ready = False, None, False
+            else:
+                close_issue, close_reason, set_pr_ready = _destination_lifecycle_change(
+                    contributor_process.state_machine,
+                    contributor_target,
+                )
             change = MarkerChange(
                 set_state=contributor_target,
                 clear_collected_by=True,
+                close_issue=close_issue,
+                close_reason=close_reason,
+                set_pr_ready=set_pr_ready,
             )
             audit = (
                 f"## cascade: collector advance\n\n"

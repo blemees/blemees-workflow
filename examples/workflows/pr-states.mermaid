@@ -1,16 +1,16 @@
 stateDiagram-v2
     direction TB
-    draft --> drafting: developer claims draft
-    drafting --> needs_review: developer marks PR ready for review
+    draft --> drafting_pr: developer claims draft
+    drafting_pr --> needs_review: developer marks PR ready for review
     needs_review --> reviewing: reviewer claims PR
     reviewing --> needs_qa: reviewer approves PR
     reviewing --> qa_passed: reviewer approves hotfix PR (QA skipped, IC discretion)
     reviewing --> changes_requested: reviewer requests changes
     changes_requested --> fixing_review: developer claims PR for fixes
     fixing_review --> needs_review: developer re-requests review
-    needs_qa --> verifying: QA claims PR
-    verifying --> qa_passed: QA posts pass verdict
-    verifying --> qa_failed: QA posts fail verdict
+    needs_qa --> verifying_pr: QA claims PR
+    verifying_pr --> qa_passed: QA posts pass verdict
+    verifying_pr --> qa_failed: QA posts fail verdict
     qa_failed --> fixing_qa: developer claims PR for fixes
     fixing_qa --> needs_review: developer re-requests review
     qa_passed --> merging: developer claims and merges

@@ -33,6 +33,8 @@ class _MockBackend:
     name: str = "mock"
     issues: dict[str, IssueState] = field(default_factory=dict)
     audit_log: list[tuple[str, str]] = field(default_factory=list)  # (issue, audit)
+    closed: list[tuple[str, str | None]] = field(default_factory=list)
+    pr_ready: list[str] = field(default_factory=list)
 
     def read_issue(self, issue_id: str) -> IssueState:
         if issue_id not in self.issues:
@@ -60,6 +62,10 @@ class _MockBackend:
         self.issues[issue_id] = new
         if audit_comment:
             self.audit_log.append((issue_id, audit_comment))
+        if change.close_issue:
+            self.closed.append((issue_id, change.close_reason))
+        if change.set_pr_ready:
+            self.pr_ready.append(issue_id)
 
     # Unused by cascade but part of the protocol.
     def list_issues(self, filters: IssueFilters) -> list[IssueState]:  # pragma: no cover
@@ -412,6 +418,49 @@ def test_cascade_multi_hop_chain():
     assert backend.issues["IL-4"].collected_by is None
     assert backend.issues["MIT-2"].state == "mitigated"
     assert backend.issues["INC-2"].state == "needs_verification"
+    assert ("IL-4", "completed") in backend.closed
+    assert ("MIT-2", "completed") in backend.closed
+
+
+def test_cascade_auto_advance_sets_pr_ready_for_destination():
+    backend, registry = _build_release_chain()
+    shipped = registry.processes_by_name["inner-loop"].state_machine.states["shipped"]
+    registry.processes_by_name["inner-loop"].state_machine.states["shipped"] = State(
+        name="shipped",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
+        closes=shipped.closes,
+        mark_pr_ready=True,
+    )
+    registry.processes_by_name["release"].state_machine.states["released"] = State(
+        name="released",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_SLOW,
+        collects=Collects(
+            process="inner-loop",
+            from_states=("staged",),
+            advance_on=(CollectAdvanceRule(collector_state="released", default_target="shipped"),),
+        ),
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    )
+    backend.issues["REL-READY"] = IssueState(
+        issue_id="REL-READY",
+        state="released",
+        agent_claim=None,
+        collects_contributors=("PR-1",),
+    )
+    backend.issues["PR-1"] = IssueState(
+        issue_id="PR-1",
+        state="staged",
+        agent_claim=None,
+        collected_by="REL-READY",
+    )
+
+    cascade_after_state_change(registry, backend, "REL-READY", backend.issues["REL-READY"])
+
+    assert backend.issues["PR-1"].state == "shipped"
+    assert ("PR-1", "completed") in backend.closed
+    assert backend.pr_ready == ["PR-1"]
 
 
 def test_cascade_cycle_guard_visits_state_pair_once():

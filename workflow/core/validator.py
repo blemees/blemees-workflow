@@ -81,6 +81,7 @@ def validate_state_machine(
     if handoff_index is not None:
         findings.extend(_check_handoffs_have_partners(state_machine, handoff_index))
     if sibling_machines is not None:
+        findings.extend(_check_duplicate_state_names(state_machine, sibling_machines))
         findings.extend(_check_spawns(state_machine, sibling_machines))
         findings.extend(_check_collects(state_machine, sibling_machines))
         findings.extend(_check_entry_not_also_target(state_machine, sibling_machines))
@@ -712,6 +713,51 @@ def _check_handoffs_have_partners(
                     location=state_machine.source_path,
                 )
             )
+    return findings
+
+
+def _check_duplicate_state_names(
+    state_machine: StateMachine,
+    sibling_machines: dict[str, StateMachine],
+) -> list[ValidationFinding]:
+    """State-name routing requires non-handoff state names to be unique.
+
+    A shared state name is allowed only when every process declaring it marks
+    that state as `handoff: true`; that makes the duplicate an explicit
+    cross-process interface instead of an accidental routing collision.
+    """
+    findings: list[ValidationFinding] = []
+    states_by_name: dict[str, list[tuple[str, bool]]] = {}
+    for process_name, machine in sibling_machines.items():
+        for state in machine.states.values():
+            states_by_name.setdefault(state.name, []).append((process_name, state.handoff))
+
+    emitted: set[str] = set()
+    for state_name, declarations in states_by_name.items():
+        if len(declarations) < 2 or state_name not in state_machine.states:
+            continue
+        if all(is_handoff for _process_name, is_handoff in declarations):
+            continue
+        if state_name in emitted:
+            continue
+        emitted.add(state_name)
+        non_handoff = sorted(
+            process_name for process_name, is_handoff in declarations if not is_handoff
+        )
+        all_processes = sorted(process_name for process_name, _is_handoff in declarations)
+        findings.append(
+            ValidationFinding(
+                severity=Severity.ERROR,
+                principle_cite="state-machine-principles.md#9",
+                message=(
+                    f"State name {state_name!r} is declared by multiple processes "
+                    f"{all_processes}, but not every declaration is `handoff: true` "
+                    f"(non-handoff: {non_handoff}). State-name routing is only "
+                    "unambiguous for unique state names or explicit handoff interfaces."
+                ),
+                location=state_machine.source_path,
+            )
+        )
     return findings
 
 

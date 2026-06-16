@@ -13,17 +13,17 @@ The pull-request lifecycle: draft → review → merged. Spawned from inner-loop
 ```mermaid
 stateDiagram-v2
     direction TB
-    draft --> drafting: developer claims draft
-    drafting --> needs_review: developer marks PR ready for review
+    draft --> drafting_pr: developer claims draft
+    drafting_pr --> needs_review: developer marks PR ready for review
     needs_review --> reviewing: reviewer claims PR
     reviewing --> needs_qa: reviewer approves PR
     reviewing --> qa_passed: reviewer approves hotfix PR (QA skipped, IC discretion)
     reviewing --> changes_requested: reviewer requests changes
     changes_requested --> fixing_review: developer claims PR for fixes
     fixing_review --> needs_review: developer re-requests review
-    needs_qa --> verifying: QA claims PR
-    verifying --> qa_passed: QA posts pass verdict
-    verifying --> qa_failed: QA posts fail verdict
+    needs_qa --> verifying_pr: QA claims PR
+    verifying_pr --> qa_passed: QA posts pass verdict
+    verifying_pr --> qa_failed: QA posts fail verdict
     qa_failed --> fixing_qa: developer claims PR for fixes
     fixing_qa --> needs_review: developer re-requests review
     qa_passed --> merging: developer claims and merges
@@ -38,13 +38,13 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `draft` | resting | reversible-fast | — | pr | — | — | — |
-| `drafting` | working | — | developer | pr | clarify-scope, general | — | — |
+| `drafting_pr` | working | — | developer | pr | clarify-scope, general | — | — |
 | `needs_review` | resting | reversible-fast | — | pr | — | — | — |
 | `reviewing` | working | — | peer-reviewer | pr | clarify-scope, needs-arch-review, needs-security-review, general | — | — |
 | `changes_requested` | resting | reversible-fast | — | pr | — | — | — |
 | `fixing_review` | working | — | developer | pr | clarify-scope, needs-arch-review, needs-security-review, general | — | — |
 | `needs_qa` | resting | reversible-fast | — | pr | — | — | — |
-| `verifying` | working | — | tester | pr | clarify-scope, blocked-on-data, general | — | — |
+| `verifying_pr` | working | — | tester | pr | clarify-scope, blocked-on-data, general | — | — |
 | `qa_passed` | resting | reversible-fast | — | pr | — | — | — |
 | `qa_failed` | resting | reversible-fast | — | pr | — | — | — |
 | `fixing_qa` | working | — | developer | pr | clarify-scope, blocked-on-data, general | — | — |
@@ -55,17 +55,17 @@ stateDiagram-v2
 
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
-| `draft` | `drafting` | claim | 'developer claims draft' | — | — |
-| `drafting` | `needs_review` | advance | 'developer marks PR ready for review' | — | — |
+| `draft` | `drafting_pr` | claim | 'developer claims draft' | — | — |
+| `drafting_pr` | `needs_review` | advance | 'developer marks PR ready for review' | — | — |
 | `needs_review` | `reviewing` | claim | 'reviewer claims PR' | — | — |
 | `reviewing` | `needs_qa` | advance | 'reviewer approves PR' | — | — |
 | `reviewing` | `qa_passed` | advance | 'reviewer approves hotfix PR (QA skipped, IC discretion)' | — | — |
 | `reviewing` | `changes_requested` | advance | 'reviewer requests changes' | — | — |
 | `changes_requested` | `fixing_review` | claim | 'developer claims PR for fixes' | — | — |
 | `fixing_review` | `needs_review` | advance | 'developer re-requests review' | — | — |
-| `needs_qa` | `verifying` | claim | 'QA claims PR' | — | — |
-| `verifying` | `qa_passed` | advance | 'QA posts pass verdict' | — | — |
-| `verifying` | `qa_failed` | advance | 'QA posts fail verdict' | — | — |
+| `needs_qa` | `verifying_pr` | claim | 'QA claims PR' | — | — |
+| `verifying_pr` | `qa_passed` | advance | 'QA posts pass verdict' | — | — |
+| `verifying_pr` | `qa_failed` | advance | 'QA posts fail verdict' | — | — |
 | `qa_failed` | `fixing_qa` | claim | 'developer claims PR for fixes' | — | — |
 | `fixing_qa` | `needs_review` | advance | 'developer re-requests review' | — | — |
 | `qa_passed` | `merging` | claim | 'developer claims and merges' | — | — |

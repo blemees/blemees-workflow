@@ -19,7 +19,7 @@ tests; everything else is open.
 
 ## 1. Critical — engine correctness
 
-- **State-name routing is unvalidated and broken by the shipped examples.**
+- **State-name routing is unvalidated and broken by the shipped examples.** **[fixed]**
   `Workflow.find_process_for_state` (workflow/config.py:398-401) resolves duplicate state
   names to whichever process loads first (alphabetical). The framework invariant
   ("state-name uniqueness") has no validator rule, and the examples violate it for
@@ -28,14 +28,14 @@ tests; everything else is open.
   a state name in ≥2 processes must be `handoff: true` in all; registry raises on
   non-handoff collisions.
 
-- **Cascade auto-advance into a closing state never closes the tracker issue.**
+- **Cascade auto-advance into a closing state never closes the tracker issue.** **[fixed]**
   workflow/core/cascade.py:220-224 and :321-324 build `MarkerChange(set_state=...)` without
   `close_issue`/`close_reason` (and without `set_pr_ready`), unlike every planner path
   (`_closing_close_info`, planner.py:155). Violates ADR-0002: contributor gets
   `state:shipped` but the GitHub issue stays open. Fix: share the planner's close-info
   helper in cascade.
 
-- **Parent auto-advance is implemented twice with conflicting semantics.**
+- **Parent auto-advance is implemented twice with conflicting semantics.** **[fixed]**
   `Controller.execute` runs `cascade_after_state_change` (controller.py:144-151,
   wait-for-all semantics), then `_do_advance_issue` *also* calls
   `_propagate_to_parent_on_closing` (cli.py:1386-1387, :1395-1497) which advances the

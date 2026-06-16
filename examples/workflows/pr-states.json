@@ -10,7 +10,7 @@
         "pr"
       ]
     },
-    "drafting": {
+    "drafting_pr": {
       "class": "working",
       "roles": [
         "developer"
@@ -75,7 +75,7 @@
         "pr"
       ]
     },
-    "verifying": {
+    "verifying_pr": {
       "class": "working",
       "roles": [
         "tester"
@@ -141,12 +141,12 @@
   "transitions": [
     {
       "source": "draft",
-      "destination": "drafting",
+      "destination": "drafting_pr",
       "type": "claim",
       "label": "developer claims draft"
     },
     {
-      "source": "drafting",
+      "source": "drafting_pr",
       "destination": "needs_review",
       "type": "advance",
       "label": "developer marks PR ready for review"
@@ -189,18 +189,18 @@
     },
     {
       "source": "needs_qa",
-      "destination": "verifying",
+      "destination": "verifying_pr",
       "type": "claim",
       "label": "QA claims PR"
     },
     {
-      "source": "verifying",
+      "source": "verifying_pr",
       "destination": "qa_passed",
       "type": "advance",
       "label": "QA posts pass verdict"
     },
     {
-      "source": "verifying",
+      "source": "verifying_pr",
       "destination": "qa_failed",
       "type": "advance",
       "label": "QA posts fail verdict"
