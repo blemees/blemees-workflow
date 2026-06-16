@@ -1135,7 +1135,7 @@ def _next_actions_to_dict(actions: list[Any]) -> list[dict[str, Any]]:
                 "default_level": a.default_level.value if a.default_level else None,
                 "effective_level": a.effective_level.value if a.effective_level else None,
                 "grant_relaxed": a.grant_relaxed,
-                "triggering_role": a.triggering_role,
+                "triggering_roles": list(a.triggering_roles),
                 "agent_prepares": a.agent_prepares_path,
                 "destination_class": (
                     a.destination_state_class.value if a.destination_state_class else None
@@ -1376,7 +1376,7 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
             issue_id=args.issue,
             destination=args.destination,
             body_text=_resolve_body(args),
-            actor=context.agent_role,
+            actor=_resolve_agent_role(ctx) or context.agent_role,
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
 
@@ -1561,7 +1561,8 @@ def _do_claim_issue(args: argparse.Namespace) -> int:
     try:
         context = _build_context_for_issue(ctx, args.issue)
         controller = _build_controller(context, dry_run=ctx["dry_run"])
-        if not context.agent_role:
+        role = _resolve_agent_role(ctx) or context.agent_role
+        if not role:
             raise ConfigError(
                 "claim requires --agent-role, AGENT_ROLE env, or `agent-role` "
                 "in <agent-home>/.workflow/config.json."
@@ -1569,7 +1570,7 @@ def _do_claim_issue(args: argparse.Namespace) -> int:
         result = claim_issue_op.run(
             controller,
             issue_id=args.issue,
-            role=context.agent_role,
+            role=role,
             destination=args.destination,
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
@@ -2956,6 +2957,7 @@ def _do_view_issue(args: argparse.Namespace) -> int:
     # with next-action info. Failure to resolve is non-fatal — `view` still
     # shows the raw state.
     actions: list[Any] = []
+    context = None
     try:
         context = _build_context_for_issue(ctx, args.issue)
         if state.state is not None:
@@ -3030,7 +3032,9 @@ def _do_view_issue(args: argparse.Namespace) -> int:
             actions,
             current_state=state.state,
             last_state=state.last_state,
-            human_inputs=_human_inputs_for(context.state_machine, state.state),
+            human_inputs=_human_inputs_for(
+                context.state_machine if context is not None else None, state.state
+            ),
         )
 
     if comments:

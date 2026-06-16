@@ -1,13 +1,13 @@
 # State Machine Design Principles
 
-These principles govern the design of state machine diagrams for agent workflow skills. Apply them whenever creating or editing a state diagram.
+These principles govern the design of state machine diagrams for agent workflow skills. Apply them whenever creating or editing a process definition.
 
 ---
 
 ## 1. Every state is resting or working
 
-- **Resting** — no agent is actively working. The issue is parked, waiting for someone to claim it or for an external event. These are pollable queues.
-- **Working** — an agent has claimed the issue and is actively doing something. Exactly one role owns the item in this state.
+- **Resting** — no one is actively working. The issue is parked, waiting for someone to claim it or for an external event. These are pollable queues.
+- **Working** — an agent or a person has claimed the issue and is actively doing something. Exactly one role owns the item in this state.
 
 There are no other state classes. The two classes are an *ownership* distinction: a resting state is unowned, a working state has exactly one owner. If a state doesn't fit one of these two, the diagram needs restructuring.
 

@@ -398,8 +398,8 @@ def _check_trust_grants(
                 )
             )
         if catalog is not None and gate in catalog.entries:
-            gate = catalog.entries[gate]
-            if grant.current_level not in gate.allowed_levels:
+            gate_row = catalog.entries[gate]
+            if grant.current_level not in gate_row.allowed_levels:
                 findings.append(
                     ValidationFinding(
                         severity=Severity.ERROR,
@@ -407,7 +407,7 @@ def _check_trust_grants(
                         message=(
                             f"Trust grant for {gate!r} requests level "
                             f"{grant.current_level.value!r} but HumanGate allows "
-                            f"{[lvl.value for lvl in gate.allowed_levels]}."
+                            f"{[lvl.value for lvl in gate_row.allowed_levels]}."
                         ),
                         location=grant.source_path,
                     )

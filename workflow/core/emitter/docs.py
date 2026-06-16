@@ -820,15 +820,15 @@ def _section_transitions(
         gate = t.gate_name or "—"
         level = "—"
         if t.is_gated and catalog is not None and t.gate_name and catalog.has(t.gate_name):
-            gate = catalog.get(t.gate_name)
-            effective = gate.default_level
+            gate_row = catalog.get(t.gate_name)
+            effective = gate_row.default_level
             if grants is not None:
-                grant = grants.get(gate.gate_name)
+                grant = grants.get(gate_row.gate_name)
                 if grant is not None and grant.effective_today:
                     effective = grant.current_level
             level = effective.value
-            if effective is not gate.default_level:
-                level += f" (default {gate.default_level.value})"
+            if effective is not gate_row.default_level:
+                level += f" (default {gate_row.default_level.value})"
         out.append(
             f"| `{t.source}` | `{t.destination}` | {t.transition_type.value} | "
             f"{t.label!r} | {gate} | {level} |"

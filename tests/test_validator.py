@@ -341,6 +341,60 @@ def test_expired_trust_grant_warns() -> None:
     )
 
 
+def test_audit_grant_on_irreversible_gate_errors() -> None:
+    """An audit-level trust grant on a gate whose destination is irreversible
+    is an ERROR (trust-grant-schema.md#7). Regression: a loop-variable shadow
+    (`gate` rebound from str to HumanGate) made this check unreachable."""
+    sm = StateMachine(name="t")
+    sm.states["working"] = State(name="working", state_class=StateClass.WORKING)
+    sm.states["released"] = State(
+        name="released",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.IRREVERSIBLE,
+        closes=Closes(taxonomy=ClosureTaxonomy.SHIPPED, reason="completed"),
+    )
+    sm.transitions.append(
+        Transition(
+            source="working",
+            destination="released",
+            label="agent releases",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="release_gate",
+        )
+    )
+    catalog = HumanGateCatalog(process_name="t")
+    catalog.entries["release_gate"] = HumanGate(
+        gate_name="release_gate",
+        gate_type=HumanGateType.AUTHORITY,
+        allowed_levels=[HumanGateLevel.BLOCK, HumanGateLevel.AUDIT],
+        default_level=HumanGateLevel.BLOCK,
+        agent_prepares_path="x.md",
+    )
+    grants = {
+        "release_gate": TrustGrant(
+            control_point="release_gate",
+            workflow="t",
+            team="acme",
+            current_level=HumanGateLevel.AUDIT,
+            parameters=TrustGrantParameters(cadence="daily"),
+            evidence=[Evidence(source="manual", metric="x", window="x", detail="x")],
+            granted_by="x@example.com",
+            granted_at=date.today() - timedelta(days=1),
+            expires_at=date.today() + timedelta(days=30),
+        )
+    }
+    findings = validate_state_machine(sm, catalog, grants)
+    matches = [
+        f
+        for f in findings
+        if f.severity is Severity.ERROR
+        and f.principle_cite == "trust-grant-schema.md#7"
+        and "irreversible" in f.message.lower()
+    ]
+    assert matches, "Expected an ERROR for audit-level grant on irreversible gate"
+    assert any("release_gate" in f.message for f in matches)
+
+
 def test_runtime_two_hitl_gates_errors() -> None:
     state = IssueState(
         issue_id="1",
