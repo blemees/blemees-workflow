@@ -13,9 +13,9 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date
-from enum import Enum
 
 from workflow.backends.base import IssueState
+from workflow.core.invariants import Severity, invariant
 from workflow.core.model.human_gate import HumanGateCatalog, HumanGateLevel
 from workflow.core.model.human_input import HumanInputDirectory
 from workflow.core.model.issue_type import IssueTypeDirectory
@@ -29,11 +29,9 @@ from workflow.core.model.trust_grant import TrustGrant
 
 logger = logging.getLogger(__name__)
 
-
-class Severity(Enum):
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
+# `Severity` is owned by `workflow.core.invariants`; re-exported here so existing
+# imports (`from workflow.core.validator import Severity`) keep working.
+__all__ = ["Severity", "ValidationFinding", "validate_state_machine", "validate_issue_markers"]
 
 
 @dataclass(frozen=True)
@@ -42,6 +40,9 @@ class ValidationFinding:
     principle_cite: str  # e.g., "state-machine-principles.md#11"
     message: str
     location: str | None = None  # filename or `state:name`, when known
+    # Set by the @invariant decorator to the id of the rule that emitted this
+    # finding; None for findings produced outside a registered invariant.
+    invariant_id: str | None = None
 
     def __str__(self) -> str:
         loc = f" [{self.location}]" if self.location else ""
@@ -142,6 +143,13 @@ def validate_issue_markers(
 # ----- check helpers -----
 
 
+@invariant(
+    id="IRREVERSIBLE_DESTINATIONS_GATED",
+    statement="Every transition into an irreversible destination carries a human gate.",
+    severity=Severity.WARNING,
+    layer="validator",
+    principle="state-machine-principles.md#11",
+)
 def _check_irreversible_destinations_gated(
     state_machine: StateMachine,
 ) -> list[ValidationFinding]:
@@ -165,6 +173,13 @@ def _check_irreversible_destinations_gated(
     return findings
 
 
+@invariant(
+    id="CLOSING_STATES_ARE_SINKS",
+    statement="A closing state (carrying `closes`) has no outgoing transitions.",
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#1",
+)
 def _check_closing_states_are_sinks(
     state_machine: StateMachine,
 ) -> list[ValidationFinding]:
@@ -191,6 +206,16 @@ def _check_closing_states_are_sinks(
     return findings
 
 
+@invariant(
+    id="CLOSES_EXCLUSIVITY",
+    statement=(
+        "`closes` is mutually exclusive with is_initial / collects / handoff / "
+        "issue_types and forbids spawns.advance_on."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#1",
+)
 def _check_closes_exclusivity(
     state_machine: StateMachine,
 ) -> list[ValidationFinding]:
@@ -240,6 +265,13 @@ def _check_closes_exclusivity(
     return findings
 
 
+@invariant(
+    id="REVERSIBILITY_DECLARED_ON_LEGEND_STATES",
+    statement="Every gated transition's destination state declares a reversibility class.",
+    severity=Severity.WARNING,
+    layer="validator",
+    principle="hitl-principles.md#4",
+)
 def _check_reversibility_declared_on_legend_states(
     state_machine: StateMachine,
 ) -> list[ValidationFinding]:
@@ -263,6 +295,13 @@ def _check_reversibility_declared_on_legend_states(
     return findings
 
 
+@invariant(
+    id="LEGEND_CATALOG_SYNC",
+    statement="Diagram gate markers, the legend, and the human-gate catalog agree.",
+    severity=Severity.WARNING,
+    layer="validator",
+    principle="hitl-principles.md#5",
+)
 def _check_legend_catalog_sync(
     state_machine: StateMachine, catalog: HumanGateCatalog
 ) -> list[ValidationFinding]:
@@ -295,6 +334,13 @@ def _check_legend_catalog_sync(
     return findings
 
 
+@invariant(
+    id="AUDIT_NOT_ON_IRREVERSIBLE",
+    statement="Audit-level gating is forbidden on transitions into irreversible destinations.",
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="hitl-principles.md#4",
+)
 def _check_audit_irreversible(
     state_machine: StateMachine, catalog: HumanGateCatalog
 ) -> list[ValidationFinding]:
@@ -333,6 +379,13 @@ def _check_audit_irreversible(
     return findings
 
 
+@invariant(
+    id="BLOCK_ON_TIMEOUT_VALID",
+    statement="A block-level gate's on_timeout is one of the allowed actions (abort / escalate).",
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="hitl-principles.md#4",
+)
 def _check_block_on_timeout(
     catalog: HumanGateCatalog, grants: dict[str, TrustGrant]
 ) -> list[ValidationFinding]:
@@ -360,6 +413,13 @@ def _check_block_on_timeout(
     return findings
 
 
+@invariant(
+    id="AGENT_PREPARES_PRESENT",
+    statement="Every catalogued gate points at an agent-prepares template.",
+    severity=Severity.WARNING,
+    layer="validator",
+    principle="hitl-principles.md#8",
+)
 def _check_agent_prepares_present(catalog: HumanGateCatalog) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     for gate in catalog.entries.values():
@@ -378,6 +438,16 @@ def _check_agent_prepares_present(catalog: HumanGateCatalog) -> list[ValidationF
     return findings
 
 
+@invariant(
+    id="TRUST_GRANTS_VALID",
+    statement=(
+        "Trust grants are unexpired, target an allowed level, carry evidence, and "
+        "never set audit on an irreversible destination."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="trust-grant-schema.md#7",
+)
 def _check_trust_grants(
     state_machine: StateMachine,
     catalog: HumanGateCatalog | None,
@@ -440,6 +510,16 @@ def _check_trust_grants(
     return findings
 
 
+@invariant(
+    id="TRANSITION_TYPE_COMPATIBILITY",
+    statement=(
+        "Transition source/destination state classes match the transition type "
+        "(claim resting→working, role-action working→resting, event resting→resting)."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#2",
+)
 def _check_transition_type_compatibility(state_machine: StateMachine) -> list[ValidationFinding]:
     """Per state-machine-principles.md #2, each transition type has strict
     source/destination state-class rules:
@@ -551,6 +631,13 @@ def _check_transition_type_compatibility(state_machine: StateMachine) -> list[Va
     return findings
 
 
+@invariant(
+    id="WORKING_STATES_ARE_CLAIM_DESTINATIONS",
+    statement="Every working state has at least one incoming CLAIM transition.",
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#3",
+)
 def _check_working_states_are_claim_destinations(
     state_machine: StateMachine,
 ) -> list[ValidationFinding]:
@@ -598,6 +685,16 @@ def _check_working_states_are_claim_destinations(
 _LEVEL_KEYWORD_RE = re.compile(r"\b(block|audit)\b(?!\w)", re.IGNORECASE)
 
 
+@invariant(
+    id="LEVEL_KEYWORDS_NOT_ON_DIAGRAM",
+    statement=(
+        "State notes don't carry standalone block/audit level keywords "
+        "(level is a runtime / trust-grant property)."
+    ),
+    severity=Severity.WARNING,
+    layer="validator",
+    principle="state-machine-principles.md#11",
+)
 def _check_level_keywords_not_on_diagram(state_machine: StateMachine) -> list[ValidationFinding]:
     """Per hitl-principles.md #11.4 (and state-machine-principles.md #11),
     HITL level information (`block`, `audit`) is a runtime property
@@ -630,6 +727,16 @@ def _check_level_keywords_not_on_diagram(state_machine: StateMachine) -> list[Va
     return findings
 
 
+@invariant(
+    id="ISSUE_TYPES_RESOLVED",
+    statement=(
+        "Every issue-type id referenced on a state resolves in issue-types.json "
+        "(a missing directory is a warning)."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#1",
+)
 def _check_issue_types_resolved(
     state_machine: StateMachine,
     issue_type_directory: IssueTypeDirectory | None,
@@ -685,6 +792,13 @@ def _check_issue_types_resolved(
     return findings
 
 
+@invariant(
+    id="HANDOFFS_HAVE_PARTNERS",
+    statement="Every handoff state is declared by at least one other process.",
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#9",
+)
 def _check_handoffs_have_partners(
     state_machine: StateMachine,
     handoff_index: dict[str, set[str]],
@@ -716,6 +830,16 @@ def _check_handoffs_have_partners(
     return findings
 
 
+@invariant(
+    id="STATE_NAMES_UNIQUE",
+    statement=(
+        "A state name shared across processes is marked handoff in all of them; "
+        "other duplicates are forbidden."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#9",
+)
 def _check_duplicate_state_names(
     state_machine: StateMachine,
     sibling_machines: dict[str, StateMachine],
@@ -761,6 +885,16 @@ def _check_duplicate_state_names(
     return findings
 
 
+@invariant(
+    id="SPAWNS_VALID",
+    statement=(
+        "Spawn rules resolve to a real target process/state, accept the spawned "
+        "type, agree on the parent-advance target, and key advance_on on closing states."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#9",
+)
 def _check_spawns(
     state_machine: StateMachine,
     sibling_machines: dict[str, StateMachine],
@@ -1021,6 +1155,16 @@ def _check_spawns(
     return findings
 
 
+@invariant(
+    id="COLLECTS_VALID",
+    statement=(
+        "Collect rules sit on a resting state, resolve their source "
+        "process/states/types, and keep advance_on and release_on disjoint."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#9",
+)
 def _check_collects(
     state_machine: StateMachine,
     sibling_machines: dict[str, StateMachine],
@@ -1268,6 +1412,16 @@ def _check_collects(
     return findings
 
 
+@invariant(
+    id="ENTRY_NOT_ALSO_TARGET",
+    statement=(
+        "An is_initial state is not also a collects target or a spawn target — "
+        "one entry path per state."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="state-machine-principles.md#2",
+)
 def _check_entry_not_also_target(
     state_machine: StateMachine,
     sibling_machines: dict[str, StateMachine],
@@ -1340,6 +1494,16 @@ def _check_entry_not_also_target(
     return findings
 
 
+@invariant(
+    id="PROCESS_REACHABLE",
+    statement=(
+        "Every process has at least one entry: an is_initial state, a collects "
+        "declaration, an inbound spawn, or a shared handoff."
+    ),
+    severity=Severity.WARNING,
+    layer="validator",
+    principle="state-machine-principles.md#2",
+)
 def _check_process_reachable(
     state_machine: StateMachine,
     sibling_machines: dict[str, StateMachine],
@@ -1429,6 +1593,16 @@ def _check_process_reachable(
     return findings
 
 
+@invariant(
+    id="GATES_HAVE_UNIQUE_SOURCE",
+    statement=(
+        "A gate fires from exactly one source state (verdict-style gates share a "
+        "source, differing only by destination)."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="hitl-principles.md#6",
+)
 def _check_gates_have_unique_source(
     state_machine: StateMachine,
 ) -> list[ValidationFinding]:
@@ -1464,6 +1638,16 @@ def _check_gates_have_unique_source(
     return findings
 
 
+@invariant(
+    id="HUMAN_INPUTS_RESOLVED",
+    statement=(
+        "Every human-input topic referenced on a working state resolves in "
+        "human-inputs.json (a missing directory is a warning)."
+    ),
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="hitl-principles.md#7",
+)
 def _check_human_inputs_resolved(
     state_machine: StateMachine,
     directory: HumanInputDirectory | None,

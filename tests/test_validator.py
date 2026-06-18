@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from workflow.backends.base import IssueState
+from workflow.core import validator
 from workflow.core.model.human_gate import (
     HumanGate,
     HumanGateCatalog,
@@ -850,5 +851,91 @@ def test_multi_spawn_advance_on_targets_must_agree() -> None:
         f.severity is Severity.ERROR
         and "advance_on" in f.message
         and "disagree" in f.message.lower()
+        for f in findings
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Direct unit triggers for the remaining validator invariants, so every
+# registered invariant is exercised by this module (see test_invariants.py).
+
+
+def test_transition_type_compatibility_claim_into_resting_errors() -> None:
+    sm = StateMachine(name="t")
+    sm.states["a"] = State(
+        name="a", state_class=StateClass.RESTING, reversibility=ReversibilityClass.REVERSIBLE_FAST
+    )
+    sm.states["b"] = State(
+        name="b", state_class=StateClass.RESTING, reversibility=ReversibilityClass.REVERSIBLE_FAST
+    )
+    sm.transitions.append(
+        Transition(
+            source="a", destination="b", label="x claims a", transition_type=TransitionType.CLAIM
+        )
+    )
+    findings = validator._check_transition_type_compatibility(sm)
+    assert any(
+        f.invariant_id == "TRANSITION_TYPE_COMPATIBILITY" and f.severity is Severity.ERROR
+        for f in findings
+    )
+
+
+def test_level_keyword_in_state_note_warns() -> None:
+    sm = StateMachine(name="t")
+    sm.states["s"] = State(
+        name="s", state_class=StateClass.WORKING, notes=("this gate is block-level",)
+    )
+    findings = validator._check_level_keywords_not_on_diagram(sm)
+    assert any(f.invariant_id == "LEVEL_KEYWORDS_NOT_ON_DIAGRAM" for f in findings)
+
+
+def test_legend_gate_state_without_reversibility_warns() -> None:
+    sm = StateMachine(name="t")
+    # A working state has no reversibility; naming it in the legend trips the rule.
+    sm.states["g"] = State(name="g", state_class=StateClass.WORKING)
+    sm.gates_in_legend["g"] = None
+    findings = validator._check_reversibility_declared_on_legend_states(sm)
+    assert any(f.invariant_id == "REVERSIBILITY_DECLARED_ON_LEGEND_STATES" for f in findings)
+
+
+def test_handoff_state_without_partner_errors() -> None:
+    sm = StateMachine(name="proc_a")
+    sm.states["shared"] = State(
+        name="shared",
+        state_class=StateClass.RESTING,
+        reversibility=ReversibilityClass.REVERSIBLE_FAST,
+        handoff=True,
+    )
+    # Only proc_a declares the state — no partner process.
+    findings = validator._check_handoffs_have_partners(sm, {"shared": {"proc_a"}})
+    assert any(
+        f.invariant_id == "HANDOFFS_HAVE_PARTNERS" and f.severity is Severity.ERROR
+        for f in findings
+    )
+
+
+def test_human_inputs_without_directory_warns() -> None:
+    sm = StateMachine(name="t")
+    sm.states["w"] = State(name="w", state_class=StateClass.WORKING, human_inputs=("general",))
+    findings = validator._check_human_inputs_resolved(sm, None)
+    assert any(f.invariant_id == "HUMAN_INPUTS_RESOLVED" for f in findings)
+
+
+def test_block_grant_invalid_on_timeout_errors() -> None:
+    catalog = HumanGateCatalog(process_name="t")
+    grant = TrustGrant(
+        control_point="g",
+        workflow="t",
+        team="x",
+        current_level=HumanGateLevel.BLOCK,
+        parameters=TrustGrantParameters(on_timeout="ignore"),
+        evidence=[Evidence(source="m", metric="trust", window="2026", detail="ok")],
+        granted_by="lead@example.com",
+        granted_at=date.today() - timedelta(days=1),
+        expires_at=date.today() + timedelta(days=30),
+    )
+    findings = validator._check_block_on_timeout(catalog, {"g": grant})
+    assert any(
+        f.invariant_id == "BLOCK_ON_TIMEOUT_VALID" and f.severity is Severity.ERROR
         for f in findings
     )

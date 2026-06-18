@@ -25,6 +25,11 @@ from workflow.core.emitter.docs import (
 )
 from workflow.core.emitter.mermaid import emit_mermaid
 
+# Note: `emitter.invariants` is intentionally NOT imported here. It is a
+# repo-maintenance entrypoint run as `python -m workflow.core.emitter.invariants`;
+# importing it eagerly would double-import under `-m`. Import it by its module
+# path where needed.
+
 __all__ = [
     "emit_mermaid",
     "emit_process_doc",
