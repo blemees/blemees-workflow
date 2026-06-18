@@ -77,6 +77,23 @@ jobs:
           workflow --workflow-dir examples/workflows generate-docs
           git diff --exit-code -- examples/workflows
 
+  invariants-doc:
+    name: Invariants doc in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (editable) with dev extras
+        run: uv pip install --system -e ".[dev]"
+      - name: Check generated invariants doc is current
+        run: |
+          python -m workflow.core.emitter.invariants
+          git diff --exit-code -- docs/invariants.md
+
   package:
     name: Build sdist + wheel
     runs-on: ubuntu-latest
