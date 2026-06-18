@@ -16,7 +16,36 @@ An invariant lives in the layer that has the information to check it:
 
 ## Parser invariants
 
-_No invariants registered in this layer yet._
+| ID | Severity | Statement | Principle | Enforced by |
+| --- | --- | --- | --- | --- |
+| `PARSE_CLOSES_SHAPE` | ERROR | `closes` is an object with a valid `taxonomy` and non-empty `reason`, only on resting states. | `state-machine-principles.md#8` | `parse_state_machine` |
+| `PARSE_COLLECTS_ADVANCE_ON_SHAPE` | ERROR | A `collects` `advance_on` is a dict of collector-state → target (or per-type map). | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_COLLECTS_ADVANCE_RELEASE_DISJOINT` | ERROR | A `collects` keeps `advance_on` keys and `release_on` entries disjoint. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_COLLECTS_FROM_STATES` | ERROR | A `collects` declares a non-empty `from_states` list. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_COLLECTS_PLACEMENT` | ERROR | `collects` is an object valid only on resting states. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_COLLECTS_RELEASE_ON_LIST` | ERROR | A `collects` `release_on`, if present, is a list of collector-state names. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_HANDOFF_PLACEMENT` | ERROR | `handoff`, if present, is a boolean valid only on resting states. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_HUMAN_INPUTS_PLACEMENT` | ERROR | `human_inputs` is a duplicate-free list, valid only on working states. | `hitl-principles.md#7` | `parse_state_machine` |
+| `PARSE_INITIAL_PLACEMENT` | ERROR | `initial` is valid only on resting states and its label is mermaid-safe. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_ISSUE_TYPES_PLACEMENT` | ERROR | `issue_types` is a duplicate-free list, required on working/resting and forbidden on closing states. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_LEGACY_CLAIM_ROLE_REJECTED` | ERROR | The removed `claim_role` field is rejected (roles live on the working state). | `ADR-0001` | `parse_state_machine` |
+| `PARSE_LEGACY_TRANSITION_FIELDS_REJECTED` | ERROR | The removed `cross_process` type and `kind`/`process` transition fields are rejected. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_MARK_PR_READY_BOOLEAN` | ERROR | `mark_pr_ready`, if present, is a boolean and is forbidden on closing states. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_NOTES_LIST_OF_STRINGS` | ERROR | `notes`, if present, is a list of strings. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_REVERSIBILITY_PLACEMENT` | ERROR | `reversibility` is required on resting/closing states and forbidden on working. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_ROLES_PLACEMENT` | ERROR | `roles` is a duplicate-free list, required on working states and forbidden elsewhere. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_SPAWNS_SHAPE` | ERROR | `spawns` is an object or non-empty list of spawn rules. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_SPAWN_ADVANCE_ON_SHAPE` | ERROR | A spawn rule's `advance_on`, if present, is a dict of closing-state → parent-state. | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_SPAWN_FIELDS` | ERROR | Each spawn rule has a non-empty `issue_type` and `initial_state` (and string `process` if present). | `state-machine-principles.md#9` | `parse_state_machine` |
+| `PARSE_STAR_ENDPOINTS_FORBIDDEN` | ERROR | `[*]` transition endpoints are not authored — entry is `is_initial`, exit is `closes`. | `ADR-0002` | `parse_state_machine` |
+| `PARSE_STATES_PRESENT` | ERROR | `states` is a non-empty JSON object of id → spec. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_STATE_CLASS_VALID` | ERROR | Each state declares `class` as one of resting | working. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_STATE_SPEC_OBJECT` | ERROR | Each state id is a non-empty string mapping to an object spec. | `state-machine-principles.md#1` | `parse_state_machine` |
+| `PARSE_TOP_LEVEL_TYPES` | ERROR | Top-level `description` and `group`, if present, are strings. | `ADR-0001` | `parse_state_machine` |
+| `PARSE_TRANSITIONS_LIST` | ERROR | `transitions` is a list. | `state-machine-principles.md#2` | `parse_state_machine` |
+| `PARSE_TRANSITION_ENDPOINTS` | ERROR | Each transition's `source` and `destination` are declared states. | `state-machine-principles.md#2` | `parse_state_machine` |
+| `PARSE_TRANSITION_LABEL_STRING` | ERROR | A transition `label`, if present, is a string. | `state-machine-principles.md#4` | `parse_state_machine` |
+| `PARSE_TRANSITION_TYPE_VALID` | ERROR | Each transition declares `type` as one of claim | advance | event. | `state-machine-principles.md#2` | `parse_state_machine` |
 
 ## Validator invariants
 
