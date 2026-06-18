@@ -6,9 +6,10 @@ parser) each conceptual precondition is registered here as a data row (ADR-0004,
 planner layer = hard stop). `tests/test_planner_invariants.py` exercises each one
 and asserts the registry is fully covered.
 
-Scope: the state-machine operations — claim / release / advance. The catalogued
-(gate), recognized (request-input), and creating (spawn / collect) operations
-register their rows in a follow-up.
+Covers every framework operation: the state-machine ops (claim / release /
+advance), the catalogued gate ops (await / approve / reject / record-action /
+check / revoke), the recognized input ops (request-input / respond), and the
+creating ops (spawn / collect).
 """
 
 from __future__ import annotations
@@ -18,6 +19,15 @@ from workflow.core.invariants import Invariant, Severity, register_invariant
 _ADVANCE = "workflow.core.planner._plan_advance"
 _CLAIM = "workflow.core.planner._plan_claim"
 _RELEASE = "workflow.core.planner._plan_release"
+_AWAIT = "workflow.core.planner._plan_await_signal"
+_APPROVE = "workflow.core.planner._plan_approve"
+_RECORD = "workflow.core.planner._plan_record_action"
+_CONFIRM = "workflow.core.planner._plan_confirm"
+_REVIEW = "workflow.core.planner._plan_review"
+_REQUEST_INPUT = "workflow.core.planner._plan_request_input"
+_RESPOND = "workflow.core.planner._plan_respond"
+_SPAWN = "workflow.core.planner._plan_spawn"
+_COLLECT = "workflow.core.planner._plan_collect"
 
 
 def _row(id: str, statement: str, symbol: str) -> Invariant:
@@ -95,9 +105,127 @@ PLANNER_INVARIANTS: tuple[Invariant, ...] = (
 )
 
 
+# Catalogued (gate), recognized (input), and creating (spawn/collect) operations.
+CATALOGUED_PLANNER_INVARIANTS: tuple[Invariant, ...] = (
+    # gate operations
+    _row(
+        "PLAN_GATE_REQUIRED",
+        "A catalogued-gate operation (await / approve / reject / record-action / check / "
+        "revoke) requires a `--gate`.",
+        _APPROVE,
+    ),
+    _row(
+        "PLAN_GATE_IN_CATALOG",
+        "The named gate is loaded and present in the human-gate catalog.",
+        _APPROVE,
+    ),
+    _row(
+        "PLAN_AWAIT_GATE_AT_SOURCE",
+        "await-signal fires only from the gate's source state.",
+        _AWAIT,
+    ),
+    _row(
+        "PLAN_SINGLE_GATE_IN_FLIGHT",
+        "Starting a gate requires no other HITL gate or audit already in flight.",
+        _AWAIT,
+    ),
+    _row(
+        "PLAN_GATE_AT_AWAITING_GATE",
+        "approve / reject target the gate the issue is currently awaiting.",
+        _APPROVE,
+    ),
+    _row(
+        "PLAN_GATE_DESTINATION_RESOLVES",
+        "A verdict-style gate requires a `--destination` among its options; a binary gate's "
+        "destination must match its single option.",
+        _APPROVE,
+    ),
+    _row(
+        "PLAN_RECORD_ACTION_REVERSIBLE",
+        "record-action (audit) requires a reversible destination.",
+        _RECORD,
+    ),
+    _row(
+        "PLAN_AUDIT_SINGLE_PENDING",
+        "record-action requires no other audit already pending on the issue.",
+        _RECORD,
+    ),
+    _row(
+        "PLAN_AUDIT_AT_PENDING_GATE",
+        "check / revoke target the gate whose audit is currently pending.",
+        _CONFIRM,
+    ),
+    # human-claim singletons (review / audit / advise)
+    _row(
+        "PLAN_HUMAN_CLAIM_REQUIRES_MARKER",
+        "Taking a human-claim singleton requires its marker active (review→awaiting-gate, "
+        "audit→audit-pending, advise→awaiting-input).",
+        _REVIEW,
+    ),
+    _row(
+        "PLAN_HUMAN_CLAIM_NOT_HELD",
+        "A human-claim singleton can't be taken when it is already held.",
+        _REVIEW,
+    ),
+    _row(
+        "PLAN_SINGLE_HUMAN_CLAIM_SINGLETON",
+        "At most one human-claim singleton (reviewing / auditing / advising) is active at a time.",
+        _REVIEW,
+    ),
+    # recognized input
+    _row(
+        "PLAN_REQUEST_INPUT_NO_GATE_IN_FLIGHT",
+        "request-input requires no input already awaited and no catalogued gate in flight.",
+        _REQUEST_INPUT,
+    ),
+    _row(
+        "PLAN_REQUEST_INPUT_BODY_REQUIRED",
+        "request-input requires a `--body`.",
+        _REQUEST_INPUT,
+    ),
+    _row(
+        "PLAN_REQUEST_INPUT_TOPIC_DECLARED",
+        "request-input's `--topic` is one the current working state declares in `human_inputs`.",
+        _REQUEST_INPUT,
+    ),
+    _row(
+        "PLAN_RESPOND_REQUIRES_AWAITING_INPUT",
+        "respond requires an awaiting-input marker active.",
+        _RESPOND,
+    ),
+    _row(
+        "PLAN_RESPOND_BODY_REQUIRED",
+        "respond requires a `--body`.",
+        _RESPOND,
+    ),
+    # creating operations
+    _row(
+        "PLAN_SPAWN_PARENT_HAS_STATE",
+        "spawn requires the parent issue to have a current state.",
+        _SPAWN,
+    ),
+    _row(
+        "PLAN_SPAWN_PR_REQUIRES_HEAD",
+        "A pr-typed spawn requires a `--head` source branch.",
+        _SPAWN,
+    ),
+    _row(
+        "PLAN_COLLECT_CONTRIBUTOR_HAS_STATE",
+        "collect requires the contributor to have a current state.",
+        _COLLECT,
+    ),
+    _row(
+        "PLAN_COLLECT_ELIGIBILITY",
+        "A collected contributor is on one of the collector's `from_states`, of an accepted "
+        "type, and not already collected (unless `--force`).",
+        _COLLECT,
+    ),
+)
+
+
 def register_planner_invariants() -> None:
     """Register every planner-layer invariant (call once)."""
-    for inv in PLANNER_INVARIANTS:
+    for inv in (*PLANNER_INVARIANTS, *CATALOGUED_PLANNER_INVARIANTS):
         register_invariant(inv)
 
 
