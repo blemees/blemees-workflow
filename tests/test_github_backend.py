@@ -52,13 +52,11 @@ def test_create_issue_invokes_gh_issue_create_with_state_label() -> None:
     assert new_id == "42"
     calls = [args.args[0] for args in patched.call_args_list]
     create_cmd = [c for c in calls if "issue" in c and "create" in c][0]
-    # Title, --body-file, and state:raw label all present.
-    assert "--title" in create_cmd
-    assert create_cmd[create_cmd.index("--title") + 1] == "Fix the login bug"
+    # Title (=form so a leading-dash title isn't parsed as a flag), --body-file,
+    # and one --label=state:raw flag all present.
+    assert "--title=Fix the login bug" in create_cmd
     assert "--body-file" in create_cmd
-    assert "--label" in create_cmd
-    label_val = create_cmd[create_cmd.index("--label") + 1]
-    assert "state:raw" in label_val
+    assert "--label=state:raw" in create_cmd
 
 
 def test_create_issue_with_claim_adds_wip_label() -> None:
@@ -82,10 +80,9 @@ def test_create_issue_with_claim_adds_wip_label() -> None:
 
     assert new_id == "7"
     create_cmd = [c.args[0] for c in patched.call_args_list if "create" in c.args[0]][-1]
-    label_val = create_cmd[create_cmd.index("--label") + 1]
-    # Comma-joined state:raw + wip:product-manager.
-    assert "state:raw" in label_val
-    assert "wip:product-manager" in label_val
+    # One --label flag per label (=form), not a comma-joined value.
+    assert "--label=state:raw" in create_cmd
+    assert "--label=wip:product-manager" in create_cmd
 
 
 def test_create_issue_raises_on_unexpected_gh_output() -> None:
@@ -179,13 +176,9 @@ def test_apply_marker_change_constructs_add_remove_labels() -> None:
     edit_calls = [c for c in calls if c[0] == "gh" and "edit" in c and "issue" in c]
     assert edit_calls
     edit_cmd = edit_calls[0]
-    # Expected add/remove flags.
-    assert "--add-label" in edit_cmd
-    assert "--remove-label" in edit_cmd
-    add_index = edit_cmd.index("--add-label") + 1
-    remove_index = edit_cmd.index("--remove-label") + 1
-    assert "state:ready_for_dev" in edit_cmd[add_index]
-    assert "state:refining" in edit_cmd[remove_index]
+    # Expected add/remove flags (=form, one per label).
+    assert "--add-label=state:ready_for_dev" in edit_cmd
+    assert "--remove-label=state:refining" in edit_cmd
 
 
 def test_apply_marker_change_singletons_and_audit() -> None:
@@ -225,12 +218,10 @@ def test_apply_marker_change_singletons_and_audit() -> None:
 
     calls = [args.args[0] for args in patched.call_args_list]
     edit_cmd = [c for c in calls if "edit" in c and "issue" in c][0]
-    add_str = edit_cmd[edit_cmd.index("--add-label") + 1]
-    remove_str = edit_cmd[edit_cmd.index("--remove-label") + 1]
-    assert "state:ready_for_dev" in add_str
-    assert "hitl:approved-ready_for_dev" in add_str
-    assert "state:refining" in remove_str
-    assert "hitl:awaiting-ready_for_dev" in remove_str
+    assert "--add-label=state:ready_for_dev" in edit_cmd
+    assert "--add-label=hitl:approved-ready_for_dev" in edit_cmd
+    assert "--remove-label=state:refining" in edit_cmd
+    assert "--remove-label=hitl:awaiting-ready_for_dev" in edit_cmd
 
 
 def test_apply_marker_change_clear_claim_does_not_unassign_without_mapping() -> None:
@@ -258,7 +249,7 @@ def test_apply_marker_change_clear_claim_does_not_unassign_without_mapping() -> 
         backend.apply_marker_change("1", MarkerChange(clear_agent_claim=True))
 
     calls = [args.args[0] for args in patched.call_args_list]
-    assert any("--remove-label" in c and "wip:product-manager" in c for c in calls)
+    assert any("--remove-label=wip:product-manager" in c for c in calls)
     assert not any("--remove-assignee" in c for c in calls)
 
 
@@ -1044,3 +1035,38 @@ def test_apply_marker_change_partial_failure_raises_repair_error() -> None:
             MarkerChange(set_state="shipped", close_issue=True, close_reason="completed"),
             audit_comment="## advance",
         )
+
+
+def test_close_issue_rejects_unsupported_reason() -> None:
+    """An unrecognised close reason is rejected loudly, not silently dropped (#27)."""
+    backend = GitHubBackend(repo="owner/repo")
+    with pytest.raises(BackendError, match="Unsupported close reason"):
+        backend.close_issue("1", reason="iterated")
+
+
+def test_list_issue_types_paginates() -> None:
+    """list_issue_types follows pagination so >30 org types aren't truncated (#27)."""
+    backend = GitHubBackend(repo="owner/repo")
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        return_value=_proc(stdout=json.dumps([{"name": "Bug"}, {"name": "Feature"}])),
+    ) as patched:
+        result = backend.list_issue_types("acme")
+    assert result == ["Bug", "Feature"]
+    assert "--paginate" in patched.call_args[0][0]
+
+
+def test_create_issue_dash_title_not_parsed_as_flag() -> None:
+    """A title starting with '-' is passed as --title=<value>, not a bare arg (#27)."""
+    backend = GitHubBackend(repo="owner/repo")
+    responses = [
+        _proc(stdout=""),  # ensure state:raw
+        _proc(stdout="https://github.com/owner/repo/issues/9\n"),
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        backend.create_issue(title="--oops looks like a flag", body="", state="raw")
+    create_cmd = [c.args[0] for c in patched.call_args_list if "create" in c.args[0]][-1]
+    assert "--title=--oops looks like a flag" in create_cmd

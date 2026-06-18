@@ -312,20 +312,21 @@ class GitHubBackend:
             tmp.write(body or "")
             tmp_path = tmp.name
         try:
+            # `--flag=value` form (and one `--label` per label) so a title /
+            # label that starts with `-` isn't parsed as a flag and an id
+            # containing a comma isn't split (#27).
             args: list[str] = [
                 "issue",
                 "create",
                 "--repo",
                 self.repo,
-                "--title",
-                title,
+                f"--title={title}",
                 "--body-file",
                 tmp_path,
-                "--label",
-                ",".join(labels),
             ]
+            args += [f"--label={lbl}" for lbl in labels]
             if issue_type:
-                args += ["--type", issue_type]
+                args += [f"--type={issue_type}"]
             output = self._gh(*args)
         finally:
             try:
@@ -388,22 +389,20 @@ class GitHubBackend:
             tmp.write(body or "")
             tmp_path = tmp.name
         try:
+            # `--flag=value` form (and one `--label` per label) — see create_issue (#27).
             args: list[str] = [
                 "pr",
                 "create",
                 "--repo",
                 self.repo,
-                "--title",
-                title,
+                f"--title={title}",
                 "--body-file",
                 tmp_path,
-                "--head",
-                head,
-                "--label",
-                ",".join(labels),
+                f"--head={head}",
             ]
+            args += [f"--label={lbl}" for lbl in labels]
             if base:
-                args += ["--base", base]
+                args += [f"--base={base}"]
             # Always create PRs as drafts — the framework's PR lifecycle
             # starts at `draft`, and the `mark_pr_ready` state field is the
             # explicit signal to flip the PR to ready-for-review.
@@ -474,10 +473,10 @@ class GitHubBackend:
         #    If this fails, nothing has changed — a bare error is correct.
         if add or remove:
             args: list[str] = ["issue", "edit", str(issue_id), "--repo", self.repo]
-            if add:
-                args += ["--add-label", ",".join(sorted(add))]
-            if remove:
-                args += ["--remove-label", ",".join(sorted(remove))]
+            # One flag per label (`--flag=value`) so ids never split on a comma
+            # or parse as a flag (#27).
+            args += [f"--add-label={lbl}" for lbl in sorted(add)]
+            args += [f"--remove-label={lbl}" for lbl in sorted(remove)]
             self._gh(*args)
 
         # 2. Best-effort follow-ups. Past this point the state label is set, so a
@@ -674,10 +673,16 @@ class GitHubBackend:
     def close_issue(self, issue_id: str, reason: str | None = None) -> None:
         """Close the GitHub issue via `gh issue close`.
 
-        `reason` is passed through as `--reason completed` or `--reason "not
-        planned"` (GitHub's two valid values). Unrecognised reasons are
-        omitted; gh defaults to `completed` in that case.
+        `reason` is `--reason completed` or `--reason "not planned"` (GitHub's
+        two valid values). An unrecognised non-None reason is rejected loudly
+        rather than silently dropped (which would close as `completed` and lose
+        the authored intent) (#27).
         """
+        if reason is not None and reason not in ("completed", "not planned"):
+            raise BackendError(
+                f"Unsupported close reason {reason!r} for GitHub — expected "
+                f"'completed' or 'not planned'. Fix the closing state's `closes.reason`."
+            )
         args: list[str] = [
             "issue",
             "close",
@@ -685,7 +690,7 @@ class GitHubBackend:
             "--repo",
             self.repo,
         ]
-        if reason in ("completed", "not planned"):
+        if reason is not None:
             args += ["--reason", reason]
         self._gh(*args)
 
@@ -882,7 +887,10 @@ class GitHubBackend:
         Side effect: none — read-only.
         """
         try:
-            output = self._gh("api", f"orgs/{org}/issue-types", check=False)
+            # --paginate follows Link headers so orgs with >30 Issue Types
+            # aren't truncated (which would break ensure_issue_type's
+            # idempotence check) (#27). gh merges array pages into one array.
+            output = self._gh("api", f"orgs/{org}/issue-types", "--paginate", check=False)
         except BackendError:
             return None
         if not output.strip():
@@ -989,9 +997,15 @@ class GitHubBackend:
                 color,
             )
         except BackendError as exc:
-            # `gh label create` exits non-zero with "already exists" if the
-            # label is present. Treat that as benign and cache it.
-            if "already exists" in str(exc).lower():
+            # `gh label create` exits non-zero if the label already exists.
+            # Confirm by listing labels rather than matching gh's stderr wording
+            # (which is brittle); fall back to the message only if the list call
+            # also fails (#27).
+            try:
+                already_present = name in self.list_labels()
+            except BackendError:
+                already_present = "already exists" in str(exc).lower()
+            if already_present:
                 self._known_labels.add(name)
                 return False
             raise
