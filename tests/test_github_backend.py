@@ -320,18 +320,23 @@ def test_list_issues_translates_filters_to_label_flags() -> None:
             IssueFilters(state="refining", claim_role="product-manager", limit=20)
         )
 
-    cmd = patched.call_args[0][0]
-    assert cmd[0] == "gh"
-    assert "issue" in cmd and "list" in cmd
-    # Filters become --label entries.
-    label_indices = [i for i, x in enumerate(cmd) if x == "--label"]
-    label_values = [cmd[i + 1] for i in label_indices]
+    # Both `gh issue list` and `gh pr list` are queried and merged.
+    calls = [c.args[0] for c in patched.call_args_list]
+    issue_cmd = next(c for c in calls if "issue" in c and "list" in c)
+    pr_cmd = next(c for c in calls if "pr" in c and "list" in c)
+    assert issue_cmd[0] == "gh"
+    # Both query every state so closed issues / PRs are visible.
+    assert issue_cmd[issue_cmd.index("--state") + 1] == "all"
+    assert pr_cmd[pr_cmd.index("--state") + 1] == "all"
+    # Filters become --label entries (identical on both queries).
+    label_indices = [i for i, x in enumerate(issue_cmd) if x == "--label"]
+    label_values = [issue_cmd[i + 1] for i in label_indices]
     assert "state:refining" in label_values
     assert "wip:product-manager" in label_values
     # Limit is respected.
-    assert "--limit" in cmd
-    assert cmd[cmd.index("--limit") + 1] == "20"
-    # Result is parsed into IssueState with the title in extras.
+    assert "--limit" in issue_cmd
+    assert issue_cmd[issue_cmd.index("--limit") + 1] == "20"
+    # Result is parsed into IssueState with the title in extras (deduped to one).
     assert len(results) == 1
     assert results[0].issue_id == "7"
     assert results[0].state == "refining"
@@ -378,6 +383,65 @@ def test_list_issues_returns_empty_for_no_matches() -> None:
     ):
         results = backend.list_issues(IssueFilters(state="refining"))
     assert results == []
+
+
+def test_list_issues_merges_prs_and_queries_all_states() -> None:
+    """list_issues queries `gh issue list` and `gh pr list`, both with
+    --state all, and merges — so closed issues and PRs are both visible."""
+    backend = GitHubBackend(repo="owner/repo")
+    issue_response = [
+        {"number": 1, "title": "a closed issue", "labels": [{"name": "state:shipped"}]},
+    ]
+    pr_response = [
+        {"number": 2, "title": "a merged PR", "labels": [{"name": "state:merged"}]},
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(
+            [
+                _proc(stdout=json.dumps(issue_response)),  # gh issue list
+                _proc(stdout=json.dumps(pr_response)),  # gh pr list
+            ]
+        ),
+    ) as patched:
+        results = backend.list_issues(IssueFilters(limit=50))
+
+    # Both the (closed) issue and the (merged) PR come through.
+    assert sorted(r.issue_id for r in results) == ["1", "2"]
+    calls = [c.args[0] for c in patched.call_args_list]
+    assert any(c[0] == "gh" and "issue" in c and "list" in c for c in calls)
+    assert any(c[0] == "gh" and "pr" in c and "list" in c for c in calls)
+    # Every list query asks for all states (open + closed + merged).
+    for c in calls:
+        assert c[c.index("--state") + 1] == "all"
+
+
+def test_list_issues_cohort_query_by_parent_of_returns_closed_and_pr_children() -> None:
+    """A cohort query (`parent-of:<id>`) finds children regardless of whether
+    they are closed issues or PRs — wait-for-all depends on this (ADR-0003)."""
+    backend = GitHubBackend(repo="owner/repo")
+    closed_child = [
+        {"number": 11, "title": "closed child", "labels": [{"name": "parent-of:100"}]},
+    ]
+    pr_child = [
+        {"number": 12, "title": "PR child", "labels": [{"name": "parent-of:100"}]},
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(
+            [
+                _proc(stdout=json.dumps(closed_child)),  # gh issue list
+                _proc(stdout=json.dumps(pr_child)),  # gh pr list
+            ]
+        ),
+    ) as patched:
+        results = backend.list_issues(IssueFilters(parent_of="100"))
+
+    assert sorted(r.issue_id for r in results) == ["11", "12"]
+    # The cohort label is passed to both queries.
+    for c in [c.args[0] for c in patched.call_args_list]:
+        label_vals = [c[i + 1] for i, x in enumerate(c) if x == "--label"]
+        assert "parent-of:100" in label_vals
 
 
 # --------------------------------------------------------------------------- #
@@ -461,8 +525,12 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
         "workflow.backends.github.subprocess.run",
         side_effect=_fake_run_factory(
             [
+                # list_issues(state=raw): gh issue list, then gh pr list.
                 _proc(stdout=json.dumps(inbox_response)),
+                _proc(stdout="[]"),
+                # list_issues(claim_role=...): gh issue list, then gh pr list.
                 _proc(stdout=json.dumps(wip_response)),
+                _proc(stdout="[]"),
             ]
         ),
     ):
