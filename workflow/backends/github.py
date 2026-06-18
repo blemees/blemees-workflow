@@ -165,23 +165,28 @@ class GitHubBackend:
     # ----- backend protocol -----
 
     def list_issues(self, filters: IssueFilters) -> list[IssueState]:
-        """List issues by translating filters to `gh issue list` flags.
+        """List issues AND pull requests by translating filters to `gh` flags.
 
-        The translation:
+        `gh issue list` excludes pull requests and `gh pr list` excludes issues,
+        so this queries both and merges the results, de-duplicated by id. Both
+        are queried with `--state all` so closed issues and closed/merged PRs
+        are visible — cohort queries (`parent-of:` / `collected-by:`) and
+        closing-state searches depend on it (ADR-0003).
+
+        The filter translation (applied identically to issues and PRs):
 
         - `filters.state` → `--label state:<name>`
         - `filters.claim_role` → `--label wip:<role>`
         - `filters.awaiting_gate` ("*" → match any awaiting; specific name → that label)
         - `filters.audit_pending` ("*" → match any audit-pending; specific → that label)
         - `filters.awaiting_input` (True → `--label hitl:awaiting-input`; False → exclude)
-        - `filters.limit` → `--limit N`
+        - `filters.parent_of` → `--label parent-of:<id>` (cohort: a parent's children)
+        - `filters.collected_by` → `--label collected-by:<id>` (cohort: a collector's contributors)
+        - `filters.limit` → `--limit N` (applied per entity kind)
 
-        Returns `IssueState` objects derived from each result's labels. For
-        wildcard awaiting / audit filters that `gh` can't express with a single
-        label match, the backend filters in Python after fetching.
+        For wildcard awaiting / audit filters that `gh` can't express with a
+        single label match, the backend filters in Python after fetching.
         """
-        args: list[str] = ["issue", "list", "--repo", self.repo, "--limit", str(filters.limit)]
-
         wildcard_awaiting = filters.awaiting_gate == "*"
         wildcard_audit = filters.audit_pending == "*"
 
@@ -196,21 +201,24 @@ class GitHubBackend:
             label_filters.append(f"hitl:audit-{filters.audit_pending}")
         if filters.awaiting_input is True:
             label_filters.append("hitl:awaiting-input")
+        if filters.parent_of:
+            label_filters.append(f"parent-of:{filters.parent_of}")
+        if filters.collected_by:
+            label_filters.append(f"collected-by:{filters.collected_by}")
 
-        for label in label_filters:
-            args += ["--label", label]
-
-        args += ["--json", "number,labels,title,state"]
-
-        try:
-            output = self._gh(*args)
-            data = json.loads(output)
-        except json.JSONDecodeError as exc:
-            raise BackendError(f"gh returned non-JSON for issue list: {exc}") from exc
+        entries = self._list_entities("issue", label_filters, filters.limit)
+        entries += self._list_entities("pr", label_filters, filters.limit)
 
         results: list[IssueState] = []
-        for entry in data:
+        seen: set[str] = set()
+        for entry in entries:
             number = str(entry.get("number", ""))
+            # Issues and PRs share one number space, so a number is one or the
+            # other; dedup is defensive against any overlap in the merge.
+            if number in seen:
+                continue
+            seen.add(number)
+
             labels = [lbl.get("name", "") for lbl in (entry.get("labels") or [])]
             state = self._labels_to_state(number, labels)
 
@@ -230,6 +238,34 @@ class GitHubBackend:
             results.append(state)
 
         return results
+
+    def _list_entities(self, kind: str, label_filters: list[str], limit: int) -> list[dict]:
+        """Run `gh <kind> list --state all` with label filters; return raw entries.
+
+        `kind` is "issue" or "pr". Querying with `--state all` makes closed
+        issues and closed/merged PRs visible; `list_issues` calls this once per
+        kind and merges, because neither `gh` subcommand returns the other's
+        entities.
+        """
+        args: list[str] = [
+            kind,
+            "list",
+            "--repo",
+            self.repo,
+            "--state",
+            "all",
+            "--limit",
+            str(limit),
+        ]
+        for label in label_filters:
+            args += ["--label", label]
+        args += ["--json", "number,labels,title,state"]
+
+        try:
+            output = self._gh(*args)
+            return json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise BackendError(f"gh returned non-JSON for {kind} list: {exc}") from exc
 
     def create_issue(
         self,

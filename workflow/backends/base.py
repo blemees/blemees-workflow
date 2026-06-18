@@ -137,6 +137,8 @@ class IssueFilters:
     awaiting_gate: str | None = None  # specific gate name; pass "*" for any
     audit_pending: str | None = None  # specific gate name; pass "*" for any
     awaiting_input: bool | None = None  # True / False / None (don't filter)
+    parent_of: str | None = None  # cohort: children spawned from this parent id
+    collected_by: str | None = None  # cohort: contributors gathered by this collector id
     limit: int = 50
 
 
