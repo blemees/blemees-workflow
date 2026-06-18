@@ -449,6 +449,32 @@ def test_legend_catalog_drift_warns() -> None:
     )
 
 
+def test_marker_catalog_drift_warns() -> None:
+    """A gated transition whose gate_name has no catalog entry is drift — the
+    three-way legend↔catalog↔markers check now flags it (#14)."""
+    workflow = StateMachine(name="t")
+    workflow.states["a"] = State(name="a", state_class=StateClass.WORKING)
+    workflow.states["b"] = State(name="b", state_class=StateClass.RESTING)
+    workflow.gates_in_legend["gate_x"] = ReversibilityClass.REVERSIBLE_SLOW
+    workflow.transitions.append(
+        Transition(
+            source="a",
+            destination="b",
+            label="gated → b",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="gate_x",  # on a transition + legend, but NOT in the catalog
+        )
+    )
+    catalog = HumanGateCatalog(process_name="t")  # empty — no gate_x entry
+    findings = validate_state_machine(workflow, catalog, {})
+    assert any(
+        f.principle_cite == "hitl-principles.md#5"
+        and "Transition gate markers" in f.message
+        and "gate_x" in f.message
+        for f in findings
+    )
+
+
 def test_expired_trust_grant_warns() -> None:
     workflow = StateMachine(name="t")
     in_past_start = date.today() - timedelta(days=60)
