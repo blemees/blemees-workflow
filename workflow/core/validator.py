@@ -74,6 +74,7 @@ def validate_state_machine(
     findings.extend(_check_closes_exclusivity(state_machine))
     findings.extend(_check_reversibility_declared_on_legend_states(state_machine))
     findings.extend(_check_transition_type_compatibility(state_machine))
+    findings.extend(_check_gates_only_on_advance(state_machine))
     findings.extend(_check_working_states_are_claim_destinations(state_machine))
     findings.extend(_check_level_keywords_not_on_diagram(state_machine))
     findings.extend(_check_issue_types_resolved(state_machine, issue_type_directory))
@@ -505,6 +506,37 @@ def _check_trust_grants(
                     principle_cite="trust-grant-schema.md#7",
                     message=(f"Trust grant for {gate!r} has no evidence entries."),
                     location=grant.source_path,
+                )
+            )
+    return findings
+
+
+@invariant(
+    id="GATES_ONLY_ON_ADVANCE",
+    statement="A `human_gate` is valid only on an ADVANCE transition, not CLAIM or EVENT.",
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="hitl-principles.md#6",
+)
+def _check_gates_only_on_advance(state_machine: StateMachine) -> list[ValidationFinding]:
+    """A CLAIM has no agent-prepared packet and an EVENT is system-triggered, so
+    neither can carry a human gate — gating only makes sense on an agent-driven
+    ADVANCE. Gated CLAIM/EVENT transitions are schema-legal but broken end-to-end
+    (no triggering role, approve clears a claim that was never set), so reject
+    them at validation time (#25)."""
+    findings: list[ValidationFinding] = []
+    for t in state_machine.transitions:
+        if t.is_gated and t.transition_type is not TransitionType.ADVANCE:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.ERROR,
+                    principle_cite="hitl-principles.md#6",
+                    message=(
+                        f"Transition {t.source!r} → {t.destination!r} is type "
+                        f"{t.transition_type.value!r} but carries human_gate "
+                        f"{t.gate_name!r}; gates are only valid on `advance` transitions."
+                    ),
+                    location=state_machine.source_path,
                 )
             )
     return findings

@@ -1448,6 +1448,7 @@ def _do_event_fired(args: argparse.Namespace) -> int:
             destination=args.destination,
             body_text=body_text,
             actor=None,  # event transitions skip role check
+            event_fired=True,  # authorize the EVENT (planner refuses it via plain advance)
         )
         _print_result(result, json_output=ctx["json_output"], context=context)
         return 0

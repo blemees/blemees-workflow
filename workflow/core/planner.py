@@ -340,6 +340,14 @@ def _plan_advance(
             f"Cannot advance to {request.destination!r}: current state is "
             f"{state.state!r}, transition source is {transition.source!r}."
         )
+    # EVENT transitions are system-triggered — they only fire through the
+    # `event-fired` command (which sets `event_fired`), never agent-driven
+    # advance (#25).
+    if transition.transition_type is TransitionType.EVENT and not request.extras.get("event_fired"):
+        raise OperationError(
+            f"Transition {transition.source!r} → {request.destination!r} is an EVENT; "
+            f"fire it with `event-fired` (it is system-triggered, not agent-driven)."
+        )
 
     # Look up the HumanGate for this transition, if any.
     gate = _find_gate_for_transition(catalog, transition)
