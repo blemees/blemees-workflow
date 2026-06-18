@@ -9,7 +9,7 @@ import pytest
 
 from workflow.backends.base import IssueFilters, MarkerChange
 from workflow.backends.github import GitHubBackend
-from workflow.errors import BackendError
+from workflow.errors import BackendError, OperationError
 
 
 def _fake_run_factory(responses: list[mock.Mock]):
@@ -1124,3 +1124,56 @@ def test_list_issues_no_warning_without_post_filter(caplog) -> None:
         backend.list_issues(IssueFilters(state="raw", limit=2))
 
     assert not any("may be missed" in r.message for r in caplog.records)
+
+
+def _claim_run_factory(verify_labels: list[str], pre_labels: list[str] | None = None):
+    """side_effect for a claim apply: read_issue vs the post-write verify fetch
+    are distinguished by the `--json` field set (`labels` only = the verify)."""
+    pre = {
+        "number": 1,
+        "labels": [{"name": lbl} for lbl in (pre_labels or ["state:raw"])],
+        "assignees": [],
+        "state": "OPEN",
+    }
+
+    def _run(*args, **kwargs):
+        cmd = args[0]
+        if "view" in cmd:
+            json_fields = cmd[cmd.index("--json") + 1]
+            if json_fields == "labels":
+                return _proc(stdout=json.dumps({"labels": [{"name": x} for x in verify_labels]}))
+            return _proc(stdout=json.dumps(pre))
+        return _proc(stdout="")
+
+    return _run
+
+
+def test_claim_race_lost_self_reverts_and_raises() -> None:
+    """A concurrent claim lands a second wip: label; the loser sees both, removes
+    its own, and raises OperationError instead of believing it won (#21)."""
+    backend = GitHubBackend(repo="owner/repo")
+    run = _claim_run_factory(verify_labels=["wip:product-manager", "wip:developer"])
+    with (
+        mock.patch("workflow.backends.github.subprocess.run", side_effect=run) as patched,
+        pytest.raises(OperationError, match="Lost claim race"),
+    ):
+        backend.apply_marker_change(
+            "1", MarkerChange(set_state="refining", set_agent_claim="product-manager")
+        )
+    # Our own wip label was removed in the self-revert (and nobody else's).
+    edits = [c.args[0] for c in patched.call_args_list if "edit" in c.args[0]]
+    assert any("--remove-label=wip:product-manager" in e for e in edits)
+    assert not any("--remove-label=wip:developer" in e for e in edits)
+
+
+def test_claim_clean_win_no_revert() -> None:
+    """When ours is the only wip: label after the write, the claim stands and no
+    self-revert fires (#21)."""
+    backend = GitHubBackend(repo="owner/repo")
+    run = _claim_run_factory(verify_labels=["wip:product-manager"])
+    with mock.patch("workflow.backends.github.subprocess.run", side_effect=run) as patched:
+        backend.apply_marker_change(
+            "1", MarkerChange(set_state="refining", set_agent_claim="product-manager")
+        )
+    edits = [c.args[0] for c in patched.call_args_list if "edit" in c.args[0]]
+    assert not any(any(a.startswith("--remove-label=wip:") for a in e) for e in edits)
