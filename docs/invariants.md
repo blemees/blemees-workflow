@@ -110,6 +110,9 @@ An invariant lives in the layer that has the information to check it:
 | `PLAN_ADVANCE_OVER_CLAIM_ROLE` | ERROR | Advancing over a CLAIM transition requires an acting role permitted by the destination working state and not conflicting with an existing claim. | `hitl-principles.md#5` | `_plan_advance` |
 | `PLAN_ADVANCE_OVER_CLAIM_TYPE` | ERROR | Advancing over a CLAIM transition requires the issue's type to be accepted by the destination working state. | `hitl-principles.md#5` | `_plan_advance` |
 | `PLAN_ADVANCE_TRANSITION_EXISTS` | ERROR | advance's destination is reachable by a transition out of the current state. | `hitl-principles.md#5` | `_plan_advance` |
+| `PLAN_AUDIT_AT_PENDING_GATE` | ERROR | check / revoke target the gate whose audit is currently pending. | `hitl-principles.md#5` | `_plan_confirm` |
+| `PLAN_AUDIT_SINGLE_PENDING` | ERROR | record-action requires no other audit already pending on the issue. | `hitl-principles.md#5` | `_plan_record_action` |
+| `PLAN_AWAIT_GATE_AT_SOURCE` | ERROR | await-signal fires only from the gate's source state. | `hitl-principles.md#5` | `_plan_await_signal` |
 | `PLAN_CLAIM_NOT_ALREADY_CLAIMED` | ERROR | An issue already claimed by another role cannot be re-claimed. | `hitl-principles.md#5` | `_plan_claim` |
 | `PLAN_CLAIM_NOT_ON_CLOSING` | ERROR | A closing state cannot be claimed (closing states are sinks). | `hitl-principles.md#5` | `_plan_claim` |
 | `PLAN_CLAIM_REQUIRES_STATE` | ERROR | claim requires the issue to have a current state. | `hitl-principles.md#5` | `_plan_claim` |
@@ -117,6 +120,24 @@ An invariant lives in the layer that has the information to check it:
 | `PLAN_CLAIM_ROLE_REQUIRED` | ERROR | claim requires an agent role. | `hitl-principles.md#5` | `_plan_claim` |
 | `PLAN_CLAIM_TRANSITION_EXISTS` | ERROR | claim resolves to exactly one CLAIM transition out of the current state (a destination must exist and be unambiguous). | `hitl-principles.md#5` | `_plan_claim` |
 | `PLAN_CLAIM_TYPE_ACCEPTED` | ERROR | The issue's type is accepted by the destination working state's `issue_types`. | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_COLLECT_CONTRIBUTOR_HAS_STATE` | ERROR | collect requires the contributor to have a current state. | `hitl-principles.md#5` | `_plan_collect` |
+| `PLAN_COLLECT_ELIGIBILITY` | ERROR | A collected contributor is on one of the collector's `from_states`, of an accepted type, and not already collected (unless `--force`). | `hitl-principles.md#5` | `_plan_collect` |
+| `PLAN_GATE_AT_AWAITING_GATE` | ERROR | approve / reject target the gate the issue is currently awaiting. | `hitl-principles.md#5` | `_plan_approve` |
+| `PLAN_GATE_DESTINATION_RESOLVES` | ERROR | A verdict-style gate requires a `--destination` among its options; a binary gate's destination must match its single option. | `hitl-principles.md#5` | `_plan_approve` |
+| `PLAN_GATE_IN_CATALOG` | ERROR | The named gate is loaded and present in the human-gate catalog. | `hitl-principles.md#5` | `_plan_approve` |
+| `PLAN_GATE_REQUIRED` | ERROR | A catalogued-gate operation (await / approve / reject / record-action / check / revoke) requires a `--gate`. | `hitl-principles.md#5` | `_plan_approve` |
+| `PLAN_HUMAN_CLAIM_NOT_HELD` | ERROR | A human-claim singleton can't be taken when it is already held. | `hitl-principles.md#5` | `_plan_review` |
+| `PLAN_HUMAN_CLAIM_REQUIRES_MARKER` | ERROR | Taking a human-claim singleton requires its marker active (review→awaiting-gate, audit→audit-pending, advise→awaiting-input). | `hitl-principles.md#5` | `_plan_review` |
+| `PLAN_RECORD_ACTION_REVERSIBLE` | ERROR | record-action (audit) requires a reversible destination. | `hitl-principles.md#5` | `_plan_record_action` |
 | `PLAN_RELEASE_NO_MARKER_DRIFT` | ERROR | release's origin → current must match a real CLAIM transition (no marker drift). | `hitl-principles.md#5` | `_plan_release` |
 | `PLAN_RELEASE_REQUIRES_CLAIM` | ERROR | release requires an active agent claim. | `hitl-principles.md#5` | `_plan_release` |
 | `PLAN_RELEASE_REQUIRES_ORIGIN` | ERROR | release requires a `last-state` origin marker (set at claim time). | `hitl-principles.md#5` | `_plan_release` |
+| `PLAN_REQUEST_INPUT_BODY_REQUIRED` | ERROR | request-input requires a `--body`. | `hitl-principles.md#5` | `_plan_request_input` |
+| `PLAN_REQUEST_INPUT_NO_GATE_IN_FLIGHT` | ERROR | request-input requires no input already awaited and no catalogued gate in flight. | `hitl-principles.md#5` | `_plan_request_input` |
+| `PLAN_REQUEST_INPUT_TOPIC_DECLARED` | ERROR | request-input's `--topic` is one the current working state declares in `human_inputs`. | `hitl-principles.md#5` | `_plan_request_input` |
+| `PLAN_RESPOND_BODY_REQUIRED` | ERROR | respond requires a `--body`. | `hitl-principles.md#5` | `_plan_respond` |
+| `PLAN_RESPOND_REQUIRES_AWAITING_INPUT` | ERROR | respond requires an awaiting-input marker active. | `hitl-principles.md#5` | `_plan_respond` |
+| `PLAN_SINGLE_GATE_IN_FLIGHT` | ERROR | Starting a gate requires no other HITL gate or audit already in flight. | `hitl-principles.md#5` | `_plan_await_signal` |
+| `PLAN_SINGLE_HUMAN_CLAIM_SINGLETON` | ERROR | At most one human-claim singleton (reviewing / auditing / advising) is active at a time. | `hitl-principles.md#5` | `_plan_review` |
+| `PLAN_SPAWN_PARENT_HAS_STATE` | ERROR | spawn requires the parent issue to have a current state. | `hitl-principles.md#5` | `_plan_spawn` |
+| `PLAN_SPAWN_PR_REQUIRES_HEAD` | ERROR | A pr-typed spawn requires a `--head` source branch. | `hitl-principles.md#5` | `_plan_spawn` |
