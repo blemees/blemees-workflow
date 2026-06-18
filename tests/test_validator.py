@@ -305,6 +305,82 @@ def test_duplicate_handoff_state_names_pass() -> None:
     assert not any("declared by multiple processes" in f.message for f in findings)
 
 
+def test_duplicate_gate_names_across_processes_error() -> None:
+    """A gate name declared by two processes is forbidden — gate names are
+    globally unique across the whole workflow (#19)."""
+    first = StateMachine(name="first")
+    first.states["a"] = State(name="a", state_class=StateClass.WORKING)
+    first.states["b"] = State(name="b", state_class=StateClass.RESTING)
+    first.transitions.append(
+        Transition(
+            source="a",
+            destination="b",
+            label="gated → b",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="shared_gate",
+        )
+    )
+    second = StateMachine(name="second")
+    second.states["c"] = State(name="c", state_class=StateClass.WORKING)
+    second.states["d"] = State(name="d", state_class=StateClass.RESTING)
+    second.transitions.append(
+        Transition(
+            source="c",
+            destination="d",
+            label="gated → d",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="shared_gate",
+        )
+    )
+
+    findings = validate_state_machine(
+        first,
+        catalog=None,
+        sibling_machines={"first": first, "second": second},
+    )
+
+    assert any(
+        f.severity is Severity.ERROR
+        and "Gate name 'shared_gate' is declared by multiple processes" in f.message
+        for f in findings
+    )
+
+
+def test_unique_gate_names_across_processes_pass() -> None:
+    first = StateMachine(name="first")
+    first.states["a"] = State(name="a", state_class=StateClass.WORKING)
+    first.states["b"] = State(name="b", state_class=StateClass.RESTING)
+    first.transitions.append(
+        Transition(
+            source="a",
+            destination="b",
+            label="gated → b",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="first_gate",
+        )
+    )
+    second = StateMachine(name="second")
+    second.states["c"] = State(name="c", state_class=StateClass.WORKING)
+    second.states["d"] = State(name="d", state_class=StateClass.RESTING)
+    second.transitions.append(
+        Transition(
+            source="c",
+            destination="d",
+            label="gated → d",
+            transition_type=TransitionType.ADVANCE,
+            gate_name="second_gate",
+        )
+    )
+
+    findings = validate_state_machine(
+        first,
+        catalog=None,
+        sibling_machines={"first": first, "second": second},
+    )
+
+    assert not any("declared by multiple processes" in f.message for f in findings)
+
+
 def test_audit_with_irreversible_destination_errors() -> None:
     """Audit-default-level on a gate that lands on an irreversible state.
     Reversibility is derived from the destination state via the gated

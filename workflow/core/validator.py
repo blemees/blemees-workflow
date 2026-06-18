@@ -84,6 +84,7 @@ def validate_state_machine(
         findings.extend(_check_handoffs_have_partners(state_machine, handoff_index))
     if sibling_machines is not None:
         findings.extend(_check_duplicate_state_names(state_machine, sibling_machines))
+        findings.extend(_check_duplicate_gate_names(state_machine, sibling_machines))
         findings.extend(_check_spawns(state_machine, sibling_machines))
         findings.extend(_check_collects(state_machine, sibling_machines))
         findings.extend(_check_entry_not_also_target(state_machine, sibling_machines))
@@ -910,6 +911,57 @@ def _check_duplicate_state_names(
                     f"{all_processes}, but not every declaration is `handoff: true` "
                     f"(non-handoff: {non_handoff}). State-name routing is only "
                     "unambiguous for unique state names or explicit handoff interfaces."
+                ),
+                location=state_machine.source_path,
+            )
+        )
+    return findings
+
+
+@invariant(
+    id="GATE_NAMES_UNIQUE",
+    statement="A gate name is declared by at most one process across the whole workflow.",
+    severity=Severity.ERROR,
+    layer="validator",
+    principle="hitl-principles.md#6",
+)
+def _check_duplicate_gate_names(
+    state_machine: StateMachine,
+    sibling_machines: dict[str, StateMachine],
+) -> list[ValidationFinding]:
+    """Gate names are globally unique across processes.
+
+    Processes are separate only for human comprehension — gate names (like
+    state names) share one flat namespace across the whole workflow. A gate
+    name declared by two processes is forbidden: trust grants key on the gate
+    name (`control_point`) with no process qualifier, so a duplicate would let
+    one process's relaxation silently apply to the other (#19). Unlike state
+    names there is no `handoff` escape hatch — a gate is owned by exactly one
+    process.
+    """
+    findings: list[ValidationFinding] = []
+    processes_by_gate: dict[str, set[str]] = {}
+    for process_name, machine in sibling_machines.items():
+        for transition in machine.transitions:
+            if transition.gate_name is not None:
+                processes_by_gate.setdefault(transition.gate_name, set()).add(process_name)
+
+    own_gates = {t.gate_name for t in state_machine.transitions if t.gate_name is not None}
+    emitted: set[str] = set()
+    for gate_name, processes in processes_by_gate.items():
+        if len(processes) < 2 or gate_name not in own_gates or gate_name in emitted:
+            continue
+        emitted.add(gate_name)
+        findings.append(
+            ValidationFinding(
+                severity=Severity.ERROR,
+                principle_cite="hitl-principles.md#6",
+                message=(
+                    f"Gate name {gate_name!r} is declared by multiple processes "
+                    f"{sorted(processes)}. Gate names are globally unique across the "
+                    "whole workflow — trust grants key on the gate name with no process "
+                    "qualifier, so a duplicate would let one process's relaxation leak "
+                    "into another. Rename so each gate has a single owning process."
                 ),
                 location=state_machine.source_path,
             )

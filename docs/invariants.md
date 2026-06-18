@@ -89,6 +89,7 @@ An invariant lives in the layer that has the information to check it:
 | `ENTRY_NOT_ALSO_TARGET` | ERROR | An is_initial state is not also a collects target or a spawn target — one entry path per state. | `state-machine-principles.md#2` | `_check_entry_not_also_target` |
 | `GATES_HAVE_UNIQUE_SOURCE` | ERROR | A gate fires from exactly one source state (verdict-style gates share a source, differing only by destination). | `hitl-principles.md#6` | `_check_gates_have_unique_source` |
 | `GATES_ONLY_ON_ADVANCE` | ERROR | A `human_gate` is valid only on an ADVANCE transition, not CLAIM or EVENT. | `hitl-principles.md#6` | `_check_gates_only_on_advance` |
+| `GATE_NAMES_UNIQUE` | ERROR | A gate name is declared by at most one process across the whole workflow. | `hitl-principles.md#6` | `_check_duplicate_gate_names` |
 | `HANDOFFS_HAVE_PARTNERS` | ERROR | Every handoff state is declared by at least one other process. | `state-machine-principles.md#9` | `_check_handoffs_have_partners` |
 | `HUMAN_INPUTS_RESOLVED` | ERROR | Every human-input topic referenced on a working state resolves in human-inputs.json (a missing directory is a warning). | `hitl-principles.md#7` | `_check_human_inputs_resolved` |
 | `IRREVERSIBLE_DESTINATIONS_GATED` | WARNING | Every transition into an irreversible destination carries a human gate. | `state-machine-principles.md#11` | `_check_irreversible_destinations_gated` |

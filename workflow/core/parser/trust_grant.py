@@ -154,17 +154,19 @@ def parse_trust_grant(source: str | Path) -> TrustGrant:
     )
 
 
-def load_team_grants(team_dir: str | Path, workflow: str | None = None) -> dict[str, TrustGrant]:
+def load_team_grants(team_dir: str | Path) -> dict[str, TrustGrant]:
     """Load every `*.json` under a team's grant directory.
 
     Returns a `{control_point: TrustGrant}` map. Files that fail to parse
     are logged at WARN and skipped — one bad grant does not poison the rest.
     Subdirectories (e.g., `trust-grants/<workflow>/<gate>.json`) are walked.
 
-    When `workflow` is given, only grants whose `workflow` field matches are
-    loaded — a gate name is unique only *within* a process, so without this
-    filter a same-named gate's relaxation would leak across processes (#19).
-    Grants are keyed by `control_point`, which is unambiguous once filtered.
+    A `control_point` is a gate name, and gate names are globally unique
+    across the whole workflow (enforced by the `GATE_NAMES_UNIQUE` validator),
+    so the flat `{control_point: grant}` keying is unambiguous — there is no
+    per-process scoping to do. A genuine duplicate `control_point` therefore
+    means two grant files target the *same* gate; we keep the first and warn
+    (#19).
     """
     path = Path(team_dir)
     if not path.exists() or not path.is_dir():
@@ -177,13 +179,10 @@ def load_team_grants(team_dir: str | Path, workflow: str | None = None) -> dict[
         except ParseError as exc:
             logger.warning("Skipping trust grant %s: %s", json_path, exc)
             continue
-        if workflow is not None and grant.workflow != workflow:
-            continue
         if grant.control_point in grants:
             logger.warning(
-                "Duplicate trust grant for control_point %r (workflow %r) in %s; keeping first.",
+                "Duplicate trust grant for control_point %r in %s; keeping first.",
                 grant.control_point,
-                grant.workflow,
                 team_dir,
             )
             continue

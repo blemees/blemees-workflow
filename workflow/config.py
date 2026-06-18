@@ -299,16 +299,15 @@ def load_process(
     if human_inputs_path.exists():
         human_input_directory = parse_human_input_directory(human_inputs_path)
 
-    resolved_process_name = process_name or (state_machine.name or "unnamed")
-
     # Trust grants — priority: explicit grants_dir > env > agent config > default.
-    # Filtered to this process: a gate name is unique only within a process, so
-    # grants for a same-named gate in another process must not leak here (#19).
+    # Keyed by control_point (gate name); gate names are globally unique across
+    # the whole workflow (GATE_NAMES_UNIQUE), so the flat keying never collides
+    # across processes (#19).
     grants: dict[str, TrustGrant] = {}
     if grants_dir is None:
         grants_dir = discover_grants_dir(agent_home=agent_home, agent_config=agent_config)
     if grants_dir is not None and grants_dir.exists():
-        grants = load_team_grants(grants_dir, workflow=resolved_process_name)
+        grants = load_team_grants(grants_dir)
 
     agent_role = agent_config.get("agent-role")
     if agent_role is not None and not isinstance(agent_role, str):
@@ -319,7 +318,7 @@ def load_process(
         agent_role = agent_role.strip("{}").strip() or None
 
     return Process(
-        process_name=resolved_process_name,
+        process_name=process_name or (state_machine.name or "unnamed"),
         state_machine=state_machine,
         catalog=catalog,
         role_directory=role_directory,
