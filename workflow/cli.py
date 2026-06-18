@@ -387,9 +387,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Spawn a child issue on the target process declared by the "
             "parent state's `spawns` field. The child gets a Refs #<parent> "
-            "footer plus a `parent-of:<parent>` label; the parent gets a "
-            "`subprocess:<child>` label so the auto-advance on child close "
-            "can resolve the relationship. For pr-typed spawns, --head is "
+            "footer plus a `parent-of:<parent>` label — the sole record of the "
+            "relationship; the auto-advance on child close finds the cohort by "
+            "querying that label (ADR-0003). For pr-typed spawns, --head is "
             "required (PRs need a source branch)."
         ),
     )
@@ -1605,24 +1605,8 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
                 issue_type=type_entry.github_issue_type if type_entry else None,
             )
 
-        # Mark the parent with the subprocess id.
-        from workflow.backends.base import MarkerChange
-
-        backend.apply_marker_change(
-            args.issue,
-            MarkerChange(),  # no marker changes; we add the label out-of-band
-        )
-        backend.ensure_label(f"subprocess:{child_id}")
-        backend._gh(
-            "issue",
-            "edit",
-            str(args.issue),
-            "--repo",
-            backend.repo,
-            "--add-label",
-            f"subprocess:{child_id}",
-        )
-
+        # The parent is not marked — the relationship lives solely on the
+        # child's `parent-of:<parent>` label; the cohort is a query (ADR-0003).
         if ctx["json_output"]:
             print(
                 _json.dumps(

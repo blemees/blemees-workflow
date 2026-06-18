@@ -60,11 +60,11 @@ class IssueState:
     # `parent-of:<parent-id>` label on GitHub). None means this issue
     # was not spawned by anyone. Used by the cascade-advance logic to
     # walk back up the spawn chain when a child terminates.
+    # The inverse — a parent's children — is NOT stored as a marker. The
+    # cohort is discovered on demand by querying the `parent-of:` label
+    # (`list_issues(parent_of=...)`); there is no parent-side registry
+    # (ADR-0003).
     parent_of: str | None = None
-    # Spawn children — every issue this issue spawned (one per spawned
-    # child). Populated from `subprocess:<child-id>` labels on GitHub.
-    # Empty when this issue isn't a spawn parent.
-    subprocess_children: tuple[str, ...] = ()
     # Misc
     extras: dict[str, str] = field(default_factory=dict)  # backend-specific extras
 

@@ -31,7 +31,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from workflow.backends.base import IssueState, MarkerChange, TrackerBackend
+from workflow.backends.base import IssueFilters, IssueState, MarkerChange, TrackerBackend
 from workflow.core.model.state_machine import StateMachine
 from workflow.errors import BackendError
 
@@ -179,21 +179,19 @@ def _apply_spawn_parent_cascade(
     if triggering_rule is None:
         return None
 
-    # Wait-for-all: every active child on the parent must satisfy its
-    # rule. Gather subprocess children from labels.
+    # Wait-for-all: every active child on the parent must satisfy its rule.
+    # The cohort is discovered by querying the dependent-side `parent-of:`
+    # label (ADR-0003) — there is no parent-side registry. This needs the
+    # backend's list to surface closed issues and PRs (see #31), since a
+    # child that just closed is exactly what triggers the cascade.
+    try:
+        cohort = backend.list_issues(IssueFilters(parent_of=parent_id))
+    except BackendError as exc:
+        logger.warning("cascade: cannot list child cohort of parent %s: %s", parent_id, exc)
+        # Conservative: if we can't enumerate the cohort, don't advance.
+        return None
     target_state: str | None = None
-    for sibling_id in parent_state.subprocess_children:
-        try:
-            sibling = backend.read_issue(sibling_id)
-        except BackendError as exc:
-            logger.warning(
-                "cascade: cannot read sibling %s of parent %s: %s",
-                sibling_id,
-                parent_id,
-                exc,
-            )
-            # Treat unreadable siblings as not-satisfied (conservative).
-            return None
+    for sibling in cohort:
         if sibling.state is None:
             return None
         if sibling.issue_type is not None:
