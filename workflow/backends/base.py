@@ -218,10 +218,15 @@ class TrackerBackend(Protocol):
         change: MarkerChange,
         audit_comment: str | None = None,
     ) -> None:
-        """Atomically apply a marker change and post the audit comment.
+        """Apply a marker change and post the audit comment.
 
-        The backend MUST honor the atomicity guarantee in
-        `backends/<name>-encoding.md` — readers never see partial state.
+        The state change itself (the marker/label swap) MUST be atomic — readers
+        never see a torn state marker. Side effects that a tracker can't bundle
+        into that swap (assignment, close, pr-ready, the audit comment) are
+        applied as a best-effort sequence *after* it; on failure the backend
+        MUST raise rather than leave a silent inconsistency, and SHOULD name the
+        repair. The audit comment is posted last so it never records a
+        transition that didn't happen.
         """
         ...
 
