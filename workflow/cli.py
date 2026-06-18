@@ -36,6 +36,9 @@ from workflow.core.operations import (
     claim_issue as claim_issue_op,
 )
 from workflow.core.operations import (
+    collect_into as collect_into_op,
+)
+from workflow.core.operations import (
     reject_audit as reject_audit_op,
 )
 from workflow.core.operations import (
@@ -2288,7 +2291,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
     (unless --force) is not already collected. Marks each contributor with a
     single `collected-by:<collector>` label (ADR-0003).
     """
-    from workflow.backends.base import IssueFilters, MarkerChange
+    from workflow.backends.base import IssueFilters
 
     ctx = _ctx_obj_from_args(args)
     contributor_ids = [r.lstrip("#") for r in args.refs]
@@ -2383,19 +2386,24 @@ def _do_collect_into(args: argparse.Namespace) -> int:
                 print(f"  #{cid}")
         return 0
 
-    # 4. Mark each contributor `collected-by:<collector>` — the sole record of
-    #    the relationship; the collector is not labelled (ADR-0003).
+    # 4. Mark each contributor `collected-by:<collector>` through the operation
+    #    seam: the pure planner validates eligibility, the controller applies the
+    #    marker. The collector is never touched (ADR-0003). Step 2 already
+    #    validated the whole set, so this loop is all-or-nothing in practice.
+    controller = _build_controller(collector_ctx, dry_run=False)
     for cid in contributor_ids:
         try:
-            backend.apply_marker_change(
-                cid,
-                MarkerChange(set_collected_by=str(args.issue)),
-                audit_comment=f"Collected into #{args.issue}.",
+            collect_into_op.run(
+                controller,
+                issue_id=cid,
+                collector_id=str(args.issue),
+                from_states=collects.from_states,
+                issue_types=collects.issue_types or (),
+                force=args.force,
             )
-        except BackendError as exc:
+        except WorkflowError as exc:
             print(
-                f"Collector #{args.issue} labelled, but failed to mark "
-                f"contributor #{cid} as collected-by — {exc}",
+                f"Failed to collect contributor #{cid} into #{args.issue} — {exc}",
                 file=sys.stderr,
             )
             return 2
