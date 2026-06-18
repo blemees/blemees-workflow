@@ -169,6 +169,13 @@
         "general"
       ]
     },
+    "rollback_requested": {
+      "class": "resting",
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "release"
+      ]
+    },
     "rolling_back": {
       "class": "working",
       "issue_types": [
@@ -291,9 +298,15 @@
     },
     {
       "source": "monitoring",
-      "destination": "rolling_back",
+      "destination": "rollback_requested",
       "type": "advance",
       "label": "on-call triggers rollback"
+    },
+    {
+      "source": "rollback_requested",
+      "destination": "rolling_back",
+      "type": "claim",
+      "label": "IC / RM claims rollback"
     },
     {
       "source": "rolling_back",

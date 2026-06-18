@@ -192,6 +192,36 @@ def test_plan_claim_already_claimed_errors() -> None:
         )
 
 
+def test_plan_claim_without_claim_transition_errors() -> None:
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="ready_for_dev", agent_claim=None)
+    with pytest.raises(OperationError, match="No CLAIM transition"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.CLAIM_ISSUE,
+                issue_id="1",
+                role="product-manager",
+            ),
+            state,
+            workflow,
+        )
+
+
+def test_plan_claim_from_closing_state_errors() -> None:
+    workflow = _build_workflow()
+    state = IssueState(issue_id="1", state="promoted", agent_claim=None)
+    with pytest.raises(OperationError, match="Cannot claim closing state"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.CLAIM_ISSUE,
+                issue_id="1",
+                role="product-manager",
+            ),
+            state,
+            workflow,
+        )
+
+
 def test_plan_release() -> None:
     workflow = _build_workflow()
     state = IssueState(

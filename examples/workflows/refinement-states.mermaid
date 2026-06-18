@@ -8,6 +8,7 @@ stateDiagram-v2
 
     [*] --> raw: ▶ raw
     raw --> refining: PM claims raw
+    followup_requested --> refining: PM claims spawned follow-up
     refining --> duplicate: PM marks duplicate
     refining --> wont_fix: PM marks won't-fix
     refining --> consult_requested: PM requests consult
@@ -19,16 +20,14 @@ stateDiagram-v2
     spike_returned --> consulting: consultant claims to process spike findings
     refining --> ready_for_dev: PM marks ready (feat/bug/chore/exp)
     ready_bounced --> refining: PM claims bounced issue
+    ready_for_dev --> refining: PM claims ready issue for staleness check
     refining --> deprioritized: PM parks issue
-    ready_for_dev --> deprioritized: PM parks issue
     deprioritized --> refining: PM claims to re-refine (staleness check)
-    deprioritized --> wont_fix: PM kills parked issue
     duplicate --> [*]: ■ duplicate
     wont_fix --> [*]: ■ wont_fix
-    ready_for_dev --> [*]: ⊙ ready_for_dev
     [*] --> ready_bounced: ⊙ ready_bounced
-    [*] --> raw: ᐉ complete
-    [*] --> raw: ᐉ iterated
+    [*] --> followup_requested: ᐉ complete
+    [*] --> followup_requested: ᐉ iterated
 
     note left of spiking
         ᐉ ready_for_spike (spike)

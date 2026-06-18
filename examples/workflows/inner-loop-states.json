@@ -15,6 +15,13 @@
         "experiment"
       ]
     },
+    "ready_for_chore": {
+      "class": "resting",
+      "reversibility": "reversible-fast",
+      "issue_types": [
+        "chore"
+      ]
+    },
     "ready_for_spike": {
       "class": "resting",
       "reversibility": "reversible-slow",
@@ -113,6 +120,12 @@
       "destination": "implementing",
       "type": "claim",
       "label": "developer claims issue"
+    },
+    {
+      "source": "ready_for_chore",
+      "destination": "implementing",
+      "type": "claim",
+      "label": "developer claims spawned chore"
     },
     {
       "source": "ready_for_spike",

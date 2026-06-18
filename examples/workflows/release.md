@@ -36,7 +36,8 @@ stateDiagram-v2
     rolling_out --> ready_for_monitoring: rollout reaches 100% (external monitoring signal)
     ready_for_monitoring --> monitoring: on-call claims post-deploy watch
     monitoring --> released: on-call confirms post-deploy window clean
-    monitoring --> rolling_back: on-call triggers rollback
+    monitoring --> rollback_requested: on-call triggers rollback
+    rollback_requested --> rolling_back: IC / RM claims rollback
     rolling_back --> rolled_back: rollback completes
     abandoned --> [*]: ■ abandoned
     rolled_back --> [*]: ■ rolled_back
@@ -72,6 +73,7 @@ stateDiagram-v2
 | `rolling_out` | resting | reversible-slow | — | release | — | — | — |
 | `ready_for_monitoring` | resting | reversible-slow | — | release | — | — | — |
 | `monitoring` | working | — | developer | release | blocked-on-data, general | — | — |
+| `rollback_requested` | resting | reversible-fast | — | release | — | — | — |
 | `rolling_back` | working | — | incident-commander, release-manager | release | clarify-scope, needs-arch-review, blocked-on-data, general | — | — |
 | `rolled_back` | resting | reversible-slow | — | — | — | reverted | completed |
 | `released` | resting | reversible-slow | — | — | — | shipped | completed |
@@ -94,7 +96,8 @@ stateDiagram-v2
 | `rolling_out` | `ready_for_monitoring` | event | 'rollout reaches 100% (external monitoring signal)' | — | — |
 | `ready_for_monitoring` | `monitoring` | claim | 'on-call claims post-deploy watch' | — | — |
 | `monitoring` | `released` | advance | 'on-call confirms post-deploy window clean' | — | — |
-| `monitoring` | `rolling_back` | advance | 'on-call triggers rollback' | — | — |
+| `monitoring` | `rollback_requested` | advance | 'on-call triggers rollback' | — | — |
+| `rollback_requested` | `rolling_back` | claim | 'IC / RM claims rollback' | — | — |
 | `rolling_back` | `rolled_back` | advance | 'rollback completes' | — | — |
 
 ## Cross-process interfaces

@@ -23,6 +23,7 @@ stateDiagram-v2
 
     [*] --> raw: ▶ raw
     raw --> refining: PM claims raw
+    followup_requested --> refining: PM claims spawned follow-up
     refining --> duplicate: PM marks duplicate
     refining --> wont_fix: PM marks won't-fix
     refining --> consult_requested: PM requests consult
@@ -34,16 +35,14 @@ stateDiagram-v2
     spike_returned --> consulting: consultant claims to process spike findings
     refining --> ready_for_dev: PM marks ready (feat/bug/chore/exp)
     ready_bounced --> refining: PM claims bounced issue
+    ready_for_dev --> refining: PM claims ready issue for staleness check
     refining --> deprioritized: PM parks issue
-    ready_for_dev --> deprioritized: PM parks issue
     deprioritized --> refining: PM claims to re-refine (staleness check)
-    deprioritized --> wont_fix: PM kills parked issue
     duplicate --> [*]: ■ duplicate
     wont_fix --> [*]: ■ wont_fix
-    ready_for_dev --> [*]: ⊙ ready_for_dev
     [*] --> ready_bounced: ⊙ ready_bounced
-    [*] --> raw: ᐉ complete
-    [*] --> raw: ᐉ iterated
+    [*] --> followup_requested: ᐉ complete
+    [*] --> followup_requested: ᐉ iterated
 
     note left of spiking
         ᐉ ready_for_spike (spike)
@@ -58,6 +57,7 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `raw` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
+| `followup_requested` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
 | `refining` | working | — | product-manager | bug, feature, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
 | `consult_requested` | resting | reversible-fast | — | bug, feature, experiment | — | — | — |
 | `consulting` | working | — | architect, designer, security-engineer | bug, feature, experiment | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
@@ -75,6 +75,7 @@ stateDiagram-v2
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
 | `raw` | `refining` | claim | 'PM claims raw' | — | — |
+| `followup_requested` | `refining` | claim | 'PM claims spawned follow-up' | — | — |
 | `refining` | `duplicate` | advance | 'PM marks duplicate' | — | — |
 | `refining` | `wont_fix` | advance | "PM marks won't-fix" | — | — |
 | `refining` | `consult_requested` | advance | 'PM requests consult' | — | — |
@@ -86,10 +87,9 @@ stateDiagram-v2
 | `spike_returned` | `consulting` | claim | 'consultant claims to process spike findings' | — | — |
 | `refining` | `ready_for_dev` | advance | 'PM marks ready (feat/bug/chore/exp)' | — | — |
 | `ready_bounced` | `refining` | claim | 'PM claims bounced issue' | — | — |
+| `ready_for_dev` | `refining` | claim | 'PM claims ready issue for staleness check' | — | — |
 | `refining` | `deprioritized` | advance | 'PM parks issue' | — | — |
-| `ready_for_dev` | `deprioritized` | advance | 'PM parks issue' | — | — |
 | `deprioritized` | `refining` | claim | 'PM claims to re-refine (staleness check)' | — | — |
-| `deprioritized` | `wont_fix` | advance | 'PM kills parked issue' | — | — |
 
 ## Cross-process interfaces
 
@@ -98,9 +98,9 @@ stateDiagram-v2
 | State | Kind | From | Detail |
 |---|---|---|---|
 | `raw` | ▶ entry | — (external) | `create-issue --to raw` — issue created (external) |
-| `raw` | ᐉ spawn | [`experimentation`](./experimentation.md) · `iterated` | `experiment` issue |
-| `raw` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `bug` issue |
-| `raw` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `feature` issue |
+| `followup_requested` | ᐉ spawn | [`experimentation`](./experimentation.md) · `iterated` | `experiment` issue |
+| `followup_requested` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `bug` issue |
+| `followup_requested` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `feature` issue |
 | `spike_returned` | ⊡ feedback | [`inner-loop`](./inner-loop.md) · `spike_completed` | child terminates → advance (spawned from `spiking`, `spike`) |
 | `ready_for_dev` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |
 | `ready_bounced` | ⊙ handoff | partner process(es) | shared resting state (also outbound) |

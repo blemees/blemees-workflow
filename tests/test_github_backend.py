@@ -233,6 +233,35 @@ def test_apply_marker_change_singletons_and_audit() -> None:
     assert "hitl:awaiting-ready_for_dev" in remove_str
 
 
+def test_apply_marker_change_clear_claim_does_not_unassign_without_mapping() -> None:
+    backend = GitHubBackend(repo="owner/repo")
+    pre = {
+        "labels": [
+            {"name": "state:refining"},
+            {"name": "wip:product-manager"},
+        ],
+        "assignees": [{"login": "alice"}],
+        "state": "OPEN",
+        "comments": [],
+        "number": 1,
+    }
+    responses = [
+        _proc(stdout=json.dumps(pre)),  # read pre-state
+        _proc(stdout=""),  # edit labels
+        _proc(stdout=json.dumps({"assignees": [{"login": "alice"}]})),
+        _proc(stdout=""),  # old buggy remove-assignee call
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        backend.apply_marker_change("1", MarkerChange(clear_agent_claim=True))
+
+    calls = [args.args[0] for args in patched.call_args_list]
+    assert any("--remove-label" in c and "wip:product-manager" in c for c in calls)
+    assert not any("--remove-assignee" in c for c in calls)
+
+
 def test_post_comment_uses_body_file() -> None:
     backend = GitHubBackend(repo="owner/repo")
     with mock.patch(
@@ -247,7 +276,7 @@ def test_post_comment_uses_body_file() -> None:
     # The body-file value is a temp path created by the backend.
 
 
-def test_assign_unassign() -> None:
+def test_assign_and_unassign_without_mapping() -> None:
     backend = GitHubBackend(repo="owner/repo")
     # assign:
     with mock.patch(
@@ -258,18 +287,12 @@ def test_assign_unassign() -> None:
     cmd = patched.call_args[0][0]
     assert "--add-assignee" in cmd and "alice" in cmd
 
-    # unassign:
-    responses = [
-        _proc(stdout=json.dumps({"assignees": [{"login": "alice"}]})),
-        _proc(stdout=""),
-    ]
     with mock.patch(
         "workflow.backends.github.subprocess.run",
-        side_effect=_fake_run_factory(responses),
+        return_value=_proc(stdout=""),
     ) as patched:
         backend.unassign("1")
-    calls = [args.args[0] for args in patched.call_args_list]
-    assert any("--remove-assignee" in c for c in calls)
+    patched.assert_not_called()
 
 
 def test_resolve_role_returns_none_by_default() -> None:
@@ -814,7 +837,9 @@ def test_registry_rejects_non_handoff_state_name_collision(tmp_path) -> None:
     registry = build_registry(workflow_dir=tmp_path)
     assert registry is not None
     registry.get_process("a")
-    with pytest.raises(ConfigError, match="Duplicate state names|Duplicate state name|declared by both"):
+    with pytest.raises(
+        ConfigError, match="Duplicate state names|Duplicate state name|declared by both"
+    ):
         registry.get_process("b")
 
 

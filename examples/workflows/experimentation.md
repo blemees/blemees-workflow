@@ -15,9 +15,9 @@ stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
     %%   Handoff: measuring (shared resting state)
-    %%   Spawn:   promoted → process inner-loop (issue_type=chore, initial=ready_for_dev)
-    %%   Spawn:   killed → process inner-loop (issue_type=chore, initial=ready_for_dev)
-    %%   Spawn:   iterated → process (derived from initial_state) (issue_type=experiment, initial=raw)
+    %%   Spawn:   promoted → process inner-loop (issue_type=chore, initial=ready_for_chore)
+    %%   Spawn:   killed → process inner-loop (issue_type=chore, initial=ready_for_chore)
+    %%   Spawn:   iterated → process (derived from initial_state) (issue_type=experiment, initial=followup_requested)
     %%
 
     measuring --> measurement_complete: measurement window elapses (time)
@@ -25,8 +25,8 @@ stateDiagram-v2
     aborting --> aborted: PO publishes abort reason
     measurement_complete --> analyzing: PO claims experiment for analysis
     analyzing --> measuring: PO extends experiment, resets window
-    analyzing --> promoted: PO promotes experiment to feature (files promotion chore on process refinement)
-    analyzing --> killed: PO kills experiment (files cleanup chore on process refinement)
+    analyzing --> promoted: PO promotes experiment to feature (files promotion chore on process inner-loop)
+    analyzing --> killed: PO kills experiment (files cleanup chore on process inner-loop)
     analyzing --> iterated: PO requests experiment iteration (files new experiment on process refinement)
     promoted --> [*]: ■ promoted
     killed --> [*]: ■ killed
@@ -34,13 +34,13 @@ stateDiagram-v2
     aborted --> [*]: ■ aborted
 
     note left of promoted
-        ᐉ ready_for_dev (chore)
+        ᐉ ready_for_chore (chore)
     end note
     note left of killed
-        ᐉ ready_for_dev (chore)
+        ᐉ ready_for_chore (chore)
     end note
     note left of iterated
-        ᐉ raw (experiment)
+        ᐉ followup_requested (experiment)
     end note
 ```
 
@@ -66,8 +66,8 @@ stateDiagram-v2
 | `aborting` | `aborted` | advance | 'PO publishes abort reason' | — | — |
 | `measurement_complete` | `analyzing` | claim | 'PO claims experiment for analysis' | — | — |
 | `analyzing` | `measuring` | advance | 'PO extends experiment, resets window' | — | — |
-| `analyzing` | `promoted` | advance | 'PO promotes experiment to feature (files promotion chore on process refinement)' | — | — |
-| `analyzing` | `killed` | advance | 'PO kills experiment (files cleanup chore on process refinement)' | — | — |
+| `analyzing` | `promoted` | advance | 'PO promotes experiment to feature (files promotion chore on process inner-loop)' | — | — |
+| `analyzing` | `killed` | advance | 'PO kills experiment (files cleanup chore on process inner-loop)' | — | — |
 | `analyzing` | `iterated` | advance | 'PO requests experiment iteration (files new experiment on process refinement)' | — | — |
 
 ## Cross-process interfaces
@@ -82,8 +82,8 @@ stateDiagram-v2
 
 | State | Kind | To | Detail |
 |---|---|---|---|
-| `promoted` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_dev` | as `chore` issue (independent) |
-| `killed` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_dev` | as `chore` issue (independent) |
-| `iterated` | ᐉ spawn | _(derived)_ · `raw` | as `experiment` issue (independent) |
+| `promoted` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_chore` | as `chore` issue (independent) |
+| `killed` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_chore` | as `chore` issue (independent) |
+| `iterated` | ᐉ spawn | _(derived)_ · `followup_requested` | as `experiment` issue (independent) |
 | `measuring` | ⊙ handoff | partner process(es) | shared resting state (also inbound) |
 | `aborted` | ■ exit | — (closes) | abandoned; closes `not planned` |

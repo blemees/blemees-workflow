@@ -570,17 +570,14 @@ class GitHubBackend:
         )
 
     def unassign(self, issue_id: str) -> None:
-        current = self.assignee(issue_id)
-        if current:
-            self._gh(
-                "issue",
-                "edit",
-                str(issue_id),
-                "--repo",
-                self.repo,
-                "--remove-assignee",
-                current,
-            )
+        # Claims are framework-managed via `wip:<role>` labels, but GitHub
+        # assignees are not yet framework-managed because role→handle mapping
+        # is still unresolved. Do not remove a human/UI assignment that this
+        # backend cannot prove it created.
+        logger.debug(
+            "unassign(%r) skipped; no framework-managed role-to-handle mapping configured.",
+            issue_id,
+        )
 
     def edit_issue(
         self,

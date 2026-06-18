@@ -502,6 +502,13 @@ def _plan_claim(
         raise OperationError(
             f"Issue already claimed by {state.agent_claim!r}; cannot claim as {role!r}."
         )
+    current_state = state_machine.states.get(state.state) if state.state is not None else None
+    if state.state is None:
+        raise OperationError("Cannot claim issue without a current workflow state.")
+    if current_state is not None and current_state.is_closing:
+        raise OperationError(
+            f"Cannot claim closing state {state.state!r}; closing states are sinks."
+        )
     # Role check is done once the destination is resolved (below), since
     # the role-restriction now lives on the destination working state.
 
@@ -533,6 +540,11 @@ def _plan_claim(
             raise OperationError(
                 f"Multiple CLAIM transitions from {state.state!r}: {options}. "
                 f"Pass --to to disambiguate."
+            )
+        else:
+            raise OperationError(
+                f"No CLAIM transition from {state.state!r}; issue cannot be claimed "
+                "from this state."
             )
         if transition is not None:
             new_state = transition.destination

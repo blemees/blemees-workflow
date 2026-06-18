@@ -1,6 +1,6 @@
 # Process: postmortem
 
-Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files follow-ups (bug/chore/feature) on refinement via the closing-state spawn declaration — `workflow spawn-issue --issue-type bug --initial-state raw` (etc.) for each item.
+Document the timeline, root cause, and remediation for an incident. Spawned by incident-response on stabilization; closes at `complete`. On close, the PM files bug/feature follow-ups on refinement and chore follow-ups on inner-loop via the closing-state spawn declaration.
 
 > Defined in: `postmortem-states.json`
 
@@ -14,9 +14,9 @@ Document the timeline, root cause, and remediation for an incident. Spawned by i
 stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
-    %%   Spawn:   complete → process (derived from initial_state) (issue_type=bug, initial=raw)
-    %%   Spawn:   complete → process inner-loop (issue_type=chore, initial=ready_for_dev)
-    %%   Spawn:   complete → process (derived from initial_state) (issue_type=feature, initial=raw)
+    %%   Spawn:   complete → process (derived from initial_state) (issue_type=bug, initial=followup_requested)
+    %%   Spawn:   complete → process inner-loop (issue_type=chore, initial=ready_for_chore)
+    %%   Spawn:   complete → process (derived from initial_state) (issue_type=feature, initial=followup_requested)
     %%
 
     pending --> drafting: PM claims postmortem
@@ -25,9 +25,9 @@ stateDiagram-v2
     [*] --> pending: ᐉ stabilized
 
     note left of complete
-        ᐉ raw (bug)
-        ᐉ ready_for_dev (chore)
-        ᐉ raw (feature)
+        ᐉ followup_requested (bug)
+        ᐉ ready_for_chore (chore)
+        ᐉ followup_requested (feature)
     end note
 ```
 
@@ -58,6 +58,6 @@ stateDiagram-v2
 
 | State | Kind | To | Detail |
 |---|---|---|---|
-| `complete` | ᐉ spawn | _(derived)_ · `raw` | as `bug` issue (independent) |
-| `complete` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_dev` | as `chore` issue (independent) |
-| `complete` | ᐉ spawn | _(derived)_ · `raw` | as `feature` issue (independent) |
+| `complete` | ᐉ spawn | _(derived)_ · `followup_requested` | as `bug` issue (independent) |
+| `complete` | ᐉ spawn | [`inner-loop`](./inner-loop.md) · `ready_for_chore` | as `chore` issue (independent) |
+| `complete` | ᐉ spawn | _(derived)_ · `followup_requested` | as `feature` issue (independent) |

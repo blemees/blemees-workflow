@@ -50,7 +50,7 @@
       "spawns": {
         "process": "inner-loop",
         "issue_type": "chore",
-        "initial_state": "ready_for_dev"
+        "initial_state": "ready_for_chore"
       },
       "closes": {
         "taxonomy": "shipped",
@@ -63,7 +63,7 @@
       "spawns": {
         "process": "inner-loop",
         "issue_type": "chore",
-        "initial_state": "ready_for_dev"
+        "initial_state": "ready_for_chore"
       },
       "closes": {
         "taxonomy": "abandoned",
@@ -75,7 +75,7 @@
       "reversibility": "reversible-fast",
       "spawns": {
         "issue_type": "experiment",
-        "initial_state": "raw"
+        "initial_state": "followup_requested"
       },
       "closes": {
         "taxonomy": "superseded",
@@ -126,13 +126,13 @@
       "source": "analyzing",
       "destination": "promoted",
       "type": "advance",
-      "label": "PO promotes experiment to feature (files promotion chore on process refinement)"
+      "label": "PO promotes experiment to feature (files promotion chore on process inner-loop)"
     },
     {
       "source": "analyzing",
       "destination": "killed",
       "type": "advance",
-      "label": "PO kills experiment (files cleanup chore on process refinement)"
+      "label": "PO kills experiment (files cleanup chore on process inner-loop)"
     },
     {
       "source": "analyzing",

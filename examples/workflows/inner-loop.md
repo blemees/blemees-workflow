@@ -27,6 +27,7 @@ stateDiagram-v2
 
     [*] --> ready_for_dev: ▶ ready_for_dev
     ready_for_dev --> implementing: developer claims issue
+    ready_for_chore --> implementing: developer claims spawned chore
     ready_for_spike --> implementing_spike: developer claims spike
     ready_for_hotfix --> implementing: developer claims hotfix
     implementing --> ready_bounced: developer bounces ticket
@@ -36,9 +37,9 @@ stateDiagram-v2
     [*] --> ready_for_dev: ⊙ ready_for_dev
     staged --> [*]: ⊙ staged
     ready_bounced --> [*]: ⊙ ready_bounced
-    [*] --> ready_for_dev: ᐉ complete
-    [*] --> ready_for_dev: ᐉ killed
-    [*] --> ready_for_dev: ᐉ promoted
+    [*] --> ready_for_chore: ᐉ complete
+    [*] --> ready_for_chore: ᐉ killed
+    [*] --> ready_for_chore: ᐉ promoted
     [*] --> ready_for_hotfix: ᐉ execute_mitigation
     [*] --> ready_for_spike: ᐉ spiking
 
@@ -55,6 +56,7 @@ stateDiagram-v2
 | Name | Class | Reversibility | Roles | Issue types | Human inputs | Closure taxonomy | Close reason |
 |---|---|---|---|---|---|---|---|
 | `ready_for_dev` | resting | reversible-slow | — | bug, feature, chore, experiment | — | — | — |
+| `ready_for_chore` | resting | reversible-fast | — | chore | — | — | — |
 | `ready_for_spike` | resting | reversible-slow | — | spike | — | — | — |
 | `ready_for_hotfix` | resting | reversible-fast | — | hotfix | — | — | — |
 | `implementing` | working | — | developer | bug, feature, chore, experiment, hotfix | clarify-scope, needs-arch-review, needs-security-review, needs-ux-input, blocked-on-data, general | — | — |
@@ -68,6 +70,7 @@ stateDiagram-v2
 | From | To | Type | Label | Gate | HITL level |
 |---|---|---|---|---|---|
 | `ready_for_dev` | `implementing` | claim | 'developer claims issue' | — | — |
+| `ready_for_chore` | `implementing` | claim | 'developer claims spawned chore' | — | — |
 | `ready_for_spike` | `implementing_spike` | claim | 'developer claims spike' | — | — |
 | `ready_for_hotfix` | `implementing` | claim | 'developer claims hotfix' | — | — |
 | `implementing` | `ready_bounced` | advance | 'developer bounces ticket' | — | — |
@@ -81,9 +84,9 @@ stateDiagram-v2
 | State | Kind | From | Detail |
 |---|---|---|---|
 | `ready_for_dev` | ▶ entry | — (external) | `create-issue --to ready_for_dev` — engineer files chore directly (skips refinement) |
-| `ready_for_dev` | ᐉ spawn | [`experimentation`](./experimentation.md) · `killed` | `chore` issue |
-| `ready_for_dev` | ᐉ spawn | [`experimentation`](./experimentation.md) · `promoted` | `chore` issue |
-| `ready_for_dev` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `chore` issue |
+| `ready_for_chore` | ᐉ spawn | [`experimentation`](./experimentation.md) · `killed` | `chore` issue |
+| `ready_for_chore` | ᐉ spawn | [`experimentation`](./experimentation.md) · `promoted` | `chore` issue |
+| `ready_for_chore` | ᐉ spawn | [`postmortem`](./postmortem.md) · `complete` | `chore` issue |
 | `ready_for_hotfix` | ᐉ spawn | [`mitigation`](./mitigation.md) · `execute_mitigation` | `hotfix` issue |
 | `ready_for_spike` | ᐉ spawn | [`refinement`](./refinement.md) · `spiking` | `spike` issue |
 | `staged` | ⊡ feedback | [`pr`](./pr.md) · `merged` | child terminates → advance (spawned from `implementing`, `pr`) |

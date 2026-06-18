@@ -9,6 +9,7 @@ stateDiagram-v2
 
     [*] --> ready_for_dev: ▶ ready_for_dev
     ready_for_dev --> implementing: developer claims issue
+    ready_for_chore --> implementing: developer claims spawned chore
     ready_for_spike --> implementing_spike: developer claims spike
     ready_for_hotfix --> implementing: developer claims hotfix
     implementing --> ready_bounced: developer bounces ticket
@@ -18,9 +19,9 @@ stateDiagram-v2
     [*] --> ready_for_dev: ⊙ ready_for_dev
     staged --> [*]: ⊙ staged
     ready_bounced --> [*]: ⊙ ready_bounced
-    [*] --> ready_for_dev: ᐉ complete
-    [*] --> ready_for_dev: ᐉ killed
-    [*] --> ready_for_dev: ᐉ promoted
+    [*] --> ready_for_chore: ᐉ complete
+    [*] --> ready_for_chore: ᐉ killed
+    [*] --> ready_for_chore: ᐉ promoted
     [*] --> ready_for_hotfix: ᐉ execute_mitigation
     [*] --> ready_for_spike: ᐉ spiking
 

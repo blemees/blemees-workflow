@@ -48,9 +48,13 @@ def test_emit_star_edges_use_process_map_symbols(
     refinement = parse_state_machine(refinement_workflow_path)
     inner_loop = parse_state_machine(inner_loop_workflow_path)
 
-    assert "[*] --> raw: ▶ raw" in emit_mermaid(refinement)
-    assert "ready_for_dev --> [*]: ⊙ ready_for_dev" in emit_mermaid(refinement)
-    assert "[*] --> ready_bounced: ⊙ ready_bounced" in emit_mermaid(refinement)
+    refinement_text = emit_mermaid(refinement)
+    assert "[*] --> raw: ▶ raw" in refinement_text
+    assert (
+        "ready_for_dev --> refining: PM claims ready issue for staleness check" in refinement_text
+    )
+    assert "ready_for_dev --> [*]: ⊙ ready_for_dev" not in refinement_text
+    assert "[*] --> ready_bounced: ⊙ ready_bounced" in refinement_text
 
     registry = build_registry(workflow_dir=workflow_dir)
     assert registry is not None
@@ -101,11 +105,12 @@ def test_emit_inner_loop_renders_claim_groups(
 ) -> None:
     text = emit_mermaid(parse_state_machine(inner_loop_workflow_path))
     # Standard PR-producing claims (bug/feature/chore/experiment) all
-    # enter via the consolidated `ready_for_dev → implementing` claim —
-    # the issue_type carries the variation. Hotfix has its own urgent
-    # handoff state (reversible-fast). Spike has its own working state
-    # because it doesn't spawn a PR.
+    # enter via the consolidated `ready_for_dev → implementing` claim;
+    # spawned chores use `ready_for_chore → implementing`. Hotfix has its
+    # own urgent handoff state (reversible-fast). Spike has its own working
+    # state because it doesn't spawn a PR.
     assert "ready_for_dev --> implementing" in text
+    assert "ready_for_chore --> implementing" in text
     assert "ready_for_hotfix --> implementing" in text
     assert "ready_for_spike --> implementing_spike" in text
 
@@ -130,9 +135,9 @@ def test_emit_spawn_state_notes_for_multi_spawn_closing(workflow_dir: Path) -> N
     text = emit_mermaid(postmortem)
 
     assert "note left of complete" in text
-    assert "ᐉ raw (bug)" in text
-    assert "ᐉ ready_for_dev (chore)" in text
-    assert "ᐉ raw (feature)" in text
+    assert "ᐉ followup_requested (bug)" in text
+    assert "ᐉ ready_for_chore (chore)" in text
+    assert "ᐉ followup_requested (feature)" in text
 
 
 def test_emit_spawn_feedback_note_on_advance_target(workflow_dir: Path) -> None:

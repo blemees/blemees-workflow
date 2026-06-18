@@ -29,10 +29,10 @@ def test_validate_against_shipped_workflows(
     workflow_dir: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """Validate iterates every workflow in the directory. The shipped tree
-    predates HITL, so we expect either no findings or warnings — no errors."""
+    """Validate iterates every workflow in the directory; shipped examples
+    should remain clean."""
     rc = cli(["--workflow-dir", str(workflow_dir), "validate-workflow"])
-    assert rc in (0, 1)
+    assert rc == 0
     output = capsys.readouterr().out
     assert output  # non-empty
     # At least one shipped process is reported.
@@ -44,7 +44,7 @@ def test_validate_json_output(
     capsys: pytest.CaptureFixture,
 ) -> None:
     rc = cli(["--json", "--workflow-dir", str(workflow_dir), "validate-workflow"])
-    assert rc in (0, 1)
+    assert rc == 0
     output = capsys.readouterr().out
     payload = json.loads(output)
     # Validate output is always grouped per workflow.

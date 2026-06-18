@@ -1,9 +1,9 @@
 stateDiagram-v2
     direction TB
     %% Cross-process interfaces:
-    %%   Spawn:   complete → process (derived from initial_state) (issue_type=bug, initial=raw)
-    %%   Spawn:   complete → process inner-loop (issue_type=chore, initial=ready_for_dev)
-    %%   Spawn:   complete → process (derived from initial_state) (issue_type=feature, initial=raw)
+    %%   Spawn:   complete → process (derived from initial_state) (issue_type=bug, initial=followup_requested)
+    %%   Spawn:   complete → process inner-loop (issue_type=chore, initial=ready_for_chore)
+    %%   Spawn:   complete → process (derived from initial_state) (issue_type=feature, initial=followup_requested)
     %%
 
     pending --> drafting: PM claims postmortem
@@ -12,7 +12,7 @@ stateDiagram-v2
     [*] --> pending: ᐉ stabilized
 
     note left of complete
-        ᐉ raw (bug)
-        ᐉ ready_for_dev (chore)
-        ᐉ raw (feature)
+        ᐉ followup_requested (bug)
+        ᐉ ready_for_chore (chore)
+        ᐉ followup_requested (feature)
     end note
