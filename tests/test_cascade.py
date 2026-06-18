@@ -68,11 +68,11 @@ class _MockBackend:
             self.pr_ready.append(issue_id)
 
     def list_issues(self, filters: IssueFilters) -> list[IssueState]:
-        """Cohort lookups only — filter the in-memory issues by parent_of /
+        """Cohort lookups only — filter the in-memory issues by child_of /
         collected_by (what the cascade queries)."""
         out: list[IssueState] = []
         for issue in self.issues.values():
-            if filters.parent_of is not None and issue.parent_of != filters.parent_of:
+            if filters.child_of is not None and issue.child_of != filters.child_of:
                 continue
             if filters.collected_by is not None and issue.collected_by != filters.collected_by:
                 continue
@@ -230,7 +230,7 @@ def test_cascade_spawn_parent_single_hop():
         issue_id="MIT-1",
         state="mitigated",
         agent_claim=None,
-        parent_of="INC-1",
+        child_of="INC-1",
     )
 
     apps = cascade_after_state_change(
@@ -389,14 +389,14 @@ def test_cascade_multi_hop_chain():
         issue_id="MIT-2",
         state="applying_mitigation",
         agent_claim="incident-responder",
-        parent_of="INC-2",
+        child_of="INC-2",
     )
     backend.issues["IL-4"] = IssueState(
         issue_id="IL-4",
         state="staged",
         agent_claim=None,
         collected_by="REL-3",
-        parent_of="MIT-2",
+        child_of="MIT-2",
     )
     backend.issues["REL-3"] = IssueState(
         issue_id="REL-3",
@@ -530,7 +530,7 @@ def test_cascade_cycle_guard_visits_state_pair_once():
         issue_id="C1",
         state="done_c",
         agent_claim=None,
-        parent_of="P1",
+        child_of="P1",
     )
 
     apps = cascade_after_state_change(registry, backend, "C1", backend.issues["C1"])
@@ -612,14 +612,14 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
         state="done_a",
         agent_claim=None,
         issue_type="kind_a",
-        parent_of="P",
+        child_of="P",
     )
     backend.issues["KB"] = IssueState(
         issue_id="KB",
         state="ready_b",
         agent_claim=None,
         issue_type="kind_b",
-        parent_of="P",
+        child_of="P",
     )
 
     # Only KA is satisfied; KB still resting. Parent must stay put.

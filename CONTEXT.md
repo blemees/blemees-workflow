@@ -245,9 +245,9 @@ The set of dependent issues attached to one anchor issue. Two instances:
 - **Child cohort** — the children spawned from one parent (spawn relationship).
 - **Contributor cohort** — the contributors gathered into one collector (collect relationship).
 
-Both follow one rule (ADR-0003): the relationship is recorded by a **single label on the dependent side** — `parent-of:<parent>` on each child, `collected-by:<collector>` on each contributor. There is no anchor-side registry (no `subprocess:`, no `collects:`). One label, one source of truth.
+Both follow one rule (ADR-0003): the relationship is recorded by a **single label on the dependent side** — `child-of:<parent>` on each child, `collected-by:<collector>` on each contributor. There is no anchor-side registry (no `subprocess:`, no `collects:`). One label, one source of truth.
 
-The label is the **trigger edge**: when a child enters a closing state, or a contributor changes state, the cascade reads that dependent's own label to find the anchor to advance or release. The **cohort** — all dependents of one anchor — is discovered on demand by querying `list_issues(label="parent-of:<parent>")` / `list_issues(label="collected-by:<collector>")`, never by reading the anchor. This is why the spawn cascade's **wait-for-all** semantics depend on the backend's list visibility covering closed issues and PRs (a closed dependent that just triggered the cascade must still appear in the cohort query).
+The label is the **trigger edge**: when a child enters a closing state, or a contributor changes state, the cascade reads that dependent's own label to find the anchor to advance or release. The **cohort** — all dependents of one anchor — is discovered on demand by querying `list_issues(label="child-of:<parent>")` / `list_issues(label="collected-by:<collector>")`, never by reading the anchor. This is why the spawn cascade's **wait-for-all** semantics depend on the backend's list visibility covering closed issues and PRs (a closed dependent that just triggered the cascade must still appear in the cohort query).
 
 A dependent is always labelled, even when its spawn/collect declares no `advance_on` rule (uniform labeling; the link is then informational only).
 

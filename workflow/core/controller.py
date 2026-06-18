@@ -195,7 +195,7 @@ class Controller:
 
         Opens a new issue/PR from `plan.create`, applies the plan's primary
         marker change to the new issue if non-empty (empty for spawn — the
-        `parent-of:` marker rides in `extra_labels`), then runs the cascade
+        `child-of:` marker rides in `extra_labels`), then runs the cascade
         against the new issue.
         """
         spec = plan.create

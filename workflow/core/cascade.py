@@ -3,7 +3,7 @@
 When an issue's state changes, two kinds of cross-process auto-advance can fire:
 
 1. **Spawn parent feedback.** If this issue was spawned by a parent
-   (it carries `parent-of:<parent>`), and the new state matches a key
+   (it carries `child-of:<parent>`), and the new state matches a key
    in the parent's `spawns.advance_on`, the parent advances to the
    mapped state.
 
@@ -137,9 +137,9 @@ def _apply_spawn_parent_cascade(
     Returns the parent's (id, post_state) for further cascading, or
     None if no advance fired this turn.
     """
-    if child_state.parent_of is None or child_state.state is None:
+    if child_state.child_of is None or child_state.state is None:
         return None
-    parent_id = child_state.parent_of
+    parent_id = child_state.child_of
     try:
         parent_state = backend.read_issue(parent_id)
     except BackendError as exc:
@@ -180,12 +180,12 @@ def _apply_spawn_parent_cascade(
         return None
 
     # Wait-for-all: every active child on the parent must satisfy its rule.
-    # The cohort is discovered by querying the dependent-side `parent-of:`
+    # The cohort is discovered by querying the dependent-side `child-of:`
     # label (ADR-0003) — there is no parent-side registry. This needs the
     # backend's list to surface closed issues and PRs (see #31), since a
     # child that just closed is exactly what triggers the cascade.
     try:
-        cohort = backend.list_issues(IssueFilters(parent_of=parent_id))
+        cohort = backend.list_issues(IssueFilters(child_of=parent_id))
     except BackendError as exc:
         logger.warning("cascade: cannot list child cohort of parent %s: %s", parent_id, exc)
         # Conservative: if we can't enumerate the cohort, don't advance.

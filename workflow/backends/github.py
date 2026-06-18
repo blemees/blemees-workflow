@@ -170,7 +170,7 @@ class GitHubBackend:
         `gh issue list` excludes pull requests and `gh pr list` excludes issues,
         so this queries both and merges the results, de-duplicated by id. Both
         are queried with `--state all` so closed issues and closed/merged PRs
-        are visible — cohort queries (`parent-of:` / `collected-by:`) and
+        are visible — cohort queries (`child-of:` / `collected-by:`) and
         closing-state searches depend on it (ADR-0003).
 
         The filter translation (applied identically to issues and PRs):
@@ -180,7 +180,7 @@ class GitHubBackend:
         - `filters.awaiting_gate` ("*" → match any awaiting; specific name → that label)
         - `filters.audit_pending` ("*" → match any audit-pending; specific → that label)
         - `filters.awaiting_input` (True → `--label hitl:awaiting-input`; False → exclude)
-        - `filters.parent_of` → `--label parent-of:<id>` (cohort: a parent's children)
+        - `filters.child_of` → `--label child-of:<id>` (cohort: a parent's children)
         - `filters.collected_by` → `--label collected-by:<id>` (cohort: a collector's contributors)
         - `filters.limit` → `--limit N` (applied per entity kind)
 
@@ -201,8 +201,8 @@ class GitHubBackend:
             label_filters.append(f"hitl:audit-{filters.audit_pending}")
         if filters.awaiting_input is True:
             label_filters.append("hitl:awaiting-input")
-        if filters.parent_of:
-            label_filters.append(f"parent-of:{filters.parent_of}")
+        if filters.child_of:
+            label_filters.append(f"child-of:{filters.child_of}")
         if filters.collected_by:
             label_filters.append(f"collected-by:{filters.collected_by}")
 
@@ -681,7 +681,7 @@ class GitHubBackend:
         issue_type: str | None = None
         human_input: str | None = None
         collected_by: str | None = None
-        parent_of: str | None = None
+        child_of: str | None = None
         reviewing = False
         auditing = False
         advising = False
@@ -707,11 +707,11 @@ class GitHubBackend:
                 continue
             # `collects:` (collector-side contributor registry) is intentionally
             # not parsed — the cohort is a `collected-by:` query now (ADR-0003).
-            if label.startswith("parent-of:"):
-                parent_of = label[len("parent-of:") :]
+            if label.startswith("child-of:"):
+                child_of = label[len("child-of:") :]
                 continue
             # `subprocess:` (parent-side child registry) is intentionally not
-            # parsed — the cohort is a `parent-of:` query now (ADR-0003).
+            # parsed — the cohort is a `child-of:` query now (ADR-0003).
             if not label.startswith("hitl:"):
                 continue
             suffix = label[len("hitl:") :]
@@ -748,7 +748,7 @@ class GitHubBackend:
             human_input=human_input,
             advising=advising,
             collected_by=collected_by,
-            parent_of=parent_of,
+            child_of=child_of,
         )
 
     def _marker_change_to_labels(

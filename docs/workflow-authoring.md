@@ -138,7 +138,7 @@ this closing state, then a fresh child issue is created on the target
 process. `advance_on` is FORBIDDEN (the parent has nothing left to advance
 to). Typical use: incident `stabilized` closing state spawns a postmortem.
 
-The child issue carries a `parent-of:<parent-id>` label and a `Refs
+The child issue carries a `child-of:<parent-id>` label and a `Refs
 #<parent-id>` body footer. The parent carries `subprocess:<child-id>`.
 Use `workflow spawn-issue --issue <parent>` to create the child explicitly.
 

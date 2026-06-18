@@ -86,7 +86,7 @@ class CreationSpec:
     The controller's create-then-apply path turns this into a
     `backend.create_issue` / `create_pull_request` call. `change` on the same
     plan (if non-empty) is then applied to the new issue; for spawn it is empty
-    because the only marker — `parent-of:<parent>` — rides in `extra_labels`.
+    because the only marker — `child-of:<parent>` — rides in `extra_labels`.
     """
 
     title: str
@@ -1075,7 +1075,7 @@ def _plan_spawn(request: OperationRequest, parent_state: IssueState) -> Operatio
     - `github_issue_type`  — native GitHub Issue Type name, or None
     - `title` / `head` / `base` — optional CLI inputs
 
-    The child carries only `parent-of:<parent>` (ADR-0003); the parent is left
+    The child carries only `child-of:<parent>` (ADR-0003); the parent is left
     untouched (empty `change`).
     """
     if parent_state.state is None:
@@ -1099,7 +1099,7 @@ def _plan_spawn(request: OperationRequest, parent_state: IssueState) -> Operatio
     )
     body = (request.body_text or "").rstrip() + footer
 
-    extra_labels = [f"parent-of:{parent_id}"]
+    extra_labels = [f"child-of:{parent_id}"]
     if entity != "pull_request":
         extra_labels.append(f"type:{spawn.issue_type}")
 
