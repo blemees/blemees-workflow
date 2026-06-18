@@ -148,9 +148,9 @@ class IssueFilters:
 class TrackerBackend(Protocol):
     """The contract a backend implementation satisfies.
 
-    Operations in `workflow.core.operations` call these methods. Each backend
-    provides the nine operations below; some backends may add tracker-specific
-    affordances, but the nine are the framework's required surface.
+    The framework's operations in `workflow.core.operations` call these methods.
+    Each backend provides every method defined below — they are the framework's
+    required surface — and may add tracker-specific affordances on top.
     """
 
     name: str  # short identifier, e.g., "github"

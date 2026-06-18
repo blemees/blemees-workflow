@@ -38,12 +38,13 @@ Per `docs/state-machine-principles.md` §1. Two ownership classes. **Closing** i
 
 ## Transition
 
-A directed edge from one state to another, with a typed label. Four types:
+A directed edge from one state to another, with a typed label. Three types (`TransitionType`):
 
-- **Claim** — resting → working (e.g., `developer claims ready_for_dev`).
-- **Role action** — working → resting (e.g., `developer opens PR`); landing in a closing state closes the issue.
-- **External** — resting → resting, driven by system event (e.g., `PR merged (external)`).
-- **Cross-process** — resting ↔ `[*]`, with handoff metadata pointing at the other process.
+- **Claim** (`claim`) — resting → working (e.g., `developer claims ready_for_dev`).
+- **Advance** (`advance`) — working → resting or a closing state, agent-driven (e.g., `developer opens PR`); landing in a closing state closes the issue.
+- **Event** (`event`) — a system/time event fired by automation, not an agent (e.g., `PR merged (external)`).
+
+There is no `cross_process` transition type — the parser rejects it. Cross-process movement is modeled with `handoff: true` states shared between processes (see "Cross-process handoff" below).
 
 Per `docs/state-machine-principles.md` §2.
 
@@ -95,7 +96,7 @@ Lives in `trust-grants/<process>/<gate>.json`. Per the upstream trust-grant-sche
 
 Every single-item command (`view-issue`, `create-issue`, `claim-issue`, `release-issue`, `advance-issue`, `request-input`, `post-comment`) ends its human-readable output with a `Next actions:` block describing what the agent could do next from the current state. The data behind it lives in `workflow.core.inspector.available_transitions` — a read-only function that walks the state machine's outgoing transitions and enriches each with the relevant human-gate row and any active trust grant. The block is informational on read-only commands and best-effort (silent on failure) so commands that don't strictly need workflow context still work outside a known workflow.
 
-For each gated transition the block surfaces: gate name, default vs effective level (so trust-grant relaxations are visible), triggering role, destination class + reversibility + closure taxonomy, and the path to the `agent_prepares` template the agent should attach via `--packet-from`. For resting states, the block emits a `claim-issue` suggestion (auto-resolved when unambiguous). For working states with a `wip_from` marker, it also surfaces `release-issue` and where it returns to.
+For each gated transition the block surfaces: gate name, default vs effective level (so trust-grant relaxations are visible), triggering role, destination class + reversibility + closure taxonomy, and the path to the `agent_prepares` template the agent should attach via `--packet-from`. For resting states, the block emits a `claim-issue` suggestion (auto-resolved when unambiguous). For working states with a `last-state` marker, it also surfaces `release-issue` and where it returns to.
 
 This means the agent does not have to consult the process documentation to figure out the next command — every operation that surfaces an issue's state surfaces its options too.
 
@@ -107,7 +108,7 @@ Per-process markdown (`<name>.md`) contains everything an agent needs to operate
 
 ## Issue type
 
-Issue types are declared at the **working-state** level. Every working state lists which types it accepts via `issue_types: [...]`; the field is required there and forbidden on resting / closing states. The process's overall accepted set is derived as the union of every working state's `issue_types` (`StateMachine.accepted_issue_types`).
+Issue types are declared per state via `issue_types: [...]`. The field is **required on working states and on non-closing resting states**, and **forbidden on closing states** (mutually exclusive with `closes`). The process's overall accepted set is the union of every state's `issue_types` — working *and* resting (`StateMachine.accepted_issue_types`); this matters for a process that carries a type by handoff/collect into a resting queue without ever claiming it into a working state (e.g. `release` holding dev tickets in `staged`).
 
 The type ids resolve against a shared `issue-types.json` (alongside `roles.json`) defining each type's display name, description, and optional backend-specific mappings (`github_issue_type`, `github_issue_type_color`).
 
@@ -170,7 +171,7 @@ A manual override is set via `workflow capabilities --set-encoding native|label`
 
 Provisions both org Issue Types and repo labels:
 
-- **Default** (`workflow setup-github`): best-effort — tries to create missing org Issue Types; if it can't (permissions), falls back to label encoding and provisions `type:*` labels on the repo. Always provisions state/wip/wip-from/hitl labels.
+- **Default** (`workflow setup-github`): best-effort — tries to create missing org Issue Types; if it can't (permissions), falls back to label encoding and provisions `type:*` labels on the repo. Always provisions state/wip/last-state/hitl labels.
 - **`--setup-org`**: admin path; creates missing Issue Types at the org and refreshes the capability cache. Fails loudly on any error. Does not touch repo labels.
 
 ## Closing the tracker's issue
@@ -189,15 +190,15 @@ This is **not** the same as a cross-process *handoff* (per principle 9), where t
 
 A bounce-back (e.g. inner-loop → refinement) is a handoff: the same issue continues elsewhere, so it must be a plain **shared resting state**, never a closing state. ADR-0002 makes the old "mark it superseded but keep it open" mislabel structurally impossible — a closing state always closes (`closes.reason` is required), so there's no way to tag a state as closing-superseded yet leave the issue open. Continuation is a shared resting state declared in both processes.
 
-## Origin marker (`wip-from`)
+## Origin marker (`last-state`)
 
-When `claim-issue` fires, the backend records `wip-from:<source-state>` alongside `wip:<role>`. On `release-issue`, the planner reads this marker and returns the issue to that resting state — the user never specifies a destination, eliminating the footgun of allowing arbitrary state jumps without a valid CLAIM transition.
+When `claim-issue` fires, the backend records `last-state:<source-state>` alongside `wip:<role>`. On `release-issue`, the planner reads this marker and returns the issue to that resting state — the user never specifies a destination, eliminating the footgun of allowing arbitrary state jumps without a valid CLAIM transition.
 
 A working state can have multiple incoming CLAIM transitions (e.g., `implementing` is claimed from both `ready_for_dev` initially and `staged` for revisions). The marker disambiguates without requiring user input.
 
-Whenever an issue leaves a working state (advance, approve, record-action, release), both `wip:<role>` and `wip-from:<source>` are cleared atomically. Per principle 1, working = exactly one role owns the item; once the issue is resting (incl. closing), no role owns it.
+Whenever an issue leaves a working state (advance, approve, record-action, release), both `wip:<role>` and `last-state:<source>` are cleared atomically. Per principle 1, working = exactly one role owns the item; once the issue is resting (incl. closing), no role owns it.
 
-If the marker drifts (no CLAIM transition from `wip_from` → current state), `release-issue` errors rather than corrupting state.
+If the marker drifts (no CLAIM transition from `last-state` → current state), `release-issue` errors rather than corrupting state.
 
 ## CLI flag conventions
 

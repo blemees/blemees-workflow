@@ -8,14 +8,14 @@ The tool is backend-neutral by design. Today it ships with a GitHub backend; fut
 
 ## Status
 
-Alpha. Implementing the eleven framework operations and the GitHub backend per `hitl-principles.md` § 5 and `backends/github-encoding.md`.
+Alpha. Implementing the framework operations and the GitHub backend per `hitl-principles.md` § 5 and `backends/github-encoding.md`.
 
 ## Installation
 
 The tool is built with [uv](https://docs.astral.sh/uv/). All commands assume uv is on PATH.
 
 ```bash
-cd tools/workflow-tool
+# From the repo root (the standalone `blemees-workflow` checkout):
 
 # Development install (creates .venv, installs dev tooling)
 uv sync --extra dev
@@ -46,7 +46,7 @@ uv run ruff format
 workflow --help                              # top-level help
 workflow <operation> --help                  # per-operation help
 
-workflow --agent-role product-manager init                     # scaffold .workflow/ for one role
+workflow --agent-role product-manager init-agent               # scaffold .workflow/ for one role
 workflow setup-github                                          # ensure org Issue Types (best-effort) + repo labels
 workflow setup-github --setup-org                              # admin path — create org Issue Types and refresh cache
 workflow capabilities                                          # show the per-(host, owner) encoding cache
@@ -62,9 +62,9 @@ workflow respond-request --issue 123 --body-from response.md
 
 The tool resolves the workflow's canonical artifacts at startup from a single `--workflow-dir` (or discovery), validates the contract, and dispatches the operation against the configured backend.
 
-## The framework's eleven operations
+## The framework's operations
 
-Three groups. See `hitl-principles.md` § 5 for full semantics.
+The catalogued / lifecycle operations below are grouped per `hitl-principles.md` § 5 (see it for full semantics); `await-signal` and `record-action` are internal primitives the agent never invokes directly. Beyond these, three **workflow operations** open or gather issues (see the last group).
 
 **Lifecycle:**
 
@@ -91,6 +91,12 @@ Three groups. See `hitl-principles.md` § 5 for full semantics.
 - `request-input` — agent invokes for an unanticipated moment.
 - `review-request` — human claims response.
 - `respond-request` — human provides input.
+
+**Workflow operations (open / gather issues):**
+
+- `create-issue` — open a new work item (or PR) in an initial state.
+- `spawn-issue` — open a child issue on another process per the parent state's `spawns` config.
+- `collect-into` — gather contributor issues into a collector via `collected-by:` labels.
 
 ## Configuration
 
@@ -125,7 +131,7 @@ See [`examples/`](examples/) for a fully populated multi-role tree with eleven a
 invocations. The recognized keys are:
 
 - `agent-role` (required for most operations) — the agent's role id, used
-  as the default actor for `claim-issue`, `list`, etc.
+  as the default actor for `claim-issue`, `view-inbox`, etc.
 - `workflow-dir` (optional) — override for where workflow files live;
   relative paths anchored to the agent home. Defaults to
   `<agent-home>/.workflow/workflows/`.
@@ -179,13 +185,13 @@ Config keys with relative path values are anchored to the agent home (so
 
 The github backend works against `github.com` and any GitHub Enterprise Server.
 There's almost nothing to configure: clone the GHES repo, `cd` into it, and run
-`workflow list`. The remote URL tells the tool which host and repo to talk to.
+`workflow view-inbox`. The remote URL tells the tool which host and repo to talk to.
 
 You can also be explicit:
 
 ```bash
-workflow --host ghe.example.com --repo myorg/myrepo list
-WORKFLOW_GH_HOST=ghe.example.com workflow list
+workflow --host ghe.example.com --repo myorg/myrepo view-inbox
+WORKFLOW_GH_HOST=ghe.example.com workflow view-inbox
 ```
 
 Resolution for `host` (highest priority first):
@@ -238,7 +244,7 @@ only.
 ```
 
 `agent-role` is the only required field (set via
-`workflow --agent-role <role> init`). Everything else is per-invocation or
+`workflow --agent-role <role> init-agent`). Everything else is per-invocation or
 auto-discovered.
 
 A per-role agent home pointing at a shared workflows directory (the
@@ -268,13 +274,19 @@ the agent home.
 
 ```
 workflow/
-  cli.py                       # argparse / click entry — one sub-command per operation
+  cli.py                       # argparse entry — one sub-command per operation
+  config.py                    # artifact resolution + the Workflow/Process registry
   core/
-    model/                     # dataclasses: StateMachine, State, Transition, HumanGate, TrustGrant, Role
-    parser/                    # mermaid, process doc, trust grant, roles parsers
-    validator.py               # cross-reference checks + static rules
+    model/                     # dataclasses: StateMachine, State, Transition, HumanGate, TrustGrant, Role, ...
+    parser/                    # JSON parsers: state_machine, human_gate_catalog, trust_grant, role_directory, issue_type_directory, human_input_directory
+    validator.py               # cross-artifact checks + static rules
+    invariants.py              # invariant registry (@invariant) feeding docs/invariants.md
     planner.py                 # operation → marker change set
     controller.py              # operation orchestration
+    cascade.py                 # cross-process advance_on propagation
+    inspector.py               # next-action introspection for view-issue / view-inbox
+    capability_cache.py        # per-(host, owner) encoding cache
+    emitter/                   # generate-docs: mermaid + invariants doc emitters
     operations/                # one module per framework operation
   backends/
     base.py                    # TrackerBackend protocol

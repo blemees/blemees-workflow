@@ -275,9 +275,9 @@ def _add_global_options(parser: argparse.ArgumentParser) -> None:
         ),
         help="Directory containing the workflow files "
         "(`*-states.json`, `*-human-gates.json`, `roles.json`). "
-        "If unset, discovered by walking up from cwd for a directory "
-        "with `*-states.json` files, or for the legacy "
-        "`skills/workflows/shared/resources/` path. "
+        "If unset, resolved from the WORKFLOW_DIR env var, then the agent "
+        "config's `workflow-dir` key, then `<agent-home>/.workflow/workflows/`. "
+        "Discovery is agent-scoped — it does NOT walk up from cwd. "
         "Env: WORKFLOW_DIR.",
     )
     parser.add_argument(

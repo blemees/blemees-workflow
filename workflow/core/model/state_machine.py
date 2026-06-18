@@ -65,7 +65,7 @@ class ClosureTaxonomy(Enum):
 class TransitionType(Enum):
     """Per state-machine-principles.md principle 2.
 
-    The four transition types the framework distinguishes. The mermaid parser
+    The three transition types the framework distinguishes. The mermaid parser
     infers the type from label patterns and source/destination state classes;
     the validator enforces principle 2's allowed combinations.
     """
