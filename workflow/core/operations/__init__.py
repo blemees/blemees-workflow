@@ -21,6 +21,7 @@ from workflow.core.operations import (
     review_audit,
     review_blocked,
     review_request,
+    spawn_issue,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "review_audit",
     "review_blocked",
     "review_request",
+    "spawn_issue",
 ]

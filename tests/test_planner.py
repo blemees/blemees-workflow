@@ -1240,3 +1240,81 @@ def test_advance_over_claim_with_conflicting_claim_errors() -> None:
             state,
             workflow,
         )
+
+
+# --------------------------------------------------------------------------- #
+# spawn — creating operation (pure CreationSpec assembly)
+
+
+def test_plan_spawn_builds_issue_creation_spec() -> None:
+    from workflow.backends.base import MarkerChange
+    from workflow.core.model.state_machine import Spawn
+
+    parent = IssueState(issue_id="100", state="refining", agent_claim="product-manager")
+    spawn = Spawn(
+        process="inner-loop", issue_type="hotfix", initial_state="ready_for_dev", advance_on=()
+    )
+    req = OperationRequest(
+        operation=Operation.SPAWN_ISSUE,
+        issue_id="100",
+        body_text="please fix",
+        extras={
+            "spawn": spawn,
+            "parent_process": "refinement",
+            "entity": "issue",
+            "github_issue_type": "Hotfix",
+        },
+    )
+    plan = plan_operation(req, parent, _build_workflow())
+
+    assert plan.operation is Operation.SPAWN_ISSUE
+    spec = plan.create
+    assert spec is not None
+    assert spec.entity == "issue"
+    assert spec.state == "ready_for_dev"
+    assert spec.github_issue_type == "Hotfix"
+    assert "parent-of:100" in spec.extra_labels
+    assert "type:hotfix" in spec.extra_labels
+    assert "Refs #100" in spec.body and "please fix" in spec.body
+    assert spec.title == "refining follow-up for #100"
+    # The parent is left untouched.
+    assert plan.change == MarkerChange()
+
+
+def test_plan_spawn_pr_requires_head() -> None:
+    from workflow.core.model.state_machine import Spawn
+
+    parent = IssueState(issue_id="5", state="refining", agent_claim="product-manager")
+    spawn = Spawn(process="pr", issue_type="pr", initial_state="draft", advance_on=())
+    req = OperationRequest(
+        operation=Operation.SPAWN_ISSUE,
+        issue_id="5",
+        extras={"spawn": spawn, "parent_process": "inner-loop", "entity": "pull_request"},
+    )
+    with pytest.raises(OperationError):
+        plan_operation(req, parent, _build_workflow())
+
+
+def test_plan_spawn_pr_builds_pr_creation_spec() -> None:
+    from workflow.core.model.state_machine import Spawn
+
+    parent = IssueState(issue_id="5", state="refining", agent_claim="product-manager")
+    spawn = Spawn(process="pr", issue_type="pr", initial_state="draft", advance_on=())
+    req = OperationRequest(
+        operation=Operation.SPAWN_ISSUE,
+        issue_id="5",
+        body_text="impl",
+        extras={
+            "spawn": spawn,
+            "parent_process": "inner-loop",
+            "entity": "pull_request",
+            "head": "feat/x",
+        },
+    )
+    spec = plan_operation(req, parent, _build_workflow()).create
+    assert spec is not None
+    assert spec.entity == "pull_request"
+    assert spec.head == "feat/x"
+    assert spec.draft is True  # initial_state == "draft"
+    # No type: label for PRs — the entity kind conveys the type.
+    assert spec.extra_labels == ("parent-of:5",)
