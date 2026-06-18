@@ -257,7 +257,6 @@ def test_cascade_collect_advance_propagates_to_contributors():
         issue_id="REL-1",
         state="released",
         agent_claim=None,
-        collects_contributors=("IL-1", "IL-2"),
     )
     backend.issues["IL-1"] = IssueState(
         issue_id="IL-1",
@@ -337,7 +336,6 @@ def test_cascade_release_clears_collection_no_state_change():
         issue_id="REL-2",
         state="cut",
         agent_claim=None,
-        collects_contributors=("IL-3",),
     )
     backend.issues["IL-3"] = IssueState(
         issue_id="IL-3",
@@ -404,7 +402,6 @@ def test_cascade_multi_hop_chain():
         issue_id="REL-3",
         state="released",
         agent_claim=None,
-        collects_contributors=("IL-4",),
     )
 
     apps = cascade_after_state_change(
@@ -452,7 +449,6 @@ def test_cascade_auto_advance_sets_pr_ready_for_destination():
         issue_id="REL-READY",
         state="released",
         agent_claim=None,
-        collects_contributors=("PR-1",),
     )
     backend.issues["PR-1"] = IssueState(
         issue_id="PR-1",
