@@ -212,8 +212,28 @@ class GitHubBackend:
         if filters.collected_by:
             label_filters.append(f"collected-by:{filters.collected_by}")
 
-        entries = self._list_entities("issue", label_filters, filters.limit)
-        entries += self._list_entities("pr", label_filters, filters.limit)
+        issue_entries = self._list_entities("issue", label_filters, filters.limit)
+        pr_entries = self._list_entities("pr", label_filters, filters.limit)
+
+        # Wildcard gate/audit and `awaiting_input is False` can't be expressed as
+        # `gh` label filters, so they're applied in Python *after* the `--limit`
+        # cap. If a kind's raw fetch hit that cap, matches beyond it were never
+        # seen — warn rather than silently under-report (#26). The honest fix is
+        # pagination; until then, the operator can raise --limit.
+        post_filtering = wildcard_awaiting or wildcard_audit or (filters.awaiting_input is False)
+        if post_filtering:
+            for kind, fetched in (("issue", issue_entries), ("pr", pr_entries)):
+                if len(fetched) >= filters.limit:
+                    logger.warning(
+                        "list_issues hit the --limit %d cap on %ss while a post-fetch filter "
+                        "(wildcard gate/audit or awaiting_input=False) is active; matches beyond "
+                        "the first %d may be missed. Raise --limit to widen the window.",
+                        filters.limit,
+                        kind,
+                        filters.limit,
+                    )
+
+        entries = issue_entries + pr_entries
 
         results: list[IssueState] = []
         seen: set[str] = set()

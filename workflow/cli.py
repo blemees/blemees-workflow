@@ -76,11 +76,31 @@ from workflow.core.validator import Severity, validate_state_machine
 from workflow.errors import (
     BackendError,
     ConfigError,
+    OperationError,
     ParseError,
     WorkflowError,
 )
 
 logger = logging.getLogger(__name__)
+
+# Exit codes (documented surface — agent scripts branch on these). argparse
+# reserves 2 for usage errors, so framework failures never reuse it (#26).
+EXIT_OK = 0
+EXIT_VALIDATION = 1  # validate-workflow / doctor-workflow reported findings
+EXIT_USAGE = 2  # argparse usage error (bad invocation) — set by argparse itself
+EXIT_OPERATION = 3  # OperationError — precondition not met; change state, then retry
+EXIT_BACKEND = 4  # BackendError — tracker/network failure; usually retryable as-is
+EXIT_CONFIG = 5  # ConfigError / ParseError — malformed or unresolvable workflow files
+
+
+def _exit_code_for(exc: WorkflowError) -> int:
+    """Map a WorkflowError to its documented exit code (#26)."""
+    if isinstance(exc, OperationError):
+        return EXIT_OPERATION
+    if isinstance(exc, BackendError):
+        return EXIT_BACKEND
+    # ConfigError, ParseError, and any other WorkflowError → "fix your inputs".
+    return EXIT_CONFIG
 
 
 PROG = "workflow"
@@ -113,18 +133,28 @@ def _add_body_args(parser: argparse.ArgumentParser, *, required: bool) -> None:
 def _resolve_body(args: argparse.Namespace) -> str | None:
     """Read the body text from either `--body` (inline) or `--body-from` (file).
 
-    Returns None when neither is set (optional cases). Errors via
-    `ConfigError` if the file can't be read.
+    Returns None when neither is set (optional cases). A body that is *provided
+    but empty* (`--body ""` or an empty `--body-from` file) is rejected with a
+    crisp `ConfigError`: argparse's required-body groups are satisfied by the
+    flag's mere presence, so an empty string would otherwise slip past the CLI
+    and fail later or post nothing (#26). Errors via `ConfigError` if the file
+    can't be read.
     """
-    if getattr(args, "body", None):
-        return str(args.body)
+    body = getattr(args, "body", None)
+    if body is not None:
+        if not str(body).strip():
+            raise ConfigError("--body was provided but is empty; give non-empty text or omit it.")
+        return str(body)
     body_from = getattr(args, "body_from", None)
     if body_from is None:
         return None
     try:
-        return Path(body_from).read_text(encoding="utf-8")
+        text = Path(body_from).read_text(encoding="utf-8")
     except OSError as exc:
         raise ConfigError(f"Could not read body file {body_from}: {exc}") from exc
+    if not text.strip():
+        raise ConfigError(f"Body file {body_from} is empty; give non-empty text or omit it.")
+    return text
 
 
 def _format_pr_body(user_body: str, refs: list[str]) -> str:
@@ -199,11 +229,14 @@ Plus utility commands: init-agent, validate-workflow, doctor-workflow, setup-git
 
 
 def _add_global_options(parser: argparse.ArgumentParser) -> None:
-    """Add the options that appear on every subcommand (via the parent parser pattern).
+    """Add the global options to the top-level parser.
 
-    These can appear either before or after the subcommand name; argparse
-    parses them on whichever parser they land in. Subcommand parsers inherit
-    via `parents=[parent]`.
+    These are defined on the top-level parser ONLY (not inherited by
+    subparsers via `parents=`), so they must appear **before** the subcommand
+    name — `workflow --repo owner/name view-issue --issue 5`, not
+    `workflow view-issue --issue 5 --repo owner/name`. This matches click's
+    group-option placement (see `build_parser`). Putting a global flag after
+    the subcommand is an argparse usage error (#26).
     """
     parser.add_argument(
         "--repo",
@@ -907,8 +940,7 @@ def cli(argv: list[str] | None = None) -> int:
     try:
         return args.func(args) or 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def main() -> None:
@@ -1264,7 +1296,9 @@ def _print_result(
     When `context` (a Process) is supplied and the post-state has a state,
     the human-readable rendering ends with a `Next actions:` block enumerating
     the agent's options. JSON output is unchanged (callers who want next
-    actions in JSON should use `view --json` for the structured form).
+    actions in JSON should use `workflow --json view-issue --issue <id>` for
+    the structured form — `--json` is a global flag, so it precedes the
+    subcommand).
     """
     if json_output:
         print(_json.dumps(_result_to_dict(result), indent=2, default=str))
@@ -1366,9 +1400,10 @@ def _result_to_dict(result: OperationResult) -> dict:
     }
 
 
-def _handle_workflow_error(exc: WorkflowError) -> None:
-    """Print a friendly message; the caller is responsible for the exit code."""
+def _handle_workflow_error(exc: WorkflowError) -> int:
+    """Print a friendly message and return the error's documented exit code (#26)."""
     print(f"error: {exc}", file=sys.stderr)
+    return _exit_code_for(exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -1394,8 +1429,7 @@ def _do_advance_issue(args: argparse.Namespace) -> int:
 
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_event_fired(args: argparse.Namespace) -> int:
@@ -1454,8 +1488,7 @@ def _do_event_fired(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_claim_issue(args: argparse.Namespace) -> int:
@@ -1478,8 +1511,7 @@ def _do_claim_issue(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_spawn_issue(args: argparse.Namespace) -> int:
@@ -1631,8 +1663,7 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
             )
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_release_issue(args: argparse.Namespace) -> int:
@@ -1644,8 +1675,7 @@ def _do_release_issue(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_review_blocked(args: argparse.Namespace) -> int:
@@ -1657,8 +1687,7 @@ def _do_review_blocked(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_approve_blocked(args: argparse.Namespace) -> int:
@@ -1676,8 +1705,7 @@ def _do_approve_blocked(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_reject_blocked(args: argparse.Namespace) -> int:
@@ -1694,8 +1722,7 @@ def _do_reject_blocked(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_review_audit(args: argparse.Namespace) -> int:
@@ -1707,8 +1734,7 @@ def _do_review_audit(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_approve_audit(args: argparse.Namespace) -> int:
@@ -1720,8 +1746,7 @@ def _do_approve_audit(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_reject_audit(args: argparse.Namespace) -> int:
@@ -1738,8 +1763,7 @@ def _do_reject_audit(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_request_input(args: argparse.Namespace) -> int:
@@ -1756,8 +1780,7 @@ def _do_request_input(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"], context=context)
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_review_request(args: argparse.Namespace) -> int:
@@ -1769,8 +1792,7 @@ def _do_review_request(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_respond_request(args: argparse.Namespace) -> int:
@@ -1786,8 +1808,7 @@ def _do_respond_request(args: argparse.Namespace) -> int:
         _print_result(result, json_output=ctx["json_output"])
         return 0
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
 
 def _do_create_issue(args: argparse.Namespace) -> int:
@@ -1809,27 +1830,24 @@ def _do_create_issue(args: argparse.Namespace) -> int:
         grants_dir=ctx.get("grants_dir"),
     )
     if registry is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 "No workflows directory found. Set WORKFLOW_DIR or run from "
                 "inside a tree containing `*-states.json` files."
             )
         )
-        return 2
 
     process_name = registry.find_process_for_state(args.initial_state)
     if process_name is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(f"State {args.initial_state!r} is not declared in any discovered workflow.")
         )
-        return 2
 
     # 2. Resolve and validate issue type.
     try:
         process = registry.get_process(process_name)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     supported_types = process.state_machine.accepted_issue_types
     issue_type: str | None = args.issue_type
@@ -1838,29 +1856,26 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             if len(supported_types) == 1:
                 issue_type = supported_types[0]
             else:
-                _handle_workflow_error(
+                return _handle_workflow_error(
                     ConfigError(
                         f"Process {process_name!r} supports multiple issue types "
                         f"{sorted(supported_types)}; pass --type to disambiguate."
                     )
                 )
-                return 2
         elif issue_type not in supported_types:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     f"Issue type {issue_type!r} is not declared in process "
                     f"{process_name!r}'s supported types {sorted(supported_types)}."
                 )
             )
-            return 2
     elif issue_type is not None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 f"Process {process_name!r} does not declare any issue types; "
                 f"--type {issue_type!r} cannot be applied."
             )
         )
-        return 2
 
     # Resolve the IssueType entry once. We need it early to know whether
     # this is a pull-request create (different backend call, extra required
@@ -1870,13 +1885,12 @@ def _do_create_issue(args: argparse.Namespace) -> int:
         try:
             type_entry = process.issue_type_directory.get(issue_type)
         except KeyError:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     f"Issue type {issue_type!r} is declared by the process "
                     f"but not defined in issue-types.json."
                 )
             )
-            return 2
 
     is_pr = type_entry is not None and type_entry.github_entity == "pull_request"
 
@@ -1901,41 +1915,36 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     # are used).
     if is_pr:
         if collects is not None:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     f"State {args.initial_state!r} declares `collects` but the "
                     f"resolved type is a pull request — collectors must not be "
                     f"pull-request types."
                 )
             )
-            return 2
         if not args.head:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError("--head BRANCH is required when creating a pull request.")
             )
-            return 2
         if not args.refs:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     "--refs N is required when creating a pull request "
                     "(repeat for multiple parents, e.g., --refs 123 --refs 456)."
                 )
             )
-            return 2
         if args.all_candidates or args.collect_none:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     "--all-candidates / --none are only valid when --to "
                     "lands on a state declaring `collects`."
                 )
             )
-            return 2
     elif collects is not None:
         if args.head or args.base:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError("--head / --base are only valid when creating pull requests.")
             )
-            return 2
         # Exactly one of --refs, --all-candidates, --none must be provided
         # to make the contributor set explicit. Listing candidates without
         # selecting any is a usage error.
@@ -1945,7 +1954,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             bool(args.collect_none),
         ]
         if sum(modes) != 1:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     f"State {args.initial_state!r} declares `collects`. "
                     f"Pass exactly one of --refs N (repeat for multiple), "
@@ -1953,56 +1962,50 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                     f"(empty collector)."
                 )
             )
-            return 2
     else:
         if args.head or args.base or args.refs:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     "--head / --base / --refs are only valid when --type "
                     "maps to GitHub pull requests or --to lands on a state "
                     "declaring `collects`."
                 )
             )
-            return 2
         if args.all_candidates or args.collect_none:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     "--all-candidates / --none are only valid when --to "
                     "lands on a state declaring `collects`."
                 )
             )
-            return 2
 
     # 3. Resolve claim role if --claim is set.
     claim_role: str | None = None
     if args.claim:
         claim_role = _resolve_agent_role(ctx)
         if not claim_role:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     "--claim requires an agent role. Pass --agent-role or "
                     "set AGENT_ROLE / config agent-role."
                 )
             )
-            return 2
 
     # 4. Load body.
     try:
         body_text = _resolve_body(args)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     # For PR creates, the body is mandatory — the framework wraps it in a
     # standard message format and a description is part of the contract.
     if is_pr and (body_text is None or not body_text.strip()):
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 "--body / --body-from is required when creating a pull "
                 "request — PRs need a description."
             )
         )
-        return 2
 
     # Contributor ids resolved against `collects`. For dry-run we pin to
     # whatever the user requested (no backend query); real-run also runs
@@ -2087,8 +2090,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     try:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     # Resolve contributors against the backend: query candidates (uncollected
     # issues in any `from_states` of the source process) when --all-candidates,
@@ -2101,21 +2103,19 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             try:
                 rows = backend.list_issues(IssueFilters(state=from_state, limit=200))
             except BackendError as exc:
-                _handle_workflow_error(exc)
-                return 2
+                return _handle_workflow_error(exc)
             for row in rows:
                 if row.collected_by is None:
                     candidates.append(row.issue_id)
         if args.all_candidates:
             if not candidates:
-                _handle_workflow_error(
+                return _handle_workflow_error(
                     ConfigError(
                         f"--all-candidates: no uncollected issues found in "
                         f"{collects_process} states "
                         f"{list(collects.from_states)}."
                     )
                 )
-                return 2
             contributor_ids = candidates
             # Re-render the body footer now that the set is known.
             suffix_refs = ", ".join(f"#{c}" for c in contributor_ids)
@@ -2126,7 +2126,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             candidate_set = set(candidates)
             invalid = [c for c in contributor_ids if c not in candidate_set]
             if invalid:
-                _handle_workflow_error(
+                return _handle_workflow_error(
                     ConfigError(
                         f"--refs references issue(s) {invalid} that are not "
                         f"uncollected candidates in {collects_process} states "
@@ -2134,7 +2134,6 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                         f"override the eligibility check."
                     )
                 )
-                return 2
 
     # Resolve issue-type encoding (native vs label) for non-PR creates. PRs
     # carry no native type and no `type:` label (the entity kind is the type).
@@ -2180,8 +2179,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             collect_contributors=contributor_ids,
         )
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
     new_id = create_result.created_issue_id
 
     # 6. If --claim, immediately claim the new issue.
@@ -2203,7 +2201,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 f"Created issue #{new_id} but claim failed: {exc}",
                 file=sys.stderr,
             )
-            return 2
+            return _exit_code_for(exc)
 
     if ctx["json_output"]:
         payload: dict[str, Any] = {
@@ -2279,27 +2277,23 @@ def _do_collect_into(args: argparse.Namespace) -> int:
     ctx = _ctx_obj_from_args(args)
     contributor_ids = [r.lstrip("#") for r in args.refs]
     if not contributor_ids:
-        _handle_workflow_error(ConfigError("--refs requires at least one id."))
-        return 2
+        return _handle_workflow_error(ConfigError("--refs requires at least one id."))
 
     # 1. Resolve the collector — read its state, then look up the
     #    `collects` declaration on that state.
     try:
         collector_ctx = _build_context_for_issue(ctx, args.issue)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
     backend = collector_ctx.backend
     try:
         collector_state_obj = backend.read_issue(args.issue)
     except BackendError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
     if collector_state_obj.state is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(f"Issue #{args.issue} has no `state:` label; cannot resolve `collects`.")
         )
-        return 2
     collector_state_def = collector_ctx.state_machine.states.get(collector_state_obj.state)
     collects = collector_state_def.collects if collector_state_def is not None else None
     collects_process: str | None = None
@@ -2317,7 +2311,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
             if registry is not None:
                 collects_process = registry.find_process_for_state(collects.from_states[0])
     if collects is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 f"Issue #{args.issue} is on state "
                 f"{collector_state_obj.state!r}, which does not declare "
@@ -2325,7 +2319,6 @@ def _do_collect_into(args: argparse.Namespace) -> int:
                 f"as collectors."
             )
         )
-        return 2
 
     # 2. Validate each contributor against the candidate set (unless --force).
     if not args.force:
@@ -2334,21 +2327,19 @@ def _do_collect_into(args: argparse.Namespace) -> int:
             try:
                 rows = backend.list_issues(IssueFilters(state=from_state, limit=200))
             except BackendError as exc:
-                _handle_workflow_error(exc)
-                return 2
+                return _handle_workflow_error(exc)
             for row in rows:
                 if row.collected_by is None:
                     candidates.add(row.issue_id)
         invalid = [cid for cid in contributor_ids if cid not in candidates]
         if invalid:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     f"--refs references issue(s) {invalid} that are not "
                     f"uncollected candidates in {collects_process} states "
                     f"{list(collects.from_states)}. Pass --force to override."
                 )
             )
-            return 2
 
     # 3. Dry-run path.
     if ctx["dry_run"]:
@@ -2374,6 +2365,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
     #    marker. The collector is never touched (ADR-0003). Step 2 already
     #    validated the whole set, so this loop is all-or-nothing in practice.
     controller = _build_controller(collector_ctx, dry_run=False)
+    marked: list[str] = []
     for cid in contributor_ids:
         try:
             collect_into_op.run(
@@ -2384,12 +2376,23 @@ def _do_collect_into(args: argparse.Namespace) -> int:
                 issue_types=collects.issue_types or (),
                 force=args.force,
             )
+            marked.append(cid)
         except WorkflowError as exc:
+            # Partial application: contributors are marked one at a time, so the
+            # ones before this failure already carry `collected-by:<collector>`.
+            # The marker write is idempotent, so re-running the same command is
+            # the repair — name what landed and what didn't so the operator
+            # isn't left guessing (#26).
+            remaining = contributor_ids[contributor_ids.index(cid) :]
             print(
-                f"Failed to collect contributor #{cid} into #{args.issue} — {exc}",
+                f"Failed to collect contributor #{cid} into #{args.issue} — {exc}\n"
+                f"Partially applied: {len(marked)} of {len(contributor_ids)} contributor(s) "
+                f"already marked collected-by:{args.issue} ({', '.join('#' + m for m in marked) or 'none'}). "
+                f"Not yet marked: {', '.join('#' + r for r in remaining)}. "
+                f"Re-run the same `collect-into` to finish — the marker is idempotent.",
                 file=sys.stderr,
             )
-            return 2
+            return _exit_code_for(exc)
 
     if ctx["json_output"]:
         print(
@@ -2418,19 +2421,17 @@ def _do_view_inbox(args: argparse.Namespace) -> int:
     try:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     role = _resolve_agent_role(ctx)
     if not role:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 "inbox needs an agent role. Pass --agent-role, set "
                 "AGENT_ROLE, or run `workflow init-agent --agent-role <role>` to "
                 "persist one in the agent config."
             )
         )
-        return 2
 
     from workflow.config import build_registry
     from workflow.core.inspector import inbox_for_role
@@ -2449,8 +2450,7 @@ def _do_view_inbox(args: argparse.Namespace) -> int:
             )
         items = inbox_for_role(registry, backend, role, args.limit)
     except (ConfigError, BackendError) as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     return _emit_issues(
         items, ctx, empty_message=f"(no inbox items or actionable wip for {role!r})"
@@ -2465,8 +2465,7 @@ def _do_search_issues(args: argparse.Namespace) -> int:
     try:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     try:
         filters = IssueFilters(
@@ -2479,8 +2478,7 @@ def _do_search_issues(args: argparse.Namespace) -> int:
         )
         items = backend.list_issues(filters)
     except (ConfigError, BackendError) as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     return _emit_issues(items, ctx, empty_message="(no issues matched the filters)")
 
@@ -2555,8 +2553,7 @@ def _do_post_comment(args: argparse.Namespace) -> int:
     try:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     if args.body is not None:
         body = args.body
@@ -2564,12 +2561,12 @@ def _do_post_comment(args: argparse.Namespace) -> int:
         try:
             body = Path(args.body_from).read_text(encoding="utf-8")
         except OSError as exc:
-            _handle_workflow_error(ConfigError(f"Could not read body file {args.body_from}: {exc}"))
-            return 2
+            return _handle_workflow_error(
+                ConfigError(f"Could not read body file {args.body_from}: {exc}")
+            )
 
     if not body.strip():
-        _handle_workflow_error(ConfigError("Comment body is empty; refusing to post."))
-        return 2
+        return _handle_workflow_error(ConfigError("Comment body is empty; refusing to post."))
 
     if ctx["dry_run"]:
         print(f"[dry-run] would post comment on #{args.issue}:")
@@ -2582,8 +2579,7 @@ def _do_post_comment(args: argparse.Namespace) -> int:
     try:
         backend.post_comment(args.issue, body)
     except BackendError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     if ctx["json_output"]:
         print(_json.dumps({"issue": args.issue, "posted": True}, indent=2))
@@ -2628,14 +2624,12 @@ def _do_edit_issue(args: argparse.Namespace) -> int:
     try:
         body = _resolve_body(args)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     if title is None and body is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError("edit requires at least one of --title, --body, --body-from.")
         )
-        return 2
 
     if ctx["dry_run"]:
         print(f"[dry-run] would edit #{args.issue}:")
@@ -2648,14 +2642,12 @@ def _do_edit_issue(args: argparse.Namespace) -> int:
     try:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     try:
         backend.edit_issue(args.issue, title=title, body=body)
     except BackendError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     if ctx["json_output"]:
         payload: dict[str, Any] = {"issue": args.issue, "edited": True}
@@ -2707,14 +2699,12 @@ def _do_view_issue(args: argparse.Namespace) -> int:
     try:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     try:
         state = backend.read_issue(args.issue)
     except BackendError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     # Resolve the issue's process via the registry so we can enrich `view`
     # with next-action info. Failure to resolve is non-fatal — `view` still
@@ -2849,10 +2839,9 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         grants_dir=ctx.get("grants_dir"),
     )
     if registry is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError("No workflows directory found. Pass --workflow-dir or set WORKFLOW_DIR.")
         )
-        return 2
 
     written: list[str] = []
     process_names = registry.discovered_processes()
@@ -2866,8 +2855,7 @@ def _do_generate_docs(args: argparse.Namespace) -> int:
         try:
             process = registry.get_process(wf_name)
         except WorkflowError as exc:
-            _handle_workflow_error(exc)
-            return 2
+            return _handle_workflow_error(exc)
         processes_loaded.append(process)
         if workflow_dir is None:
             workflow_dir = process.workflow_dir
@@ -3080,14 +3068,13 @@ def _do_validate_workflow(args: argparse.Namespace) -> int:
         grants_dir=grants_dir,
     )
     if registry is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 "No workflows directory found. Pass --workflow-dir, set "
                 "WORKFLOW_DIR, or run from inside a directory whose tree "
                 "contains `*-states.json` files."
             )
         )
-        return 2
 
     # Build a cross-process handoff index: state_name → {process names declaring
     # that state with handoff: true}. The validator uses this to confirm every
@@ -3286,13 +3273,12 @@ def _do_init_agent(args: argparse.Namespace) -> int:
 
     agent_role = ctx.get("agent_role")
     if not agent_role:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 "init requires --agent-role (or AGENT_ROLE env). "
                 "Example: workflow --agent-role pm init"
             )
         )
-        return 2
 
     target = (ctx.get("agent_home") or Path.cwd()).resolve()
     workflow_dir = target / ".workflow"
@@ -3301,18 +3287,9 @@ def _do_init_agent(args: argparse.Namespace) -> int:
     workflows_path = workflow_dir / "workflows"
 
     if config_path.exists() and not args.force:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(f"{config_path} already exists. Pass --force to overwrite.")
         )
-        return 2
-
-    try:
-        workflow_dir.mkdir(parents=True, exist_ok=True)
-        grants_path.mkdir(parents=True, exist_ok=True)
-        workflows_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        _handle_workflow_error(ConfigError(f"Could not create {workflow_dir}: {exc}"))
-        return 2
 
     # Build the config from provided values. Strip placeholder braces from
     # the role so `{pm}` and `pm` both produce the same `pm`.
@@ -3355,14 +3332,21 @@ def _do_init_agent(args: argparse.Namespace) -> int:
                 print(f"  {line}")
         return 0
 
+    # Past the dry-run gate — now it's safe to touch the filesystem.
+    try:
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        grants_path.mkdir(parents=True, exist_ok=True)
+        workflows_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return _handle_workflow_error(ConfigError(f"Could not create {workflow_dir}: {exc}"))
+
     try:
         config_path.write_text(
             _json.dumps(config, indent=2) + "\n",
             encoding="utf-8",
         )
     except OSError as exc:
-        _handle_workflow_error(ConfigError(f"Could not write {config_path}: {exc}"))
-        return 2
+        return _handle_workflow_error(ConfigError(f"Could not write {config_path}: {exc}"))
 
     if ctx["json_output"]:
         print(
@@ -3472,8 +3456,7 @@ def _provision_labels(
     try:
         existing = set(backend.list_labels())
     except BackendError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
 
     created: list[str] = []
     skipped: list[str] = []
@@ -3516,12 +3499,18 @@ def _provision_labels(
     return 1 if failed else 0
 
 
-def _resolve_encoding(ctx: dict, backend: Any, *, force_probe: bool = False) -> str:
+def _resolve_encoding(
+    ctx: dict, backend: Any, *, force_probe: bool = False, persist: bool = True
+) -> str:
     """Resolve the encoding for the current (host, owner), consulting the cache.
 
     - Manual entries are returned as-is (unless `force_probe=True`).
     - Non-manual, non-expired entries are returned as-is.
     - Otherwise, probes via `backend.list_issue_types(owner)` and caches.
+
+    `persist=False` skips writing the probed result back to the cache — used by
+    dry-run, which may read (probe) the tracker but must not leave side effects
+    on disk (#26).
 
     Returns `"native"` or `"label"`.
     """
@@ -3536,8 +3525,9 @@ def _resolve_encoding(ctx: dict, backend: Any, *, force_probe: bool = False) -> 
 
     types = backend.list_issue_types(owner)
     encoding = "native" if (types is not None and types) else "label"
-    cache.set(host, owner, encoding, manual=False)
-    cache.save()
+    if persist:
+        cache.set(host, owner, encoding, manual=False)
+        cache.save()
     return encoding
 
 
@@ -3562,8 +3552,7 @@ def _do_setup_github(args: argparse.Namespace) -> int:
     try:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
+        return _handle_workflow_error(exc)
     host, owner = _host_and_owner(backend)
 
     # Collect issue types from the registry (the first process's directory wins
@@ -3575,13 +3564,12 @@ def _do_setup_github(args: argparse.Namespace) -> int:
         grants_dir=ctx.get("grants_dir"),
     )
     if registry is None:
-        _handle_workflow_error(
+        return _handle_workflow_error(
             ConfigError(
                 "No workflows directory found. Set WORKFLOW_DIR or run from "
                 "inside a tree containing `*-states.json` files."
             )
         )
-        return 2
     type_directory = None
     for wf_name in registry.discovered_processes():
         try:
@@ -3592,17 +3580,23 @@ def _do_setup_github(args: argparse.Namespace) -> int:
             type_directory = wf_context.issue_type_directory
             break
 
+    # Dry-run gate — BEFORE any cache write or org-type creation. Both the
+    # default and --setup-org paths mutate (cache.save / ensure_issue_type), so
+    # the gate sits here, ahead of them. Encoding is resolved read-only and
+    # nothing is created (#26).
+    if ctx["dry_run"]:
+        return _report_setup_github_dry_run(ctx, backend, host, owner, type_directory)
+
     # --- --setup-org path: force-probe, create types, refresh cache, stop ---
     if args.setup_org:
         types_now = backend.list_issue_types(owner)
         if types_now is None:
-            _handle_workflow_error(
+            return _handle_workflow_error(
                 ConfigError(
                     f"Org {owner!r} does not support Issue Types (or you "
                     f"lack permission to read them)."
                 )
             )
-            return 2
         existing = set(types_now)
         if type_directory is None or not type_directory.types:
             print(f"No issue-types.json found; nothing to provision at org {owner!r}.")
@@ -3628,8 +3622,7 @@ def _do_setup_github(args: argparse.Namespace) -> int:
                 )
                 created.append(gh_name)
             except BackendError as exc:
-                _handle_workflow_error(exc)
-                return 2
+                return _handle_workflow_error(exc)
         # Refresh cache (always native after a successful org provisioning).
         cache = CapabilityCache.load()
         cache.set(host, owner, "native", manual=False)
@@ -3697,27 +3690,58 @@ def _do_setup_github(args: argparse.Namespace) -> int:
     try:
         required = _enumerate_required_labels(ctx, encoding=encoding)
     except WorkflowError as exc:
-        _handle_workflow_error(exc)
-        return 2
-
-    if ctx["dry_run"]:
-        if ctx["json_output"]:
-            print(
-                _json.dumps(
-                    {
-                        "encoding": encoding,
-                        "labels": sorted(required),
-                    },
-                    indent=2,
-                )
-            )
-        else:
-            print(f"[dry-run] would ensure {len(required)} label(s) on repo:")
-            for name in sorted(required):
-                print(f"  {name}")
-        return 0
+        return _handle_workflow_error(exc)
 
     return _provision_labels(backend, required, json_output=ctx["json_output"])
+
+
+def _report_setup_github_dry_run(
+    ctx: dict, backend: Any, host: str, owner: str, type_directory: Any
+) -> int:
+    """Report what `setup-github` would do, with no side effects (#26).
+
+    Resolves the encoding read-only (`persist=False` — may probe the tracker
+    but never writes the capability cache) and lists the org types and repo
+    labels that would be provisioned, without creating any.
+    """
+    encoding = _resolve_encoding(ctx, backend, persist=False)
+
+    types_to_create: list[str] = []
+    if encoding == "native" and type_directory is not None and type_directory.types:
+        existing = set(backend.list_issue_types(owner) or [])
+        types_to_create = sorted(
+            entry.github_issue_type
+            for entry in type_directory.types.values()
+            if entry.github_issue_type and entry.github_issue_type not in existing
+        )
+
+    try:
+        required = _enumerate_required_labels(ctx, encoding=encoding)
+    except WorkflowError as exc:
+        return _handle_workflow_error(exc)
+
+    if ctx["json_output"]:
+        print(
+            _json.dumps(
+                {
+                    "encoding": encoding,
+                    "org_types_to_create": types_to_create,
+                    "labels": sorted(required),
+                    "dry_run": True,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"[dry-run] encoding for {host}/{owner}: {encoding} (cache not written)")
+        if types_to_create:
+            print(f"[dry-run] would create {len(types_to_create)} org issue type(s):")
+            for name in types_to_create:
+                print(f"  + {name}")
+        print(f"[dry-run] would ensure {len(required)} label(s) on repo:")
+        for name in sorted(required):
+            print(f"  {name}")
+    return 0
 
 
 def _do_capabilities(args: argparse.Namespace) -> int:
@@ -3737,8 +3761,7 @@ def _do_capabilities(args: argparse.Namespace) -> int:
         try:
             backend = _build_backend(ctx)
         except WorkflowError as exc:
-            _handle_workflow_error(exc)
-            return 2
+            return _handle_workflow_error(exc)
         host, owner = _host_and_owner(backend)
         cache.set(host, owner, args.set_encoding, manual=True)
         cache.save()
@@ -3749,8 +3772,7 @@ def _do_capabilities(args: argparse.Namespace) -> int:
         try:
             backend = _build_backend(ctx)
         except WorkflowError as exc:
-            _handle_workflow_error(exc)
-            return 2
+            return _handle_workflow_error(exc)
         refreshed: list[str] = []
         skipped: list[str] = []
         for key, entry in list(cache.entries.items()):

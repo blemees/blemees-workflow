@@ -121,7 +121,7 @@ def test_advance_unknown_destination_errors_clean(
             ]
         )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 3
     assert "error" in (captured.out + captured.err).lower()
 
 
@@ -168,7 +168,7 @@ def test_comment_empty_body_rejected(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "empty" in (captured.out + captured.err).lower()
 
 
@@ -430,7 +430,7 @@ def test_init_refuses_to_overwrite_existing_config(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "already exists" in (captured.out + captured.err).lower()
     # Existing config is untouched.
     assert json.loads(config_path.read_text())["agent-role"] == "existing"
@@ -593,7 +593,7 @@ def test_create_pr_requires_head(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "--head" in (captured.out + captured.err)
 
 
@@ -619,7 +619,7 @@ def test_create_pr_requires_refs(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "--refs" in (captured.out + captured.err)
 
 
@@ -645,7 +645,7 @@ def test_create_pr_requires_body(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "body" in (captured.out + captured.err).lower()
 
 
@@ -672,7 +672,7 @@ def test_create_issue_rejects_pr_flags(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "--head" in (captured.out + captured.err)
 
 
@@ -747,7 +747,7 @@ def test_create_unknown_state_errors_clean(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "not declared" in (captured.out + captured.err).lower()
 
 
@@ -895,7 +895,7 @@ def test_create_with_claim_but_no_agent_role_errors(
         ]
     )
     captured = capsys.readouterr()
-    assert rc == 2
+    assert rc == 5
     assert "agent role" in (captured.out + captured.err).lower()
 
 
@@ -1129,12 +1129,90 @@ def test_edit_without_title_or_body_errors(
             "42",
         ]
     )
-    assert rc == 2
+    assert rc == 5
     err = capsys.readouterr().err
     assert "at least one of --title" in err
 
 
 # --------------------------------------------------------------------------- #
+# #26 — CLI robustness bundle
+
+
+def test_resolve_body_rejects_provided_but_empty() -> None:
+    """`--body ""` is provided-but-empty: `_resolve_body` must reject it rather
+    than coerce it to None (which would slip past required-body groups) (#26)."""
+    import argparse
+
+    from workflow.cli import _resolve_body
+    from workflow.errors import ConfigError
+
+    # Empty inline body → rejected.
+    with pytest.raises(ConfigError, match="empty"):
+        _resolve_body(argparse.Namespace(body="", body_from=None))
+    # Whitespace-only is also empty.
+    with pytest.raises(ConfigError, match="empty"):
+        _resolve_body(argparse.Namespace(body="   ", body_from=None))
+    # Genuinely absent → None (optional-body commands still work).
+    assert _resolve_body(argparse.Namespace(body=None, body_from=None)) is None
+    # Non-empty → passed through.
+    assert _resolve_body(argparse.Namespace(body="ship it", body_from=None)) == "ship it"
+
+
+def test_init_dry_run_creates_no_directories(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`init-agent --dry-run` must not touch the filesystem (#26)."""
+    rc = cli(
+        [
+            "--dry-run",
+            "--agent-home",
+            str(tmp_path),
+            "--agent-role",
+            "developer",
+            "init-agent",
+        ]
+    )
+    assert rc == 0
+    # No .workflow tree was created.
+    assert not (tmp_path / ".workflow").exists()
+    assert "dry-run" in capsys.readouterr().out.lower()
+
+
+def test_differentiated_exit_codes(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Backend failures (4) are distinguishable from operation-precondition
+    failures (3) and from argparse usage errors (2) (#26)."""
+    # Backend hiccup → EXIT_BACKEND (4). view-issue surfaces a read failure as a
+    # bare BackendError (the claim path would wrap it in workflow resolution).
+    from workflow.errors import BackendError
+
+    with mock.patch(
+        "workflow.backends.github.GitHubBackend.read_issue",
+        side_effect=BackendError("gh exploded"),
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "view-issue",
+                "--issue",
+                "5",
+            ]
+        )
+    assert rc == 4
+    capsys.readouterr()
+
+    # argparse usage error stays 2 (unknown flag).
+    with pytest.raises(SystemExit) as exc_info:
+        cli(["advance-issue", "--nonsense"])
+    assert exc_info.value.code == 2
+
+
 # #14 — CLI dispatch coverage for event-fired / spawn-issue / collect-into
 
 

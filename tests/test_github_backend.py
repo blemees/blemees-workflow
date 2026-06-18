@@ -1072,6 +1072,60 @@ def test_create_issue_dash_title_not_parsed_as_flag() -> None:
     assert "--title=--oops looks like a flag" in create_cmd
 
 
+def test_list_issues_warns_when_post_filter_hits_limit(caplog) -> None:
+    """A wildcard gate filter is applied after the `--limit` cap; if the raw
+    fetch filled the cap, matches beyond it were missed — warn (#26)."""
+    import logging
+
+    backend = GitHubBackend(repo="owner/repo")
+    # Two issues, both awaiting some gate, returned at limit=2.
+    issues = [
+        {"number": 1, "labels": [{"name": "hitl:awaiting-g1"}], "title": "a", "state": "OPEN"},
+        {"number": 2, "labels": [{"name": "hitl:awaiting-g2"}], "title": "b", "state": "OPEN"},
+    ]
+
+    def _run(*args, **kwargs):
+        cmd = args[0]
+        if "issue" in cmd and "list" in cmd:
+            return _proc(stdout=json.dumps(issues))
+        return _proc(stdout=json.dumps([]))  # pr list
+
+    with (
+        mock.patch("workflow.backends.github.subprocess.run", side_effect=_run),
+        caplog.at_level(logging.WARNING),
+    ):
+        results = backend.list_issues(IssueFilters(awaiting_gate="*", limit=2))
+
+    assert len(results) == 2
+    assert any("may be missed" in r.message for r in caplog.records)
+
+
+def test_list_issues_no_warning_without_post_filter(caplog) -> None:
+    """Hitting the limit with no post-filter is the expected top-N behavior — no
+    truncation warning (#26)."""
+    import logging
+
+    backend = GitHubBackend(repo="owner/repo")
+    issues = [
+        {"number": 1, "labels": [{"name": "state:raw"}], "title": "a", "state": "OPEN"},
+        {"number": 2, "labels": [{"name": "state:raw"}], "title": "b", "state": "OPEN"},
+    ]
+
+    def _run(*args, **kwargs):
+        cmd = args[0]
+        if "issue" in cmd and "list" in cmd:
+            return _proc(stdout=json.dumps(issues))
+        return _proc(stdout=json.dumps([]))
+
+    with (
+        mock.patch("workflow.backends.github.subprocess.run", side_effect=_run),
+        caplog.at_level(logging.WARNING),
+    ):
+        backend.list_issues(IssueFilters(state="raw", limit=2))
+
+    assert not any("may be missed" in r.message for r in caplog.records)
+
+
 def _claim_run_factory(verify_labels: list[str], pre_labels: list[str] | None = None):
     """side_effect for a claim apply: read_issue vs the post-write verify fetch
     are distinguished by the `--json` field set (`labels` only = the verify)."""
