@@ -1014,6 +1014,53 @@ def _fake_state(state_name: str = "raw", agent_claim: str | None = None):
     )
 
 
+def test_view_issue_json_with_next_actions(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`view-issue --json` projects next actions without crashing.
+
+    Regression for #7: `_next_actions_to_dict` read `a.triggering_role`, but
+    `AvailableTransition` only defines `triggering_roles`, so this structured
+    read path raised an uncaught AttributeError on any issue that had next
+    actions. `raw` has a CLAIM transition (raw → refining), so `actions` is
+    non-empty here and the projection is actually exercised.
+    """
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_issue",
+            return_value=_fake_state(state_name="raw"),
+        ),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_comments",
+            return_value=[],
+        ),
+    ):
+        rc = cli(
+            [
+                "--json",
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "view-issue",
+                "--issue",
+                "123",
+            ]
+        )
+
+    output = capsys.readouterr().out
+    assert rc == 0, output
+    payload = json.loads(output)
+    assert payload["id"] == "123"
+    assert payload["state"] == "raw"
+    # The crash path: a non-empty next_actions list, each carrying the
+    # plural `triggering_roles` field as a JSON list.
+    assert payload["next_actions"], "expected raw to surface next actions"
+    for action in payload["next_actions"]:
+        assert isinstance(action["triggering_roles"], list)
+
+
 def test_edit_invokes_backend_with_title_and_body(
     workflow_dir: Path,
     capsys: pytest.CaptureFixture,
