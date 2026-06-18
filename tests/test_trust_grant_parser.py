@@ -164,6 +164,27 @@ def test_load_team_grants_nonexistent_returns_empty(tmp_path: Path) -> None:
     assert grants == {}
 
 
+def test_load_team_grants_filters_by_workflow(tmp_path: Path) -> None:
+    """A same-named gate in two processes must not leak its relaxation (#19).
+    `workflow=` filters to the requested process; without it both are returned
+    (keyed by control_point, last-wins) — which is exactly the leak."""
+    team_dir = tmp_path / "acme"
+    team_dir.mkdir()
+    (team_dir / "refinement.json").write_text(
+        _grant_json(workflow="refinement", control_point="shared_gate"), encoding="utf-8"
+    )
+    (team_dir / "release.json").write_text(
+        _grant_json(workflow="release", control_point="shared_gate"), encoding="utf-8"
+    )
+
+    refinement = load_team_grants(team_dir, workflow="refinement")
+    assert set(refinement) == {"shared_gate"}
+    assert refinement["shared_gate"].workflow == "refinement"
+
+    release = load_team_grants(team_dir, workflow="release")
+    assert release["shared_gate"].workflow == "release"
+
+
 def test_expires_before_granted_rejected() -> None:
     body = _grant_json(
         granted_at="2026-06-01",
