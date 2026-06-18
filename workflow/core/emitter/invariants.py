@@ -14,9 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Importing the validator populates the registry with the validator-layer
-# invariants (the @invariant decorators run at import time). Parser and planner
-# layers register themselves the same way once their modules are imported.
+# Importing these populates the registry: the validator's @invariant decorators
+# run at import, and the parser invariants module registers its rows at import.
+# (The planner layer registers the same way once its module lands.)
+import workflow.core.parser.invariants  # noqa: F401  (import for registration side effect)
 import workflow.core.validator  # noqa: F401  (import for registration side effect)
 from workflow.core.invariants import LAYERS, all_invariants
 

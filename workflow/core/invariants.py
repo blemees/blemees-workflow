@@ -103,6 +103,15 @@ def invariant(
     return deco
 
 
+def register_invariant(inv: Invariant) -> None:
+    """Register an invariant directly (for raise-style layers — parser/planner —
+    whose checks raise rather than return findings, so the `@invariant`
+    decorator's auto-stamp doesn't apply)."""
+    if inv.id in _REGISTRY:
+        raise ValueError(f"duplicate invariant id: {inv.id!r}")
+    _REGISTRY[inv.id] = inv
+
+
 def all_invariants() -> list[Invariant]:
     """Every registered invariant, sorted by (layer, id) for stable output."""
     return sorted(_REGISTRY.values(), key=lambda inv: (inv.layer, inv.id))
