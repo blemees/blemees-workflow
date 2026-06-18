@@ -206,3 +206,27 @@ def test_controller_skips_cascade_when_state_unchanged() -> None:
     assert result.post_state is not None and result.post_state.state == "refining"
     assert result.cascade_applications == []
     assert consulted == []  # the registry was never consulted
+
+
+def test_controller_resolves_native_issue_type() -> None:
+    from workflow.core.model.issue_type import IssueType, IssueTypeDirectory
+
+    directory = IssueTypeDirectory(
+        types={
+            "bug": IssueType(type_id="bug", name="Bug", description="d", github_issue_type="Bug")
+        }
+    )
+    controller = Controller(
+        backend=_CreateMockBackend(),
+        state_machine=StateMachine(name="t"),
+        registry=None,
+        issue_type_directory=directory,
+    )
+    # Native encoding (no type: label) → mapped to the framework id.
+    native = IssueState(issue_id="1", state="raw", agent_claim=None, native_issue_type="Bug")
+    assert controller._resolve_native_type(native).issue_type == "bug"
+    # Label encoding already resolved the id → left untouched.
+    labelled = IssueState(
+        issue_id="2", state="raw", agent_claim=None, issue_type="feature", native_issue_type="Bug"
+    )
+    assert controller._resolve_native_type(labelled).issue_type == "feature"

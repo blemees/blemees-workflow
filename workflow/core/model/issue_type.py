@@ -57,3 +57,15 @@ class IssueTypeDirectory:
 
     def has(self, type_id: str) -> bool:
         return type_id in self.types
+
+    def by_github_type(self, github_issue_type: str) -> str | None:
+        """Map a native GitHub Issue Type name back to its framework type id.
+
+        Used to resolve an issue read under native encoding (where there's no
+        `type:` label) to the framework id the state machine reasons about.
+        Returns None when no entry declares that GitHub type.
+        """
+        for type_id, entry in self.types.items():
+            if entry.github_issue_type == github_issue_type:
+                return type_id
+        return None

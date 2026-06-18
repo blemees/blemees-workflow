@@ -399,6 +399,7 @@ def _plan_advance(
             clear_awaiting_gate=True,
             clear_audit_pending=True,
             set_awaiting_input=False,
+            clear_human_input=True,
             clear_agent_claim=leaving_working,
             clear_last_state=leaving_working,
             # Claim semantics for CLAIM transitions (#11): ownership + origin.
@@ -669,6 +670,15 @@ def _plan_release(
         set_state=state.last_state,
         clear_agent_claim=True,
         clear_last_state=True,
+        # Releasing abandons any in-flight HITL — don't let queue/claim/singleton
+        # markers ride back to the resting state (#12).
+        clear_awaiting_gate=True,
+        clear_audit_pending=True,
+        set_awaiting_input=False,
+        clear_human_input=True,
+        set_reviewing=False,
+        set_auditing=False,
+        set_advising=False,
     )
     audit = f"## release: agent {state.agent_claim!r} releases issue → {state.last_state!r}"
     return OperationPlan(
@@ -911,13 +921,17 @@ def _plan_record_action(
         raise OperationError(f"Another audit is pending ({state.audit_pending!r}).")
     # Record-action leaves the working state (same shape as audit-gated advance).
     close, reason = _closing_close_info(state_machine, destination)
+    dest = state_machine.states.get(destination)
     change = MarkerChange(
         set_state=destination,
         set_audit_pending=gate.gate_name,
         clear_agent_claim=True,
         clear_last_state=True,
+        set_awaiting_input=False,
+        clear_human_input=True,
         close_issue=close,
         close_reason=reason,
+        set_pr_ready=bool(dest and dest.mark_pr_ready),
     )
     audit = (
         f"## record-action: {state.state} → {destination} (gate {gate.gate_name!r})\n\n"

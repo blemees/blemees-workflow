@@ -34,6 +34,12 @@ class IssueState:
     # native type field. None means the backend couldn't determine it;
     # the planner treats that as "skip type-restriction checks."
     issue_type: str | None = None
+    # The backend's native type name when read under native encoding (GitHub
+    # Issue Type, e.g. "Bug") and no `type:` label is present. The framework id
+    # isn't derivable without the issue-type directory, so the controller maps
+    # this back to `issue_type` before planning (otherwise type-restriction
+    # checks silently no-op under native encoding).
+    native_issue_type: str | None = None
     # Catalogued-block markers
     awaiting_gate: str | None = None  # gate_name currently awaiting signal
     reviewing: bool = False  # singleton: a human has claimed pre-action review

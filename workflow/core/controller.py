@@ -20,7 +20,7 @@ the cascade pass with a debug log.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from workflow.backends.base import IssueState, MarkerChange, TrackerBackend
@@ -42,6 +42,7 @@ from workflow.errors import OperationError
 
 if TYPE_CHECKING:
     from workflow.config import Workflow
+    from workflow.core.model.issue_type import IssueTypeDirectory
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,22 @@ class Controller:
     # `advance_on` chains propagate. Without it, the primary operation
     # still runs but cascades are skipped (the user sees a debug log).
     registry: Workflow | None = None
+    # Optional issue-type directory, used to map an issue read under native
+    # encoding (GitHub Issue Type name, no `type:` label) back to its framework
+    # type id before planning — so claim-time type-restriction checks aren't
+    # silently skipped (#12).
+    issue_type_directory: IssueTypeDirectory | None = None
+
+    def _resolve_native_type(self, state: IssueState) -> IssueState:
+        if (
+            state.issue_type is None
+            and state.native_issue_type is not None
+            and self.issue_type_directory is not None
+        ):
+            framework_id = self.issue_type_directory.by_github_type(state.native_issue_type)
+            if framework_id is not None:
+                return replace(state, issue_type=framework_id)
+        return state
 
     def execute(self, request: OperationRequest) -> OperationResult:
         # create-issue opens a brand-new issue — there is no existing issue to
@@ -110,6 +127,9 @@ class Controller:
                 )
             else:
                 raise
+        # Resolve a native-encoded issue type to its framework id so claim /
+        # advance type checks aren't silently skipped (#12).
+        pre_state = self._resolve_native_type(pre_state)
         # Runtime claim discipline (principle 6).
         findings = validate_issue_markers(pre_state)
         for finding in findings:
