@@ -310,11 +310,10 @@ def _check_legend_catalog_sync(
     findings: list[ValidationFinding] = []
     legend_gates = set(state_machine.gates_in_legend.keys())
     catalog_gates = set(catalog.entries.keys())
-    marker_gates = {
-        t.destination if "→" not in t.label else t.destination
-        for t in state_machine.transitions
-        if t.is_gated
-    }
+    # Marker gates: the gate names actually carried by gated transitions. The
+    # presence of `gate_name` IS the HITL marker (model docstring), so this is
+    # the third leg of the legend ↔ catalog ↔ markers triangle.
+    marker_gates = {t.gate_name for t in state_machine.transitions if t.is_gated}
 
     # The strict requirement: legend ↔ catalog ↔ markers all agree
     # (hitl-principles.md#5/#9). When pre-HITL artifacts have none of the
@@ -329,6 +328,24 @@ def _check_legend_catalog_sync(
                         "Legend gates and catalog gates differ. "
                         f"Legend-only: {sorted(legend_gates - catalog_gates)}, "
                         f"Catalog-only: {sorted(catalog_gates - legend_gates)}"
+                    ),
+                    location=catalog.source_path or state_machine.source_path,
+                )
+            )
+        # Markers vs catalog — a gated transition referencing a gate the catalog
+        # doesn't define has no gate config at runtime; a catalogued gate no
+        # transition references is dead. Either way it's drift worth flagging.
+        if catalog_gates ^ marker_gates:
+            findings.append(
+                ValidationFinding(
+                    severity=Severity.WARNING,
+                    principle_cite="hitl-principles.md#5",
+                    message=(
+                        "Transition gate markers and catalog gates differ. "
+                        f"Marker-only (gated transition, no catalog entry): "
+                        f"{sorted(marker_gates - catalog_gates)}, "
+                        f"Catalog-only (no transition fires it): "
+                        f"{sorted(catalog_gates - marker_gates)}"
                     ),
                     location=catalog.source_path or state_machine.source_path,
                 )

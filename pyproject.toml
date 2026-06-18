@@ -3,7 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "workflow"
+# Distribution name (PyPI). The generic `workflow` is taken on PyPI and doesn't
+# match the repo, so the published package is `blemees-workflow` (#14). The
+# import package and `workflow` console command are intentionally left as-is;
+# renaming the import package is a larger, publish-time change tracked in #5.
+name = "blemees-workflow"
 version = "0.1.0"
 description = "The canonical operation mechanism for agent-driven state machine workflows. Implements the framework defined in agent-workflow-skill-creator."
 readme = "README.md"
