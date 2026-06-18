@@ -36,6 +36,9 @@ from workflow.core.operations import (
     claim_issue as claim_issue_op,
 )
 from workflow.core.operations import (
+    collect_into as collect_into_op,
+)
+from workflow.core.operations import (
     reject_audit as reject_audit_op,
 )
 from workflow.core.operations import (
@@ -588,8 +591,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ticket id(s) referenced by this issue. For PR types: parents the "
         "PR addresses, rendered as 'Refs #N' in the message footer. For "
         "states declaring `collects`: contributor ids to gather into this "
-        "collector (each gets `collected-by:<new>` and the new issue gets "
-        "`collects:<each>`).",
+        "collector (each contributor gets a `collected-by:<new>` label — the "
+        "sole record of the relationship).",
     )
     p_create_issue.add_argument(
         "--all-candidates",
@@ -624,8 +627,8 @@ def build_parser() -> argparse.ArgumentParser:
             "collector must reside on a state declaring `collects`; each "
             "contributor must be in one of `collects.from_states` on the "
             "source process and not already collected (use --force to "
-            "override). Applies `collects:<contributor>` to the collector "
-            "and `collected-by:<collector>` to each contributor."
+            "override). Applies a `collected-by:<collector>` label to each "
+            "contributor — the sole record of the relationship (ADR-0003)."
         ),
     )
     p_collect.add_argument(
@@ -2164,21 +2167,22 @@ def _do_create_issue(args: argparse.Namespace) -> int:
         # Create at the initial state with no claim label. Claiming, if
         # requested, runs as a second operation so the state machine moves
         # resting → working properly (sets wip:<role> AND last-state:<initial_state>).
-        collect_labels = [f"collects:{cid}" for cid in contributor_ids]
+        # No collector-side `collects:` labels — the relationship lives solely
+        # on each contributor's `collected-by:` label (ADR-0003).
         try:
             new_id = backend.create_issue(
                 title=args.title,
                 body=body,
                 state=args.initial_state,
-                extra_labels=[*type_extra_labels, *collect_labels],
+                extra_labels=[*type_extra_labels],
                 issue_type=backend_issue_type,
             )
         except BackendError as exc:
             _handle_workflow_error(exc)
             return 2
 
-        # Apply the inverse `collected-by:<new_id>` label on each
-        # contributor so the relationship is queryable from either side.
+        # Mark each contributor `collected-by:<new_id>` — the sole record of
+        # the relationship; the cohort is found by querying this label.
         if contributor_ids:
             from workflow.backends.base import MarkerChange
 
@@ -2284,10 +2288,10 @@ def _do_collect_into(args: argparse.Namespace) -> int:
 
     Validates that the collector resides on a state declaring `collects`,
     that each contributor lives on one of the declared `from_states`, and
-    (unless --force) is not already collected. Applies the dual labels
-    atomically per contributor.
+    (unless --force) is not already collected. Marks each contributor with a
+    single `collected-by:<collector>` label (ADR-0003).
     """
-    from workflow.backends.base import IssueFilters, MarkerChange
+    from workflow.backends.base import IssueFilters
 
     ctx = _ctx_obj_from_args(args)
     contributor_ids = [r.lstrip("#") for r in args.refs]
@@ -2382,28 +2386,24 @@ def _do_collect_into(args: argparse.Namespace) -> int:
                 print(f"  #{cid}")
         return 0
 
-    # 4. Apply the dual labels: collects:<contributor> on the collector,
-    #    collected-by:<collector> on each contributor.
-    try:
-        backend.apply_marker_change(
-            str(args.issue),
-            MarkerChange(add_collects=tuple(contributor_ids)),
-            audit_comment=("Collected " + ", ".join(f"#{c}" for c in contributor_ids) + "."),
-        )
-    except BackendError as exc:
-        _handle_workflow_error(exc)
-        return 2
+    # 4. Mark each contributor `collected-by:<collector>` through the operation
+    #    seam: the pure planner validates eligibility, the controller applies the
+    #    marker. The collector is never touched (ADR-0003). Step 2 already
+    #    validated the whole set, so this loop is all-or-nothing in practice.
+    controller = _build_controller(collector_ctx, dry_run=False)
     for cid in contributor_ids:
         try:
-            backend.apply_marker_change(
-                cid,
-                MarkerChange(set_collected_by=str(args.issue)),
-                audit_comment=f"Collected into #{args.issue}.",
+            collect_into_op.run(
+                controller,
+                issue_id=cid,
+                collector_id=str(args.issue),
+                from_states=collects.from_states,
+                issue_types=collects.issue_types or (),
+                force=args.force,
             )
-        except BackendError as exc:
+        except WorkflowError as exc:
             print(
-                f"Collector #{args.issue} labelled, but failed to mark "
-                f"contributor #{cid} as collected-by — {exc}",
+                f"Failed to collect contributor #{cid} into #{args.issue} — {exc}",
                 file=sys.stderr,
             )
             return 2

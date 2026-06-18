@@ -59,6 +59,8 @@ class Operation(Enum):
     RESPOND_REQUEST = "respond-request"
     # Creating — opens a new issue (no in-place mutation of issue_id)
     SPAWN_ISSUE = "spawn-issue"
+    # Fan-in — marks a contributor as collected by a collector
+    COLLECT_INTO = "collect-into"
 
 
 @dataclass(frozen=True)
@@ -158,6 +160,8 @@ def plan_operation(
             return _plan_revoke(request, state, catalog)
         case Operation.SPAWN_ISSUE:
             return _plan_spawn(request, state)
+        case Operation.COLLECT_INTO:
+            return _plan_collect(request, state)
         case Operation.REQUEST_INPUT:
             return _plan_request_input(request, state, state_machine)
         case Operation.REVIEW_REQUEST:
@@ -1113,4 +1117,56 @@ def _plan_spawn(request: OperationRequest, parent_state: IssueState) -> Operatio
         change=MarkerChange(),
         audit_comment=audit,
         create=spec,
+    )
+
+
+def _plan_collect(request: OperationRequest, contributor_state: IssueState) -> OperationPlan:
+    """Plan a collect — mark a contributor as gathered into a collector.
+
+    Pure: the impure resolution (which collector, its `collects` config) happens
+    at the operation boundary and arrives via `request.extras`:
+
+    - `collector_id`  — the collector issue's id
+    - `from_states`   — resting states the collector gathers from
+    - `issue_types`   — types the collector accepts (empty = any)
+    - `force`         — bypass eligibility checks
+
+    The contributor (`request.issue_id`) is stamped `collected-by:<collector>`
+    (ADR-0003); the collector is not touched.
+    """
+    extras = request.extras
+    collector_id = extras["collector_id"]
+    from_states = tuple(extras.get("from_states", ()))
+    issue_types = tuple(extras.get("issue_types") or ())
+    force = bool(extras.get("force", False))
+
+    if contributor_state.state is None:
+        raise OperationError(f"Contributor #{request.issue_id} has no state; cannot collect it.")
+    if not force:
+        if from_states and contributor_state.state not in from_states:
+            raise OperationError(
+                f"Contributor #{request.issue_id} is on {contributor_state.state!r}, "
+                f"not one of the collector's from_states {list(from_states)}. "
+                f"Pass --force to override."
+            )
+        if (
+            issue_types
+            and contributor_state.issue_type is not None
+            and contributor_state.issue_type not in issue_types
+        ):
+            raise OperationError(
+                f"Contributor #{request.issue_id} is type "
+                f"{contributor_state.issue_type!r}, not one the collector accepts "
+                f"{list(issue_types)}. Pass --force to override."
+            )
+        if contributor_state.collected_by is not None:
+            raise OperationError(
+                f"Contributor #{request.issue_id} is already collected by "
+                f"#{contributor_state.collected_by}. Pass --force to override."
+            )
+
+    return OperationPlan(
+        operation=Operation.COLLECT_INTO,
+        change=MarkerChange(set_collected_by=collector_id),
+        audit_comment=f"## collect: into #{collector_id}",
     )

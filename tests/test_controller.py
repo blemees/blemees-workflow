@@ -5,9 +5,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from workflow.backends.base import IssueFilters, IssueState
+from workflow.backends.base import IssueFilters, IssueState, MarkerChange
 from workflow.core.controller import Controller
 from workflow.core.model.state_machine import Spawn, StateMachine
+from workflow.core.operations import collect_into as collect_into_op
 from workflow.core.operations import spawn_issue as spawn_issue_op
 
 
@@ -25,6 +26,7 @@ class _CreateMockBackend:
     created_issues: list[tuple[str, str, tuple[str, ...], str | None]] = field(default_factory=list)
     created_prs: list[tuple[str, str | None, bool, tuple[str, ...]]] = field(default_factory=list)
     mutations: list[str] = field(default_factory=list)
+    applied: list[tuple[str, MarkerChange]] = field(default_factory=list)
     _next: int = 200
 
     def read_issue(self, issue_id: str) -> IssueState:
@@ -51,9 +53,10 @@ class _CreateMockBackend:
         return new_id
 
     def apply_marker_change(self, issue_id, change, audit_comment=None) -> None:
-        # Spawn must not mutate any existing issue — the empty change is skipped
-        # by the controller, so this should never be called.
+        # Records every applied change. Spawn applies none (empty change is
+        # skipped by the controller); collect applies one per contributor.
         self.mutations.append(issue_id)
+        self.applied.append((issue_id, change))
 
     def list_issues(self, filters: IssueFilters) -> list[IssueState]:
         return []
@@ -137,3 +140,21 @@ def test_controller_spawn_dry_run_creates_nothing() -> None:
     assert result.created_issue_id is None
     assert backend.created_issues == [] and backend.created_prs == []
     assert result.plan.create is not None and result.plan.create.state == "ready_for_dev"
+
+
+def test_controller_collect_marks_contributor_only() -> None:
+    backend = _CreateMockBackend()
+    backend.issues["7"] = IssueState(issue_id="7", state="staged", agent_claim=None)
+
+    result = collect_into_op.run(
+        _controller(backend),
+        issue_id="7",
+        collector_id="REL-1",
+        from_states=("staged",),
+    )
+
+    assert result.operation.value == "collect-into"
+    # Exactly one mutation — on the contributor — carrying set_collected_by.
+    assert [iid for iid, _ in backend.applied] == ["7"]
+    _, change = backend.applied[0]
+    assert change.set_collected_by == "REL-1"

@@ -315,22 +315,19 @@ def _apply_collector_cascade(
     if matching_rule is None and not is_release:
         return []
 
-    contributors = list(collector_state.collects_contributors)
-    if not contributors:
+    # The contributor cohort is discovered by querying the dependent-side
+    # `collected-by:` label (ADR-0003) — there is no collector-side registry.
+    try:
+        cohort = backend.list_issues(IssueFilters(collected_by=collector_id))
+    except BackendError as exc:
+        logger.warning("cascade: cannot list contributor cohort of %s: %s", collector_id, exc)
+        return []
+    if not cohort:
         return []
 
     next_queue: list[tuple[str, IssueState]] = []
-    for contributor_id in contributors:
-        try:
-            contributor = backend.read_issue(contributor_id)
-        except BackendError as exc:
-            logger.warning(
-                "cascade: cannot read contributor %s of %s: %s",
-                contributor_id,
-                collector_id,
-                exc,
-            )
-            continue
+    for contributor in cohort:
+        contributor_id = contributor.issue_id
         if contributor.state is None:
             continue
         # Resolve the contributor's target — depends on its issue_type

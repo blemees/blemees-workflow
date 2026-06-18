@@ -50,11 +50,10 @@ class IssueState:
     # means the issue has not yet been collected and is a candidate for
     # future collectors that target its state.
     collected_by: str | None = None
-    # Fan-in inverse — each contributor's id this collector pulled in.
-    # Populated from `collects:<contributor-id>` labels on GitHub. Empty
-    # when this issue isn't a collector or hasn't gathered any
-    # contributors yet.
-    collects_contributors: tuple[str, ...] = ()
+    # The inverse — a collector's contributors — is NOT stored as a marker.
+    # The cohort is discovered on demand by querying the `collected-by:` label
+    # (`list_issues(collected_by=...)`); there is no collector-side registry
+    # (ADR-0003).
     # Spawn parent — when this issue was created by another issue via
     # `spawns`, the parent's id is recorded here (read from a
     # `parent-of:<parent-id>` label on GitHub). None means this issue
@@ -96,14 +95,11 @@ class MarkerChange:
     set_human_input: str | None = None
     clear_human_input: bool = False
     set_advising: bool | None = None
-    # Fan-in label mutations — applied bidirectionally by `collect` and
-    # by `create-issue` when the destination state declares `collects`.
-    # `set_collected_by` is set on each contributor; `add_collects` lists
-    # the contributors a collector pulled in (additive — labels stack so
-    # additional contributors join later via more `collect` invocations).
+    # Fan-in label mutation — `collected-by:<collector>` is set on each
+    # contributor (the sole record of the relationship; ADR-0003). There is no
+    # collector-side `collects:` write — the cohort is a `collected-by:` query.
     set_collected_by: str | None = None
     clear_collected_by: bool = False
-    add_collects: tuple[str, ...] = ()
     # Outcome markers (audit-trace labels in GitHub encoding; signal events elsewhere)
     record_approval: str | None = None  # gate approved (destination is captured via set_state)
     record_rejection: str | None = None  # gate rejected

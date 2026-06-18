@@ -1318,3 +1318,42 @@ def test_plan_spawn_pr_builds_pr_creation_spec() -> None:
     assert spec.draft is True  # initial_state == "draft"
     # No type: label for PRs — the entity kind conveys the type.
     assert spec.extra_labels == ("parent-of:5",)
+
+
+# --------------------------------------------------------------------------- #
+# collect — fan-in mutation (pure eligibility validation)
+
+
+def _collect_req(issue_id, contributor_extras):
+    return OperationRequest(
+        operation=Operation.COLLECT_INTO, issue_id=issue_id, extras=contributor_extras
+    )
+
+
+def test_plan_collect_eligible_contributor_sets_collected_by() -> None:
+    contributor = IssueState(issue_id="7", state="staged", agent_claim=None)
+    req = _collect_req("7", {"collector_id": "REL-1", "from_states": ("staged",)})
+    plan = plan_operation(req, contributor, _build_workflow())
+    assert plan.operation is Operation.COLLECT_INTO
+    assert plan.change.set_collected_by == "REL-1"
+
+
+def test_plan_collect_wrong_state_errors() -> None:
+    contributor = IssueState(issue_id="7", state="refining", agent_claim="product-manager")
+    req = _collect_req("7", {"collector_id": "REL-1", "from_states": ("staged",)})
+    with pytest.raises(OperationError):
+        plan_operation(req, contributor, _build_workflow())
+
+
+def test_plan_collect_already_collected_errors() -> None:
+    contributor = IssueState(issue_id="7", state="staged", agent_claim=None, collected_by="REL-9")
+    req = _collect_req("7", {"collector_id": "REL-1", "from_states": ("staged",)})
+    with pytest.raises(OperationError):
+        plan_operation(req, contributor, _build_workflow())
+
+
+def test_plan_collect_force_bypasses_eligibility() -> None:
+    contributor = IssueState(issue_id="7", state="refining", agent_claim=None, collected_by="REL-9")
+    req = _collect_req("7", {"collector_id": "REL-1", "from_states": ("staged",), "force": True})
+    plan = plan_operation(req, contributor, _build_workflow())
+    assert plan.change.set_collected_by == "REL-1"
