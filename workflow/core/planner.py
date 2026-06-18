@@ -57,6 +57,8 @@ class Operation(Enum):
     REQUEST_INPUT = "request-input"
     REVIEW_REQUEST = "review-request"
     RESPOND_REQUEST = "respond-request"
+    # Creating — opens a new issue (no in-place mutation of issue_id)
+    SPAWN_ISSUE = "spawn-issue"
 
 
 @dataclass(frozen=True)
@@ -75,11 +77,36 @@ class OperationRequest:
 
 
 @dataclass(frozen=True)
+class CreationSpec:
+    """Describes a new issue/PR a creating operation opens.
+
+    The controller's create-then-apply path turns this into a
+    `backend.create_issue` / `create_pull_request` call. `change` on the same
+    plan (if non-empty) is then applied to the new issue; for spawn it is empty
+    because the only marker — `parent-of:<parent>` — rides in `extra_labels`.
+    """
+
+    title: str
+    body: str
+    state: str
+    entity: str = "issue"  # "issue" | "pull_request"
+    issue_type: str | None = None  # framework type id (already encoded in extra_labels)
+    github_issue_type: str | None = None  # native GitHub Issue Type name, when used
+    extra_labels: tuple[str, ...] = ()
+    head: str | None = None  # PR source branch
+    base: str | None = None  # PR target branch
+    draft: bool = False
+
+
+@dataclass(frozen=True)
 class OperationPlan:
     operation: Operation
     change: MarkerChange
     audit_comment: str
     packet_body: str | None = None  # additional comment, when applicable
+    # Set by creating operations (spawn / create). When present the controller
+    # opens a new issue from this spec instead of mutating `issue_id` in place.
+    create: CreationSpec | None = None
 
 
 def plan_operation(
@@ -129,6 +156,8 @@ def plan_operation(
             return _plan_confirm(request, state)
         case Operation.REJECT_AUDIT:
             return _plan_revoke(request, state, catalog)
+        case Operation.SPAWN_ISSUE:
+            return _plan_spawn(request, state)
         case Operation.REQUEST_INPUT:
             return _plan_request_input(request, state, state_machine)
         case Operation.REVIEW_REQUEST:
@@ -1019,4 +1048,69 @@ def _plan_respond(request: OperationRequest, state: IssueState) -> OperationPlan
         change=change,
         audit_comment=audit,
         packet_body=response,
+    )
+
+
+def _plan_spawn(request: OperationRequest, parent_state: IssueState) -> OperationPlan:
+    """Plan a spawn — open a child issue/PR from the parent's `spawns` config.
+
+    Pure: the impure cross-process resolution (which spawn rule, which target
+    process, the issue-type entry / native GitHub type, the entity kind) happens
+    at the operation boundary and arrives via `request.extras`:
+
+    - `spawn`              — the chosen Spawn rule (issue_type, initial_state)
+    - `parent_process`     — name of the parent's process (for the footer)
+    - `entity`             — "issue" | "pull_request"
+    - `github_issue_type`  — native GitHub Issue Type name, or None
+    - `title` / `head` / `base` — optional CLI inputs
+
+    The child carries only `parent-of:<parent>` (ADR-0003); the parent is left
+    untouched (empty `change`).
+    """
+    if parent_state.state is None:
+        raise OperationError("Parent issue has no state; cannot resolve spawn config.")
+    extras = request.extras
+    spawn = extras["spawn"]
+    parent_process = extras.get("parent_process", "")
+    entity = extras.get("entity", "issue")
+    head = extras.get("head")
+    base = extras.get("base")
+    if entity == "pull_request" and not head:
+        raise OperationError("--head is required for pr-typed spawns (PRs need a source branch).")
+
+    parent_id = request.issue_id
+    title = extras.get("title") or f"{parent_state.state} follow-up for #{parent_id}"
+    footer = (
+        f"\n\n---\n\n"
+        f"**Spawned from**: state `{parent_state.state}` of process "
+        f"`{parent_process}` (parent #{parent_id}).\n\n"
+        f"Refs #{parent_id}\n"
+    )
+    body = (request.body_text or "").rstrip() + footer
+
+    extra_labels = [f"parent-of:{parent_id}"]
+    if entity != "pull_request":
+        extra_labels.append(f"type:{spawn.issue_type}")
+
+    spec = CreationSpec(
+        title=title,
+        body=body,
+        state=spawn.initial_state,
+        entity=entity,
+        issue_type=spawn.issue_type,
+        github_issue_type=extras.get("github_issue_type"),
+        extra_labels=tuple(extra_labels),
+        head=head,
+        base=base,
+        draft=entity == "pull_request" and spawn.initial_state == "draft",
+    )
+    audit = (
+        f"## spawn: {spawn.issue_type} → {spawn.initial_state}\n\n"
+        f"Child spawned from #{parent_id} (state `{parent_state.state}`)."
+    )
+    return OperationPlan(
+        operation=Operation.SPAWN_ISSUE,
+        change=MarkerChange(),
+        audit_comment=audit,
+        create=spec,
     )

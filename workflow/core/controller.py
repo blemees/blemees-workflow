@@ -23,7 +23,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from workflow.backends.base import IssueState, TrackerBackend
+from workflow.backends.base import IssueState, MarkerChange, TrackerBackend
 from workflow.core.cascade import CascadeApplication, cascade_after_state_change
 from workflow.core.model.human_gate import HumanGateCatalog
 from workflow.core.model.state_machine import StateMachine
@@ -59,6 +59,9 @@ class OperationResult:
     # Empty for dry-runs and for operations whose change didn't trigger
     # any sibling advance_on / collects rule.
     cascade_applications: list[CascadeApplication] = field(default_factory=list)
+    # Set by creating operations (spawn / create) to the id of the new issue.
+    # None for in-place operations and for dry-runs.
+    created_issue_id: str | None = None
 
 
 @dataclass
@@ -107,6 +110,11 @@ class Controller:
             catalog=self.catalog,
             grants=self.grants,
         )
+
+        # Creating operations (spawn / create) open a new issue rather than
+        # mutating `issue_id` in place — separate path.
+        if plan.create is not None:
+            return self._execute_create(request, plan, pre_state, findings)
 
         if self.dry_run:
             logger.info(
@@ -161,4 +169,83 @@ class Controller:
             post_state=post_state,
             findings=findings,
             cascade_applications=cascade_applications,
+        )
+
+    def _execute_create(
+        self,
+        request: OperationRequest,
+        plan: OperationPlan,
+        pre_state: IssueState,
+        findings: list[ValidationFinding],
+    ) -> OperationResult:
+        """Create-then-apply path for creating operations (spawn / create).
+
+        Opens a new issue/PR from `plan.create`, applies the plan's primary
+        marker change to the new issue if non-empty (empty for spawn — the
+        `parent-of:` marker rides in `extra_labels`), then runs the cascade
+        against the new issue.
+        """
+        spec = plan.create
+        assert spec is not None
+        if self.dry_run:
+            logger.info(
+                "[dry-run] %s would create a %s in state %s",
+                request.operation.value,
+                spec.entity,
+                spec.state,
+            )
+            return OperationResult(
+                operation=request.operation,
+                issue_id=request.issue_id,
+                dry_run=True,
+                plan=plan,
+                pre_state=pre_state,
+                post_state=None,
+                findings=findings,
+            )
+
+        if spec.entity == "pull_request":
+            new_id = self.backend.create_pull_request(
+                title=spec.title,
+                body=spec.body,
+                state=spec.state,
+                head=spec.head,
+                base=spec.base,
+                draft=spec.draft,
+                extra_labels=list(spec.extra_labels),
+            )
+        else:
+            new_id = self.backend.create_issue(
+                title=spec.title,
+                body=spec.body,
+                state=spec.state,
+                extra_labels=list(spec.extra_labels),
+                issue_type=spec.github_issue_type,
+            )
+
+        if plan.change != MarkerChange():
+            self.backend.apply_marker_change(new_id, plan.change, audit_comment=plan.audit_comment)
+
+        child_state = self.backend.read_issue(new_id)
+
+        cascade_applications: list[CascadeApplication] = []
+        if self.registry is not None:
+            cascade_applications = cascade_after_state_change(
+                self.registry,
+                self.backend,
+                new_id,
+                child_state,
+                actor=request.actor,
+            )
+
+        return OperationResult(
+            operation=request.operation,
+            issue_id=request.issue_id,
+            dry_run=False,
+            plan=plan,
+            pre_state=pre_state,
+            post_state=child_state,
+            findings=findings,
+            cascade_applications=cascade_applications,
+            created_issue_id=new_id,
         )

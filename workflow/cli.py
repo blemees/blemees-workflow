@@ -59,6 +59,9 @@ from workflow.core.operations import (
 from workflow.core.operations import (
     review_request as review_request_op,
 )
+from workflow.core.operations import (
+    spawn_issue as spawn_issue_op,
+)
 
 # await_signal and record_action remain importable as internal primitives,
 # but are not exposed as CLI subcommands. `advance-issue` dispatches into
@@ -1558,55 +1561,47 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
                     f"Child issue type {spawn.issue_type!r} not in issue-types.json."
                 ) from None
         is_pr = type_entry is not None and type_entry.github_entity == "pull_request"
-        if is_pr and not args.head:
-            raise ConfigError("--head is required for pr-typed spawns (PRs need a source branch).")
 
-        title = args.title or f"{parent_state.state} follow-up for #{args.issue}"
-        user_body = _resolve_body(args) or ""
-        footer = (
-            f"\n\n---\n\n"
-            f"**Spawned from**: state `{parent_state.state}` of process "
-            f"`{parent_process}` (parent #{args.issue}).\n\n"
-            f"Refs #{args.issue}\n"
+        # Hand the resolved spawn off to the operation seam: the pure planner
+        # assembles the CreationSpec, the controller's create path opens the
+        # child and runs the cascade. The parent is never marked — the
+        # relationship lives solely on the child's `parent-of:` label (ADR-0003).
+        controller = Controller(
+            backend=backend,
+            state_machine=parent_ctx.state_machine,
+            catalog=parent_ctx.catalog,
+            grants=parent_ctx.grants,
+            dry_run=ctx["dry_run"],
+            registry=registry,
         )
-        body = user_body.rstrip() + footer
+        result = spawn_issue_op.run(
+            controller,
+            issue_id=args.issue,
+            spawn=spawn,
+            parent_process=parent_process,
+            entity="pull_request" if is_pr else "issue",
+            github_issue_type=type_entry.github_issue_type if type_entry else None,
+            title=args.title,
+            body=_resolve_body(args),
+            head=args.head,
+            base=args.base,
+            actor=_resolve_agent_role(ctx),
+        )
 
-        if ctx["dry_run"]:
+        if result.dry_run:
+            spec = result.plan.create
             print(f"[dry-run] would spawn child on process {spawn_process_name!r}:")
             print(f"  parent:        #{args.issue} (state {parent_state.state!r})")
             print(f"  issue_type:    {spawn.issue_type}")
             print(f"  initial_state: {spawn.initial_state}")
-            print(f"  title:         {title}")
+            print(f"  title:         {spec.title}")
             if is_pr:
                 print(f"  head:          {args.head}")
                 print(f"  base:          {args.base or '(repo default)'}")
-            print(f"  body:          {len(body)} character(s)")
+            print(f"  body:          {len(spec.body)} character(s)")
             return 0
 
-        if is_pr:
-            child_id = backend.create_pull_request(
-                title=title,
-                body=body,
-                state=spawn.initial_state,
-                head=args.head,
-                base=args.base,
-                draft=spawn.initial_state == "draft",
-                extra_labels=[f"parent-of:{args.issue}"],
-            )
-        else:
-            child_id = backend.create_issue(
-                title=title,
-                body=body,
-                state=spawn.initial_state,
-                extra_labels=[
-                    f"parent-of:{args.issue}",
-                    f"type:{spawn.issue_type}",
-                ],
-                issue_type=type_entry.github_issue_type if type_entry else None,
-            )
-
-        # The parent is not marked — the relationship lives solely on the
-        # child's `parent-of:<parent>` label; the cohort is a query (ADR-0003).
+        child_id = result.created_issue_id
         if ctx["json_output"]:
             print(
                 _json.dumps(

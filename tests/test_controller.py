@@ -1,0 +1,139 @@
+"""Controller create-path tests — creating operations (spawn) open a new
+issue rather than mutating `issue_id` in place."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from workflow.backends.base import IssueFilters, IssueState
+from workflow.core.controller import Controller
+from workflow.core.model.state_machine import Spawn, StateMachine
+from workflow.core.operations import spawn_issue as spawn_issue_op
+
+
+def _parent_from(labels: list[str] | None) -> str | None:
+    for label in labels or []:
+        if label.startswith("parent-of:"):
+            return label[len("parent-of:") :]
+    return None
+
+
+@dataclass
+class _CreateMockBackend:
+    name: str = "mock"
+    issues: dict[str, IssueState] = field(default_factory=dict)
+    created_issues: list[tuple[str, str, tuple[str, ...], str | None]] = field(default_factory=list)
+    created_prs: list[tuple[str, str | None, bool, tuple[str, ...]]] = field(default_factory=list)
+    mutations: list[str] = field(default_factory=list)
+    _next: int = 200
+
+    def read_issue(self, issue_id: str) -> IssueState:
+        return self.issues[issue_id]
+
+    def create_issue(self, title, body, state, extra_labels=None, issue_type=None) -> str:
+        new_id = str(self._next)
+        self._next += 1
+        self.created_issues.append((new_id, state, tuple(extra_labels or ()), issue_type))
+        self.issues[new_id] = IssueState(
+            issue_id=new_id, state=state, agent_claim=None, parent_of=_parent_from(extra_labels)
+        )
+        return new_id
+
+    def create_pull_request(
+        self, title, body, state, head=None, base=None, draft=False, extra_labels=None
+    ) -> str:
+        new_id = str(self._next)
+        self._next += 1
+        self.created_prs.append((new_id, head, draft, tuple(extra_labels or ())))
+        self.issues[new_id] = IssueState(
+            issue_id=new_id, state=state, agent_claim=None, parent_of=_parent_from(extra_labels)
+        )
+        return new_id
+
+    def apply_marker_change(self, issue_id, change, audit_comment=None) -> None:
+        # Spawn must not mutate any existing issue — the empty change is skipped
+        # by the controller, so this should never be called.
+        self.mutations.append(issue_id)
+
+    def list_issues(self, filters: IssueFilters) -> list[IssueState]:
+        return []
+
+
+def _controller(backend: _CreateMockBackend) -> Controller:
+    # registry=None → cascade is skipped (the fresh child triggers nothing here).
+    return Controller(backend=backend, state_machine=StateMachine(name="parent"), registry=None)
+
+
+def test_controller_spawn_creates_child_and_leaves_parent_untouched() -> None:
+    backend = _CreateMockBackend()
+    backend.issues["100"] = IssueState(issue_id="100", state="mitigating", agent_claim="ic")
+    spawn = Spawn(
+        process="inner-loop", issue_type="hotfix", initial_state="ready_for_dev", advance_on=()
+    )
+
+    result = spawn_issue_op.run(
+        _controller(backend),
+        issue_id="100",
+        spawn=spawn,
+        parent_process="incident-response",
+        entity="issue",
+        github_issue_type="Hotfix",
+        body="fix it",
+    )
+
+    assert result.created_issue_id == "200"
+    new_id, state, labels, gh_type = backend.created_issues[0]
+    assert state == "ready_for_dev"
+    assert "parent-of:100" in labels and "type:hotfix" in labels
+    assert gh_type == "Hotfix"
+    # The parent (100) was read but never mutated.
+    assert backend.mutations == []
+    assert backend.issues["100"].state == "mitigating"
+
+
+def test_controller_spawn_pr_uses_create_pull_request() -> None:
+    backend = _CreateMockBackend()
+    backend.issues["5"] = IssueState(issue_id="5", state="implementing", agent_claim="dev")
+    spawn = Spawn(process="pr", issue_type="pr", initial_state="draft", advance_on=())
+
+    result = spawn_issue_op.run(
+        _controller(backend),
+        issue_id="5",
+        spawn=spawn,
+        parent_process="inner-loop",
+        entity="pull_request",
+        head="feat/x",
+        body="impl",
+    )
+
+    assert result.created_issue_id == "200"
+    assert not backend.created_issues  # went through the PR path
+    new_id, head, draft, labels = backend.created_prs[0]
+    assert head == "feat/x"
+    assert draft is True
+    assert labels == ("parent-of:5",)
+    assert backend.mutations == []
+
+
+def test_controller_spawn_dry_run_creates_nothing() -> None:
+    backend = _CreateMockBackend()
+    backend.issues["100"] = IssueState(issue_id="100", state="mitigating", agent_claim="ic")
+    spawn = Spawn(
+        process="inner-loop", issue_type="hotfix", initial_state="ready_for_dev", advance_on=()
+    )
+    controller = Controller(
+        backend=backend, state_machine=StateMachine(name="parent"), registry=None, dry_run=True
+    )
+
+    result = spawn_issue_op.run(
+        controller,
+        issue_id="100",
+        spawn=spawn,
+        parent_process="incident-response",
+        entity="issue",
+    )
+
+    assert result.dry_run is True
+    assert result.created_issue_id is None
+    assert backend.created_issues == [] and backend.created_prs == []
+    assert result.plan.create is not None and result.plan.create.state == "ready_for_dev"
