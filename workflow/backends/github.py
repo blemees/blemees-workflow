@@ -438,7 +438,7 @@ class GitHubBackend:
             "--repo",
             self.repo,
             "--json",
-            "number,labels,assignees,state,comments",
+            "number,labels,assignees,state,issueType",
         )
         try:
             data = json.loads(result)
@@ -446,7 +446,12 @@ class GitHubBackend:
             raise BackendError(f"gh returned non-JSON for issue {issue_id}: {exc}") from exc
 
         labels = [lbl.get("name", "") for lbl in (data.get("labels") or [])]
-        return self._labels_to_state(issue_id, labels)
+        # `issueType` is GitHub's native Issue Type ({"name": "Bug"} or null).
+        # Under native encoding there's no `type:` label, so this is the only
+        # signal of the issue's type.
+        issue_type_obj = data.get("issueType") or {}
+        native_type = issue_type_obj.get("name") if isinstance(issue_type_obj, dict) else None
+        return self._labels_to_state(issue_id, labels, native_issue_type=native_type)
 
     def apply_marker_change(
         self,
@@ -696,7 +701,9 @@ class GitHubBackend:
 
     # ----- internals -----
 
-    def _labels_to_state(self, issue_id: str, labels: list[str]) -> IssueState:
+    def _labels_to_state(
+        self, issue_id: str, labels: list[str], native_issue_type: str | None = None
+    ) -> IssueState:
         state: str | None = None
         agent_claim: str | None = None
         last_state: str | None = None
@@ -773,6 +780,9 @@ class GitHubBackend:
             advising=advising,
             collected_by=collected_by,
             child_of=child_of,
+            # Only surface the native type when no `type:` label gave us the
+            # framework id directly (label encoding wins).
+            native_issue_type=native_issue_type if issue_type is None else None,
         )
 
     def _marker_change_to_labels(

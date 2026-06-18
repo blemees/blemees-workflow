@@ -1123,6 +1123,7 @@ def _build_controller(context: Process, dry_run: bool) -> Controller:
         grants=context.grants,
         dry_run=dry_run,
         registry=registry,
+        issue_type_directory=context.issue_type_directory,
     )
 
 

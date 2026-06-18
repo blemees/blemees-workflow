@@ -1530,3 +1530,43 @@ def test_plan_respond_requires_advise_claim() -> None:
             state,
             wf,
         )
+
+
+# --------------------------------------------------------------------------- #
+# #12 — marker-consistency fixes
+
+
+def test_plan_release_clears_in_flight_hitl() -> None:
+    wf = _build_workflow()
+    state = IssueState(
+        issue_id="1",
+        state="refining",
+        agent_claim="product-manager",
+        last_state="raw",
+        awaiting_gate="ready_for_dev",
+        human_input="general",
+    )
+    plan = plan_operation(
+        OperationRequest(operation=Operation.RELEASE_ISSUE, issue_id="1"), state, wf
+    )
+    c = plan.change
+    assert c.set_state == "raw"
+    assert c.clear_awaiting_gate and c.clear_audit_pending and c.clear_human_input
+    assert c.set_awaiting_input is False
+    assert c.set_reviewing is False and c.set_auditing is False and c.set_advising is False
+
+
+def test_plan_advance_clears_human_input() -> None:
+    wf = _build_workflow()
+    state = IssueState(issue_id="1", state="raw", agent_claim=None, human_input="general")
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.ADVANCE_ISSUE,
+            issue_id="1",
+            destination="refining",
+            actor="product-manager",
+        ),
+        state,
+        wf,
+    )
+    assert plan.change.clear_human_input is True
