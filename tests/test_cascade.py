@@ -67,9 +67,17 @@ class _MockBackend:
         if change.set_pr_ready:
             self.pr_ready.append(issue_id)
 
-    # Unused by cascade but part of the protocol.
-    def list_issues(self, filters: IssueFilters) -> list[IssueState]:  # pragma: no cover
-        return []
+    def list_issues(self, filters: IssueFilters) -> list[IssueState]:
+        """Cohort lookups only — filter the in-memory issues by parent_of /
+        collected_by (what the cascade queries)."""
+        out: list[IssueState] = []
+        for issue in self.issues.values():
+            if filters.parent_of is not None and issue.parent_of != filters.parent_of:
+                continue
+            if filters.collected_by is not None and issue.collected_by != filters.collected_by:
+                continue
+            out.append(issue)
+        return out
 
 
 @dataclass
@@ -217,7 +225,6 @@ def test_cascade_spawn_parent_single_hop():
         issue_id="INC-1",
         state="mitigating",
         agent_claim="incident-commander",
-        subprocess_children=("MIT-1",),
     )
     backend.issues["MIT-1"] = IssueState(
         issue_id="MIT-1",
@@ -379,14 +386,12 @@ def test_cascade_multi_hop_chain():
         issue_id="INC-2",
         state="mitigating",
         agent_claim="incident-commander",
-        subprocess_children=("MIT-2",),
     )
     backend.issues["MIT-2"] = IssueState(
         issue_id="MIT-2",
         state="applying_mitigation",
         agent_claim="incident-responder",
         parent_of="INC-2",
-        subprocess_children=("IL-4",),
     )
     backend.issues["IL-4"] = IssueState(
         issue_id="IL-4",
@@ -524,7 +529,6 @@ def test_cascade_cycle_guard_visits_state_pair_once():
         issue_id="P1",
         state="working",
         agent_claim="a",
-        subprocess_children=("C1",),
     )
     backend.issues["C1"] = IssueState(
         issue_id="C1",
@@ -606,7 +610,6 @@ def test_cascade_multi_spawn_wait_for_all_holds_when_sibling_unfinished():
         issue_id="P",
         state="working",
         agent_claim="worker",
-        subprocess_children=("KA", "KB"),
     )
     backend.issues["KA"] = IssueState(
         issue_id="KA",
