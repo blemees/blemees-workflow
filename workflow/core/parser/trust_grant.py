@@ -160,6 +160,13 @@ def load_team_grants(team_dir: str | Path) -> dict[str, TrustGrant]:
     Returns a `{control_point: TrustGrant}` map. Files that fail to parse
     are logged at WARN and skipped — one bad grant does not poison the rest.
     Subdirectories (e.g., `trust-grants/<workflow>/<gate>.json`) are walked.
+
+    A `control_point` is a gate name, and gate names are globally unique
+    across the whole workflow (enforced by the `GATE_NAMES_UNIQUE` validator),
+    so the flat `{control_point: grant}` keying is unambiguous — there is no
+    per-process scoping to do. A genuine duplicate `control_point` therefore
+    means two grant files target the *same* gate; we keep the first and warn
+    (#19).
     """
     path = Path(team_dir)
     if not path.exists() or not path.is_dir():

@@ -300,6 +300,9 @@ def load_process(
         human_input_directory = parse_human_input_directory(human_inputs_path)
 
     # Trust grants — priority: explicit grants_dir > env > agent config > default.
+    # Keyed by control_point (gate name); gate names are globally unique across
+    # the whole workflow (GATE_NAMES_UNIQUE), so the flat keying never collides
+    # across processes (#19).
     grants: dict[str, TrustGrant] = {}
     if grants_dir is None:
         grants_dir = discover_grants_dir(agent_home=agent_home, agent_config=agent_config)
