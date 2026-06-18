@@ -260,9 +260,8 @@ def load_process(
     if workflow_dir is None:
         raise ConfigError(
             "Cannot find a workflows directory. Pass --workflow-dir, set "
-            "WORKFLOW_DIR, or run from inside a repo containing "
-            "`skills/workflows/shared/resources/` (or a directory with "
-            "`*-states.json` files)."
+            "WORKFLOW_DIR, set the agent config's `workflow-dir` key, or place "
+            "the `*-states.json` files in `<agent-home>/.workflow/workflows/`."
         )
     if process_name is None:
         raise ConfigError("load_process requires a process_name to resolve the workflow file.")
