@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from workflow.backends.base import IssueFilters, IssueState, MarkerChange
-from workflow.errors import BackendError
+from workflow.errors import BackendError, OperationError
 
 logger = logging.getLogger(__name__)
 
@@ -484,6 +484,15 @@ class GitHubBackend:
             args += [f"--remove-label={lbl}" for lbl in sorted(remove)]
             self._gh(*args)
 
+        # 1a. Claim concurrency control. GitHub labels have no compare-and-swap,
+        #     and `--add-label wip:<role>` is additive: two agents claiming the
+        #     same resting issue both pass the planner's snapshot precondition and
+        #     both wip: labels land, violating "at most one wip" (#21). Verify
+        #     after the write — if our claim didn't win cleanly, self-revert and
+        #     raise so the loser doesn't believe it holds the claim.
+        if change.set_agent_claim:
+            self._verify_claim_won(issue_id, change.set_agent_claim)
+
         # 2. Best-effort follow-ups. Past this point the state label is set, so a
         #    failure is a *partial* apply — surface it with a repair hint.
         try:
@@ -518,6 +527,65 @@ class GitHubBackend:
                     issue_id,
                     exc,
                 )
+
+    def _verify_claim_won(self, issue_id: str, role: str) -> None:
+        """Confirm our `wip:<role>` claim is the only one on the issue (#21).
+
+        Called immediately after a claim's label swap. Re-reads the live label
+        set and checks exactly one `wip:` label is present and it is ours. If a
+        concurrent claim also landed (two `wip:` labels), or the surviving claim
+        isn't ours, we lost the race: remove our own `wip:` label so we don't
+        leave a phantom claim, then raise `OperationError`.
+
+        This narrows but does not fully close the race. Both contenders may
+        observe two labels and both self-revert (leaving the issue unclaimed for
+        a retry), or — depending on read/write interleaving — one may read its
+        label alone and return success while the other reverts. Either way the
+        invariant that matters holds: no caller ever returns believing it won
+        while a second `wip:` label survives. The residual window is inherent to
+        a tracker without compare-and-swap; a single GraphQL mutation would be
+        the real fix.
+        """
+        expected = f"wip:{role}"
+        wip_labels = sorted(lbl for lbl in self._fetch_labels(issue_id) if lbl.startswith("wip:"))
+        if wip_labels == [expected]:
+            return  # clean win
+        # Lost (or contended) — drop our own label so no phantom claim remains.
+        try:
+            self._gh(
+                "issue",
+                "edit",
+                str(issue_id),
+                "--repo",
+                self.repo,
+                f"--remove-label={expected}",
+            )
+        except BackendError as exc:
+            logger.warning(
+                "Issue #%s: lost claim race and failed to self-revert %r: %s",
+                issue_id,
+                expected,
+                exc,
+            )
+        raise OperationError(
+            f"Lost claim race on #{issue_id}: expected only {expected!r} after claiming, "
+            f"but the live wip labels are {wip_labels}. A concurrent agent claimed the same "
+            f"issue; our claim was reverted. Re-poll the queue and claim a different issue."
+        )
+
+    def _fetch_labels(self, issue_id: str) -> list[str]:
+        """Return the raw label names currently on the issue.
+
+        Unlike `read_issue`, which collapses the label set into an `IssueState`
+        (one `wip:` claim wins), this preserves every label — needed by the
+        claim race check, which must see duplicate `wip:` labels.
+        """
+        result = self._gh("issue", "view", str(issue_id), "--repo", self.repo, "--json", "labels")
+        try:
+            data = json.loads(result)
+        except json.JSONDecodeError as exc:
+            raise BackendError(f"gh returned non-JSON for issue {issue_id}: {exc}") from exc
+        return [lbl.get("name", "") for lbl in (data.get("labels") or [])]
 
     def mark_pr_ready(self, pr_id: str) -> None:
         """Flip the PR from draft to ready-for-review via `gh pr ready`.
