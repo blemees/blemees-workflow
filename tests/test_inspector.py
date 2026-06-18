@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from workflow.core.inspector import available_transitions
+from workflow.core.inspector import available_transitions, inbox_states_for_role
 from workflow.core.model.human_gate import (
     HumanGate,
     HumanGateCatalog,
@@ -144,3 +144,41 @@ def test_trust_grant_relaxes_effective_level() -> None:
 def test_no_actions_for_closing_state() -> None:
     sm, catalog = _build()
     assert available_transitions(sm, catalog, {}, source_state="wont_fix") == []
+
+
+def test_inbox_states_discovers_resting_source_of_role_claim() -> None:
+    """A resting state is in the role's inbox when its CLAIM lands on a working
+    state whose `roles` includes that role."""
+    sm, _ = _build()
+    # 'raw' -> 'refining' (roles: product-manager) is the only CLAIM.
+    assert inbox_states_for_role(sm, "product-manager") == {"raw"}
+
+
+def test_inbox_states_excludes_role_not_permitted_by_destination() -> None:
+    sm, _ = _build()
+    # No working state lists 'developer', so the role has no inbox here.
+    assert inbox_states_for_role(sm, "developer") == set()
+
+
+def test_inbox_states_role_match_is_brace_and_case_insensitive() -> None:
+    sm, _ = _build()
+    assert inbox_states_for_role(sm, "{Product-Manager}") == {"raw"}
+
+
+def test_inbox_states_unrestricted_working_state_is_open_to_any_role() -> None:
+    """A working state with no `roles` is an open queue — any role's inbox
+    includes the resting state that claims into it."""
+    sm = StateMachine(name="t")
+    sm.states = {
+        "queued": State(name="queued", state_class=StateClass.RESTING),
+        "doing": State(name="doing", state_class=StateClass.WORKING),  # no roles
+    }
+    sm.transitions = [
+        Transition(
+            source="queued",
+            destination="doing",
+            label="anyone claims queued",
+            transition_type=TransitionType.CLAIM,
+        ),
+    ]
+    assert inbox_states_for_role(sm, "anyone") == {"queued"}

@@ -358,8 +358,8 @@ def test_list_issues_returns_empty_for_no_matches() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# _list_for_role helper tests (defined in cli.py but operates on the backend
-# protocol; mocking subprocess.run lets us exercise it end-to-end).
+# inspector.inbox_for_role tests (registry-aware read-only query; mocking
+# subprocess.run lets us exercise it end-to-end against the real backend).
 
 
 def _fake_registry(workflow, name="test"):
@@ -371,7 +371,7 @@ def _fake_registry(workflow, name="test"):
 
 
 def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
-    from workflow.cli import _list_for_role
+    from workflow.core.inspector import inbox_for_role
     from workflow.core.model.state_machine import (
         State,
         StateClass,
@@ -433,27 +433,21 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
         },
     ]
 
-    # Mock build_registry to return a registry with our test workflow.
-    with (
-        mock.patch(
-            "workflow.config.build_registry",
-            return_value=_fake_registry(workflow),
-        ),
-        mock.patch(
-            "workflow.backends.github.subprocess.run",
-            side_effect=_fake_run_factory(
-                [
-                    _proc(stdout=json.dumps(inbox_response)),
-                    _proc(stdout=json.dumps(wip_response)),
-                ]
-            ),
+    # Pass the fake registry straight into the inspector query.
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(
+            [
+                _proc(stdout=json.dumps(inbox_response)),
+                _proc(stdout=json.dumps(wip_response)),
+            ]
         ),
     ):
-        results = _list_for_role(
-            ctx={},
-            backend=backend,
-            role="product-manager",
-            limit=50,
+        results = inbox_for_role(
+            _fake_registry(workflow),
+            backend,
+            "product-manager",
+            50,
         )
 
     ids = sorted(item.issue_id for item in results)
@@ -467,7 +461,7 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
 def test_list_for_role_no_inbox_states_when_no_working_state_accepts_role() -> None:
     """If no working state's `roles` includes the queried role, the role has
     no inbox in this workflow — only the wip filter contributes."""
-    from workflow.cli import _list_for_role
+    from workflow.core.inspector import inbox_for_role
     from workflow.core.model.state_machine import (
         State,
         StateClass,
@@ -496,23 +490,17 @@ def test_list_for_role_no_inbox_states_when_no_working_state_accepts_role() -> N
     ]
 
     backend = GitHubBackend(repo="owner/repo")
-    with (
-        mock.patch(
-            "workflow.config.build_registry",
-            return_value=_fake_registry(workflow),
-        ),
-        mock.patch(
-            "workflow.backends.github.subprocess.run",
-            # Only one subprocess.run call: the wip:developer filter
-            # (no inbox states means no per-state backend calls).
-            return_value=_proc(stdout=json.dumps([])),
-        ),
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        # Only one subprocess.run call: the wip:developer filter
+        # (no inbox states means no per-state backend calls).
+        return_value=_proc(stdout=json.dumps([])),
     ):
-        results = _list_for_role(
-            ctx={},
-            backend=backend,
-            role="developer",
-            limit=50,
+        results = inbox_for_role(
+            _fake_registry(workflow),
+            backend,
+            "developer",
+            50,
         )
 
     assert results == []
