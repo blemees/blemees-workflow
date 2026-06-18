@@ -1803,110 +1803,6 @@ def _do_respond_request(args: argparse.Namespace) -> int:
         return 2
 
 
-def _list_for_role(
-    ctx: dict,
-    backend: TrackerBackend,
-    role: str,
-    limit: int,
-) -> list:
-    """Compute the role's open work across ALL workflows: inbox + actionable wip.
-
-    Roles often participate in multiple workflows (a product-manager does
-    refinement, postmortem, prioritization). The query uses the workflow
-    registry to aggregate inbox states: resting states from which `role`
-    can CLAIM into a working state that declares `role` in its `roles`
-    list (or has no role restriction).
-
-    Two categories, deduplicated by issue id:
-
-    1. **Inbox** — items in those discovered resting states with no current
-       claim. Aggregated across all workflows.
-
-    2. **Actionable wip** — items with `wip:{role}` where the agent is not
-       blocked waiting on a human: no `hitl:awaiting-*`, no `hitl:audit-*`,
-       no `hitl:awaiting-input`. (Backend-level filter; not workflow-scoped.)
-
-    Excludes:
-      - items where the agent is currently blocked on a human signal
-      - items already claimed by another role
-    """
-    from workflow.backends.base import IssueFilters
-    from workflow.config import build_registry
-
-    seen: dict[str, Any] = {}
-    inbox_states: set[str] = set()
-
-    # Aggregate inbox states from every workflow in the registry. An
-    # inbox state for `role` is any resting state with at least one CLAIM
-    # transition to a working state whose `roles` includes the role.
-    registry = build_registry(
-        agent_home=ctx.get("agent_home"),
-        workflow_dir=ctx.get("workflow_dir"),
-        backend=None,
-        grants_dir=ctx.get("grants_dir"),
-    )
-    if registry is None:
-        raise ConfigError(
-            "No workflows directory found. Set WORKFLOW_DIR or run inside "
-            "a directory whose tree contains `*-states.json` files."
-        )
-    for wf_name in registry.discovered_processes():
-        try:
-            wf_context = registry.get_process(wf_name)
-        except (ConfigError, Exception) as exc:
-            logger.debug("Skipping workflow %r: %s", wf_name, exc)
-            continue
-        inbox_states |= _states_claimed_by_role(wf_context.state_machine, role)
-
-    # 1. Inbox: query the backend for each discovered inbox state.
-    for state_name in inbox_states:
-        for item in backend.list_issues(IssueFilters(state=state_name, limit=limit)):
-            if item.agent_claim is None and item.issue_id not in seen:
-                seen[item.issue_id] = item
-
-    # 2. Actionable wip: wip:{role} AND no awaiting/audit/awaiting-input markers.
-    # (This is workflow-agnostic — wip labels don't care about which workflow
-    # the item belongs to.)
-    for item in backend.list_issues(IssueFilters(claim_role=role, limit=limit)):
-        if (
-            item.awaiting_gate is None
-            and item.audit_pending is None
-            and not item.awaiting_input
-            and item.issue_id not in seen
-        ):
-            seen[item.issue_id] = item
-
-    return list(seen.values())
-
-
-def _states_claimed_by_role(state_machine: Any, role: str) -> set[str]:
-    """Find resting states from which `role` can claim into a working state.
-
-    The role-restriction now lives on the working state's `roles` list, not
-    on the resting state. To enumerate the role's inbox, walk every CLAIM
-    transition and collect its source if the destination working state
-    permits the role (empty `roles` means unrestricted — included for any
-    role). Role match is case-insensitive and ignores `{...}` braces.
-    """
-    from workflow.core.model.state_machine import TransitionType
-
-    role_normalized = role.strip("{}").lower()
-    matches: set[str] = set()
-    for t in state_machine.transitions:
-        if t.transition_type is not TransitionType.CLAIM:
-            continue
-        dest = state_machine.states.get(t.destination)
-        if dest is None:
-            continue
-        if dest.roles:
-            allowed = {r.strip("{}").lower() for r in dest.roles}
-            if role_normalized not in allowed:
-                continue
-        # dest.roles empty = open queue; any role may claim.
-        matches.add(t.source)
-    return matches
-
-
 def _do_create_issue(args: argparse.Namespace) -> int:
     """Create a new issue in the given initial state.
 
@@ -2574,8 +2470,22 @@ def _do_view_inbox(args: argparse.Namespace) -> int:
         )
         return 2
 
+    from workflow.config import build_registry
+    from workflow.core.inspector import inbox_for_role
+
     try:
-        items = _list_for_role(ctx, backend, role, args.limit)
+        registry = build_registry(
+            agent_home=ctx.get("agent_home"),
+            workflow_dir=ctx.get("workflow_dir"),
+            backend=None,
+            grants_dir=ctx.get("grants_dir"),
+        )
+        if registry is None:
+            raise ConfigError(
+                "No workflows directory found. Set WORKFLOW_DIR or run inside "
+                "a directory whose tree contains `*-states.json` files."
+            )
+        items = inbox_for_role(registry, backend, role, args.limit)
     except (ConfigError, BackendError) as exc:
         _handle_workflow_error(exc)
         return 2

@@ -12,7 +12,9 @@ issue or the backend.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from workflow.core.model.human_gate import HumanGate, HumanGateCatalog, HumanGateLevel
 from workflow.core.model.state_machine import (
@@ -23,6 +25,12 @@ from workflow.core.model.state_machine import (
     TransitionType,
 )
 from workflow.core.model.trust_grant import TrustGrant
+
+if TYPE_CHECKING:
+    from workflow.backends.base import IssueState, TrackerBackend
+    from workflow.config import Workflow
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -122,3 +130,88 @@ def available_transitions(
             )
         )
     return out
+
+
+def inbox_states_for_role(state_machine: StateMachine, role: str) -> set[str]:
+    """Find resting states from which `role` can claim into a working state.
+
+    The role-restriction lives on the working state's `roles` list, not on the
+    resting state. To enumerate the role's inbox, walk every CLAIM transition
+    and collect its source if the destination working state permits the role
+    (empty `roles` means unrestricted — included for any role). Role match is
+    case-insensitive and ignores `{...}` braces.
+    """
+    role_normalized = role.strip("{}").lower()
+    matches: set[str] = set()
+    for t in state_machine.transitions:
+        if t.transition_type is not TransitionType.CLAIM:
+            continue
+        dest = state_machine.states.get(t.destination)
+        if dest is None:
+            continue
+        if dest.roles:
+            allowed = {r.strip("{}").lower() for r in dest.roles}
+            if role_normalized not in allowed:
+                continue
+        # dest.roles empty = open queue; any role may claim.
+        matches.add(t.source)
+    return matches
+
+
+def inbox_for_role(
+    registry: Workflow,
+    backend: TrackerBackend,
+    role: str,
+    limit: int,
+) -> list[IssueState]:
+    """Compute the role's open work across ALL workflows: inbox + actionable wip.
+
+    Roles often participate in multiple workflows (a product-manager does
+    refinement, postmortem, prioritization). The query uses the workflow
+    registry to aggregate inbox states: resting states from which `role` can
+    CLAIM into a working state that declares `role` in its `roles` list (or has
+    no role restriction).
+
+    Two categories, deduplicated by issue id:
+
+    1. **Inbox** — items in those discovered resting states with no current
+       claim. Aggregated across all workflows.
+
+    2. **Actionable wip** — items with `wip:{role}` where the agent is not
+       blocked waiting on a human: no `hitl:awaiting-*`, no `hitl:audit-*`,
+       no `hitl:awaiting-input`. (Backend-level filter; not workflow-scoped.)
+
+    Excludes items where the agent is blocked on a human signal, and items
+    already claimed by another role. Read-only: never mutates issue or backend.
+    """
+    from workflow.backends.base import IssueFilters
+
+    seen: dict[str, IssueState] = {}
+    inbox_states: set[str] = set()
+
+    # Aggregate inbox states from every workflow in the registry.
+    for wf_name in registry.discovered_processes():
+        try:
+            wf_context = registry.get_process(wf_name)
+        except Exception as exc:  # skip malformed workflows; inbox is best-effort
+            logger.debug("Skipping workflow %r: %s", wf_name, exc)
+            continue
+        inbox_states |= inbox_states_for_role(wf_context.state_machine, role)
+
+    # 1. Inbox: query the backend for each discovered inbox state.
+    for state_name in inbox_states:
+        for item in backend.list_issues(IssueFilters(state=state_name, limit=limit)):
+            if item.agent_claim is None and item.issue_id not in seen:
+                seen[item.issue_id] = item
+
+    # 2. Actionable wip: wip:{role} AND no awaiting/audit/awaiting-input markers.
+    for item in backend.list_issues(IssueFilters(claim_role=role, limit=limit)):
+        if (
+            item.awaiting_gate is None
+            and item.audit_pending is None
+            and not item.awaiting_input
+            and item.issue_id not in seen
+        ):
+            seen[item.issue_id] = item
+
+    return list(seen.values())
