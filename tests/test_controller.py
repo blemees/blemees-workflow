@@ -15,8 +15,8 @@ from workflow.core.operations import spawn_issue as spawn_issue_op
 
 def _parent_from(labels: list[str] | None) -> str | None:
     for label in labels or []:
-        if label.startswith("parent-of:"):
-            return label[len("parent-of:") :]
+        if label.startswith("child-of:"):
+            return label[len("child-of:") :]
     return None
 
 
@@ -38,7 +38,7 @@ class _CreateMockBackend:
         self._next += 1
         self.created_issues.append((new_id, state, tuple(extra_labels or ()), issue_type))
         self.issues[new_id] = IssueState(
-            issue_id=new_id, state=state, agent_claim=None, parent_of=_parent_from(extra_labels)
+            issue_id=new_id, state=state, agent_claim=None, child_of=_parent_from(extra_labels)
         )
         return new_id
 
@@ -49,7 +49,7 @@ class _CreateMockBackend:
         self._next += 1
         self.created_prs.append((new_id, head, draft, tuple(extra_labels or ())))
         self.issues[new_id] = IssueState(
-            issue_id=new_id, state=state, agent_claim=None, parent_of=_parent_from(extra_labels)
+            issue_id=new_id, state=state, agent_claim=None, child_of=_parent_from(extra_labels)
         )
         return new_id
 
@@ -88,7 +88,7 @@ def test_controller_spawn_creates_child_and_leaves_parent_untouched() -> None:
     assert result.created_issue_id == "200"
     new_id, state, labels, gh_type = backend.created_issues[0]
     assert state == "ready_for_dev"
-    assert "parent-of:100" in labels and "type:hotfix" in labels
+    assert "child-of:100" in labels and "type:hotfix" in labels
     assert gh_type == "Hotfix"
     # The parent (100) was read but never mutated.
     assert backend.mutations == []
@@ -115,7 +115,7 @@ def test_controller_spawn_pr_uses_create_pull_request() -> None:
     new_id, head, draft, labels = backend.created_prs[0]
     assert head == "feat/x"
     assert draft is True
-    assert labels == ("parent-of:5",)
+    assert labels == ("child-of:5",)
     assert backend.mutations == []
 
 

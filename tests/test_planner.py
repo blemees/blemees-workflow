@@ -1273,7 +1273,7 @@ def test_plan_spawn_builds_issue_creation_spec() -> None:
     assert spec.entity == "issue"
     assert spec.state == "ready_for_dev"
     assert spec.github_issue_type == "Hotfix"
-    assert "parent-of:100" in spec.extra_labels
+    assert "child-of:100" in spec.extra_labels
     assert "type:hotfix" in spec.extra_labels
     assert "Refs #100" in spec.body and "please fix" in spec.body
     assert spec.title == "refining follow-up for #100"
@@ -1317,7 +1317,7 @@ def test_plan_spawn_pr_builds_pr_creation_spec() -> None:
     assert spec.head == "feat/x"
     assert spec.draft is True  # initial_state == "draft"
     # No type: label for PRs — the entity kind conveys the type.
-    assert spec.extra_labels == ("parent-of:5",)
+    assert spec.extra_labels == ("child-of:5",)
 
 
 # --------------------------------------------------------------------------- #

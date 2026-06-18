@@ -56,14 +56,14 @@ class IssueState:
     # (ADR-0003).
     # Spawn parent — when this issue was created by another issue via
     # `spawns`, the parent's id is recorded here (read from a
-    # `parent-of:<parent-id>` label on GitHub). None means this issue
+    # `child-of:<parent-id>` label on GitHub). None means this issue
     # was not spawned by anyone. Used by the cascade-advance logic to
     # walk back up the spawn chain when a child terminates.
     # The inverse — a parent's children — is NOT stored as a marker. The
-    # cohort is discovered on demand by querying the `parent-of:` label
-    # (`list_issues(parent_of=...)`); there is no parent-side registry
+    # cohort is discovered on demand by querying the `child-of:` label
+    # (`list_issues(child_of=...)`); there is no parent-side registry
     # (ADR-0003).
-    parent_of: str | None = None
+    child_of: str | None = None
     # Misc
     extras: dict[str, str] = field(default_factory=dict)  # backend-specific extras
 
@@ -133,7 +133,7 @@ class IssueFilters:
     awaiting_gate: str | None = None  # specific gate name; pass "*" for any
     audit_pending: str | None = None  # specific gate name; pass "*" for any
     awaiting_input: bool | None = None  # True / False / None (don't filter)
-    parent_of: str | None = None  # cohort: children spawned from this parent id
+    child_of: str | None = None  # cohort: children spawned from this parent id
     collected_by: str | None = None  # cohort: contributors gathered by this collector id
     limit: int = 50
 

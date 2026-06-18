@@ -416,15 +416,15 @@ def test_list_issues_merges_prs_and_queries_all_states() -> None:
         assert c[c.index("--state") + 1] == "all"
 
 
-def test_list_issues_cohort_query_by_parent_of_returns_closed_and_pr_children() -> None:
-    """A cohort query (`parent-of:<id>`) finds children regardless of whether
+def test_list_issues_cohort_query_by_child_of_returns_closed_and_pr_children() -> None:
+    """A cohort query (`child-of:<id>`) finds children regardless of whether
     they are closed issues or PRs — wait-for-all depends on this (ADR-0003)."""
     backend = GitHubBackend(repo="owner/repo")
     closed_child = [
-        {"number": 11, "title": "closed child", "labels": [{"name": "parent-of:100"}]},
+        {"number": 11, "title": "closed child", "labels": [{"name": "child-of:100"}]},
     ]
     pr_child = [
-        {"number": 12, "title": "PR child", "labels": [{"name": "parent-of:100"}]},
+        {"number": 12, "title": "PR child", "labels": [{"name": "child-of:100"}]},
     ]
     with mock.patch(
         "workflow.backends.github.subprocess.run",
@@ -435,13 +435,13 @@ def test_list_issues_cohort_query_by_parent_of_returns_closed_and_pr_children() 
             ]
         ),
     ) as patched:
-        results = backend.list_issues(IssueFilters(parent_of="100"))
+        results = backend.list_issues(IssueFilters(child_of="100"))
 
     assert sorted(r.issue_id for r in results) == ["11", "12"]
     # The cohort label is passed to both queries.
     for c in [c.args[0] for c in patched.call_args_list]:
         label_vals = [c[i + 1] for i, x in enumerate(c) if x == "--label"]
-        assert "parent-of:100" in label_vals
+        assert "child-of:100" in label_vals
 
 
 # --------------------------------------------------------------------------- #

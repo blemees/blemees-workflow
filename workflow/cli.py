@@ -396,7 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Spawn a child issue on the target process declared by the "
             "parent state's `spawns` field. The child gets a Refs #<parent> "
-            "footer plus a `parent-of:<parent>` label — the sole record of the "
+            "footer plus a `child-of:<parent>` label — the sole record of the "
             "relationship; the auto-advance on child close finds the cohort by "
             "querying that label (ADR-0003). For pr-typed spawns, --head is "
             "required (PRs need a source branch)."
@@ -1571,7 +1571,7 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
         # Hand the resolved spawn off to the operation seam: the pure planner
         # assembles the CreationSpec, the controller's create path opens the
         # child and runs the cascade. The parent is never marked — the
-        # relationship lives solely on the child's `parent-of:` label (ADR-0003).
+        # relationship lives solely on the child's `child-of:` label (ADR-0003).
         controller = Controller(
             backend=backend,
             state_machine=parent_ctx.state_machine,
