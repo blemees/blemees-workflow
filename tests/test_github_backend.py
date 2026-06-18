@@ -1014,3 +1014,33 @@ def test_discover_workflows_dir_respects_env_var(tmp_path, monkeypatch) -> None:
 
     found = discover_workflows_dir(agent_home=agent_home)
     assert found == env_dir.resolve()
+
+
+def test_apply_marker_change_partial_failure_raises_repair_error() -> None:
+    """If a follow-up step fails after the label swap, the issue is partially
+    applied — the backend raises a clear repair error, not a bare one (#20)."""
+    backend = GitHubBackend(repo="owner/repo")
+    pre = {
+        "labels": [{"name": "state:implementing"}],
+        "assignees": [],
+        "state": "OPEN",
+        "comments": [],
+        "number": 1,
+    }
+
+    def _run(*args, **kwargs):
+        cmd = args[0]
+        if "view" in cmd:
+            return _proc(stdout=json.dumps(pre))
+        return _proc(stdout="")  # label create / edit all succeed
+
+    with (
+        mock.patch("workflow.backends.github.subprocess.run", side_effect=_run),
+        mock.patch.object(GitHubBackend, "close_issue", side_effect=BackendError("close boom")),
+        pytest.raises(BackendError, match="partially applied"),
+    ):
+        backend.apply_marker_change(
+            "1",
+            MarkerChange(set_state="shipped", close_issue=True, close_reason="completed"),
+            audit_comment="## advance",
+        )

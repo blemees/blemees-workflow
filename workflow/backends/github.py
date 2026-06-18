@@ -7,8 +7,14 @@ Per `backends/github-encoding.md`:
 - HITL markers → `hitl:*` labels in the queue / claim / signal subnamespaces.
 - Audit records → issue/PR comments.
 
-Atomicity is achieved by passing every label change as a single `gh issue
-edit` invocation; `gh` translates this to GraphQL's `replaceLabels` mutation.
+The label swap is the one atomic step: every add/remove rides a single `gh
+issue edit` invocation (GraphQL `replaceLabels`), so the state marker never
+tears. The surrounding follow-ups in `apply_marker_change` — assignment, close,
+pr-ready, audit comment — are a best-effort sequence, NOT part of that
+transaction. The label swap goes first (it carries the state change); a
+follow-up failure raises a partial-apply error with a repair hint rather than
+leaving a silent inconsistency. `gh` has no multi-resource transaction, so a
+fully atomic apply would need a single GraphQL mutation (future work).
 
 The backend creates missing labels lazily with namespace-appropriate colors.
 """
@@ -449,7 +455,14 @@ class GitHubBackend:
         change: MarkerChange,
         audit_comment: str | None = None,
     ) -> None:
-        # Compute the add/remove label deltas from the change.
+        # This is NOT a single atomic transaction (gh has no multi-resource
+        # transaction). Only the label swap is atomic (one `gh issue edit` →
+        # GraphQL `replaceLabels`); it carries the state change, so it goes
+        # FIRST. Everything after is a best-effort sequence: a failure there
+        # means the state label is already updated, so we raise a partial-apply
+        # error naming what to repair rather than leaving a silent inconsistency
+        # (#20). The audit comment is posted LAST, so it never records a
+        # transition that didn't happen.
         current = self.read_issue(issue_id)
         add, remove = self._marker_change_to_labels(current, change)
 
@@ -457,44 +470,50 @@ class GitHubBackend:
         for label in add:
             self._ensure_label_exists(label)
 
-        # Post the audit comment FIRST per the encoding doc's ordering
-        # guarantee (§ 3): validate guards → emit audit comment → swap labels.
-        if audit_comment:
-            self.post_comment(issue_id, audit_comment)
-
-        # Apply add + remove in a single `gh` invocation — per `gh`'s docs and
-        # the encoding doc, this maps to GraphQL's `replaceLabels` mutation.
+        # 1. The atomic state change: add + remove in a single `gh` invocation.
+        #    If this fails, nothing has changed — a bare error is correct.
         if add or remove:
-            args: list[str] = [
-                "issue",
-                "edit",
-                str(issue_id),
-                "--repo",
-                self.repo,
-            ]
+            args: list[str] = ["issue", "edit", str(issue_id), "--repo", self.repo]
             if add:
                 args += ["--add-label", ",".join(sorted(add))]
             if remove:
                 args += ["--remove-label", ",".join(sorted(remove))]
             self._gh(*args)
 
-        # Handle assignment for claim / release.
-        if change.set_agent_claim:
-            role_handle = self.resolve_role(change.set_agent_claim)
-            if role_handle:
-                self.assign(issue_id, role_handle)
-        if change.clear_agent_claim:
-            self.unassign(issue_id)
+        # 2. Best-effort follow-ups. Past this point the state label is set, so a
+        #    failure is a *partial* apply — surface it with a repair hint.
+        try:
+            if change.set_agent_claim:
+                role_handle = self.resolve_role(change.set_agent_claim)
+                if role_handle:
+                    self.assign(issue_id, role_handle)
+            if change.clear_agent_claim:
+                self.unassign(issue_id)
+            # Close the issue when the advance lands on a closing state.
+            if change.close_issue:
+                self.close_issue(issue_id, reason=change.close_reason)
+            # Flip the PR draft → ready when the destination declared
+            # `mark_pr_ready`. Self-non-fatal when the issue isn't a PR.
+            if change.set_pr_ready:
+                self.mark_pr_ready(issue_id)
+        except BackendError as exc:
+            raise BackendError(
+                f"Issue #{issue_id}: the state label was updated but a follow-up step failed "
+                f"({exc}). The issue is partially applied — re-run the same operation "
+                f"(label edits are idempotent) or repair the assignment/close state by hand."
+            ) from exc
 
-        # Close the issue when the advance lands on a closing state-done state.
-        if change.close_issue:
-            self.close_issue(issue_id, reason=change.close_reason)
-
-        # Flip the PR from draft → ready-for-review when the destination
-        # state declared `mark_pr_ready: true`. No-op (logged warning) when
-        # the issue isn't actually a PR — gh errors out gracefully.
-        if change.set_pr_ready:
-            self.mark_pr_ready(issue_id)
+        # 3. Audit comment last — best-effort. A missing comment is an audit gap,
+        #    not a state inconsistency, so it never fails the operation.
+        if audit_comment:
+            try:
+                self.post_comment(issue_id, audit_comment)
+            except BackendError as exc:
+                logger.warning(
+                    "Issue #%s: state applied but audit comment failed to post: %s",
+                    issue_id,
+                    exc,
+                )
 
     def mark_pr_ready(self, pr_id: str) -> None:
         """Flip the PR from draft to ready-for-review via `gh pr ready`.
