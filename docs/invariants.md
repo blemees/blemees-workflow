@@ -104,4 +104,19 @@ An invariant lives in the layer that has the information to check it:
 
 ## Planner invariants
 
-_No invariants registered in this layer yet._
+| ID | Severity | Statement | Principle | Enforced by |
+| --- | --- | --- | --- | --- |
+| `PLAN_ADVANCE_DESTINATION_REQUIRED` | ERROR | advance requires a `--to` destination. | `hitl-principles.md#5` | `_plan_advance` |
+| `PLAN_ADVANCE_OVER_CLAIM_ROLE` | ERROR | Advancing over a CLAIM transition requires an acting role permitted by the destination working state and not conflicting with an existing claim. | `hitl-principles.md#5` | `_plan_advance` |
+| `PLAN_ADVANCE_OVER_CLAIM_TYPE` | ERROR | Advancing over a CLAIM transition requires the issue's type to be accepted by the destination working state. | `hitl-principles.md#5` | `_plan_advance` |
+| `PLAN_ADVANCE_TRANSITION_EXISTS` | ERROR | advance's destination is reachable by a transition out of the current state. | `hitl-principles.md#5` | `_plan_advance` |
+| `PLAN_CLAIM_NOT_ALREADY_CLAIMED` | ERROR | An issue already claimed by another role cannot be re-claimed. | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_CLAIM_NOT_ON_CLOSING` | ERROR | A closing state cannot be claimed (closing states are sinks). | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_CLAIM_REQUIRES_STATE` | ERROR | claim requires the issue to have a current state. | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_CLAIM_ROLE_PERMITTED` | ERROR | The claiming role is permitted by the destination working state's `roles`. | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_CLAIM_ROLE_REQUIRED` | ERROR | claim requires an agent role. | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_CLAIM_TRANSITION_EXISTS` | ERROR | claim resolves to exactly one CLAIM transition out of the current state (a destination must exist and be unambiguous). | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_CLAIM_TYPE_ACCEPTED` | ERROR | The issue's type is accepted by the destination working state's `issue_types`. | `hitl-principles.md#5` | `_plan_claim` |
+| `PLAN_RELEASE_NO_MARKER_DRIFT` | ERROR | release's origin → current must match a real CLAIM transition (no marker drift). | `hitl-principles.md#5` | `_plan_release` |
+| `PLAN_RELEASE_REQUIRES_CLAIM` | ERROR | release requires an active agent claim. | `hitl-principles.md#5` | `_plan_release` |
+| `PLAN_RELEASE_REQUIRES_ORIGIN` | ERROR | release requires a `last-state` origin marker (set at claim time). | `hitl-principles.md#5` | `_plan_release` |
