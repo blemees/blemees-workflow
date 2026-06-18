@@ -939,3 +939,26 @@ def test_block_grant_invalid_on_timeout_errors() -> None:
         f.invariant_id == "BLOCK_ON_TIMEOUT_VALID" and f.severity is Severity.ERROR
         for f in findings
     )
+
+
+def test_gate_on_claim_transition_errors() -> None:
+    """A human_gate on a CLAIM (or EVENT) transition is rejected — gates are
+    only valid on agent-driven ADVANCE transitions (#25)."""
+    sm = StateMachine(name="t")
+    sm.states["q"] = State(
+        name="q", state_class=StateClass.RESTING, reversibility=ReversibilityClass.REVERSIBLE_FAST
+    )
+    sm.states["w"] = State(name="w", state_class=StateClass.WORKING, roles=("dev",))
+    sm.transitions.append(
+        Transition(
+            source="q",
+            destination="w",
+            label="dev claims",
+            transition_type=TransitionType.CLAIM,
+            gate_name="oops",
+        )
+    )
+    findings = validator._check_gates_only_on_advance(sm)
+    assert any(
+        f.invariant_id == "GATES_ONLY_ON_ADVANCE" and f.severity is Severity.ERROR for f in findings
+    )

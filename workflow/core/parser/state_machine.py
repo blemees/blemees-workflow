@@ -251,29 +251,27 @@ def parse_state_machine(source: str | Path, name: str | None = None) -> StateMac
             raise ParseError(f"transitions[{idx}] must be an object (got {type(spec).__name__}).")
         transitions.append(_parse_transition(idx, spec, states))
 
-    # Build the HITL gate legend (gate_name → destination reversibility).
-    # Every hitl transition declares a `gate` field; the destination state's
-    # reversibility is the gate's reversibility per principle 11.
-    gates_in_legend: dict[str, ReversibilityClass] = {}
-    for t in transitions:
-        if not t.is_gated or t.gate_name is None:
-            continue
-        if t.destination == "[*]":
-            continue
-        dst = states.get(t.destination)
-        if dst is None or dst.reversibility is None:
-            continue
-        gates_in_legend[t.gate_name] = dst.reversibility
-
-    return StateMachine(
+    machine = StateMachine(
         name=name,
         description=description,
         group=group,
         states=states,
         transitions=transitions,
-        gates_in_legend=gates_in_legend,
+        gates_in_legend={},
         source_path=source_path,
     )
+
+    # Build the HITL gate legend (gate_name → reversibility). A gate's
+    # reversibility is the worst case across all its destinations (per
+    # principle 4 / `StateMachine.gate_reversibility`), so a verdict-style
+    # gate's legend entry doesn't depend on JSON transition order (#25).
+    gate_names = {t.gate_name for t in transitions if t.is_gated and t.gate_name}
+    machine.gates_in_legend = {
+        gate: rev
+        for gate in sorted(gate_names)
+        if (rev := machine.gate_reversibility(gate)) is not None
+    }
+    return machine
 
 
 def _parse_state(state_id: str, spec: dict[str, Any]) -> State:

@@ -1399,3 +1399,41 @@ def test_plan_creation_pr_requires_head() -> None:
         plan_operation(
             req, IssueState(issue_id="", state=None, agent_claim=None), _build_workflow()
         )
+
+
+def test_advance_rejects_event_transition_unless_event_fired() -> None:
+    sm = StateMachine(name="t")
+    sm.states["a"] = State(
+        name="a", state_class=StateClass.RESTING, reversibility=ReversibilityClass.REVERSIBLE_FAST
+    )
+    sm.states["b"] = State(
+        name="b", state_class=StateClass.RESTING, reversibility=ReversibilityClass.REVERSIBLE_FAST
+    )
+    sm.transitions.append(
+        Transition(
+            source="a",
+            destination="b",
+            label="merged (external)",
+            transition_type=TransitionType.EVENT,
+        )
+    )
+    state = IssueState(issue_id="1", state="a", agent_claim=None)
+    # Plain advance refuses an EVENT transition.
+    with pytest.raises(OperationError, match="EVENT"):
+        plan_operation(
+            OperationRequest(operation=Operation.ADVANCE_ISSUE, issue_id="1", destination="b"),
+            state,
+            sm,
+        )
+    # event-fired authorizes it.
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.ADVANCE_ISSUE,
+            issue_id="1",
+            destination="b",
+            extras={"event_fired": True},
+        ),
+        state,
+        sm,
+    )
+    assert plan.change.set_state == "b"

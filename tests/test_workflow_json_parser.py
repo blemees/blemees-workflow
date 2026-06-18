@@ -523,3 +523,42 @@ def test_parses_real_inner_loop_workflow(inner_loop_workflow_path: Path) -> None
     # (PR's closing state was renamed from `staged` to `merged` so state names
     # don't collide across processes.)
     assert impl.spawns[0].advance_on == (("merged", "staged"),)
+
+
+def test_verdict_gate_legend_uses_worst_case_reversibility() -> None:
+    """A verdict gate's legend reversibility is the worst case across its
+    destinations, independent of JSON transition order (#25)."""
+    from workflow.core.model.state_machine import ReversibilityClass
+
+    spec = _minimal()
+    spec["states"]["killed"] = {
+        "class": "resting",
+        "reversibility": "reversible-fast",
+        "closes": {"taxonomy": "abandoned", "reason": "not planned"},
+    }
+    spec["states"]["shipped"] = {
+        "class": "resting",
+        "reversibility": "irreversible",
+        "closes": {"taxonomy": "shipped", "reason": "completed"},
+    }
+    # reversible-fast destination listed first, irreversible second.
+    spec["transitions"].append(
+        {
+            "source": "b",
+            "destination": "killed",
+            "type": "advance",
+            "human_gate": "verdict",
+            "label": "kill",
+        }
+    )
+    spec["transitions"].append(
+        {
+            "source": "b",
+            "destination": "shipped",
+            "type": "advance",
+            "human_gate": "verdict",
+            "label": "ship",
+        }
+    )
+    wf = parse_state_machine(json.dumps(spec))
+    assert wf.gates_in_legend["verdict"] is ReversibilityClass.IRREVERSIBLE

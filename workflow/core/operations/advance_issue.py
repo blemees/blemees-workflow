@@ -27,12 +27,17 @@ def run(
     destination: str,
     body_text: str | None = None,
     actor: str | None = None,
+    event_fired: bool = False,
 ) -> OperationResult:
+    # `event_fired` marks an EVENT-transition firing (the `event-fired` command).
+    # Agent-driven advance leaves it False so the planner refuses EVENT
+    # transitions, which must be system-triggered (#25).
     request = OperationRequest(
         operation=Operation.ADVANCE_ISSUE,
         issue_id=issue_id,
         destination=destination,
         body_text=body_text,
         actor=actor,
+        extras={"event_fired": True} if event_fired else {},
     )
     return dispatch(controller, request)
