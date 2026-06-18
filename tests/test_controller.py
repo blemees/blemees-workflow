@@ -9,6 +9,7 @@ from workflow.backends.base import IssueFilters, IssueState, MarkerChange
 from workflow.core.controller import Controller
 from workflow.core.model.state_machine import Spawn, StateMachine
 from workflow.core.operations import collect_into as collect_into_op
+from workflow.core.operations import create_issue as create_issue_op
 from workflow.core.operations import spawn_issue as spawn_issue_op
 
 
@@ -158,3 +159,19 @@ def test_controller_collect_marks_contributor_only() -> None:
     assert [iid for iid, _ in backend.applied] == ["7"]
     _, change = backend.applied[0]
     assert change.set_collected_by == "REL-1"
+
+
+def test_controller_create_with_collect_marks_contributors() -> None:
+    backend = _CreateMockBackend()
+
+    result = create_issue_op.run(
+        _controller(backend),
+        title="release cut",
+        state="cut",
+        collect_contributors=("7", "8"),
+    )
+
+    assert result.created_issue_id == "200"
+    # The new collector's contributors are stamped collected-by:<new-id>.
+    marked = {iid: change.set_collected_by for iid, change in backend.applied}
+    assert marked == {"7": "200", "8": "200"}

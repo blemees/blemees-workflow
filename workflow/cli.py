@@ -39,6 +39,9 @@ from workflow.core.operations import (
     collect_into as collect_into_op,
 )
 from workflow.core.operations import (
+    create_issue as create_issue_op,
+)
+from workflow.core.operations import (
     reject_audit as reject_audit_op,
 )
 from workflow.core.operations import (
@@ -2131,75 +2134,53 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 )
                 return 2
 
-    if is_pr:
-        # PRs don't carry a native GitHub Issue Type and don't get a
-        # `type:` label (the entity kind is the type). Open the PR as a
-        # draft when landing on the framework's `draft` state.
-        try:
-            new_id = backend.create_pull_request(
-                title=args.title,
-                body=body,
-                state=args.initial_state,
-                head=args.head,
-                base=args.base,
-                draft=args.initial_state == "draft",
-            )
-        except BackendError as exc:
-            _handle_workflow_error(exc)
-            return 2
-    else:
-        # Resolve encoding from capability cache (probe if needed). Then
-        # resolve the framework type id to either a backend-specific type
-        # string (native encoding) or a `type:<id>` label (label encoding).
-        backend_issue_type: str | None = None
-        type_extra_labels: list[str] = []
-        if issue_type is not None:
-            encoding = _resolve_encoding(ctx, backend)
-            if type_entry is not None:
-                if encoding == "native":
-                    backend_issue_type = type_entry.github_issue_type
-                else:
-                    type_extra_labels = [f"type:{issue_type}"]
-            elif encoding == "label":
-                # Fall back to `type:<id>` even without a directory entry.
+    # Resolve issue-type encoding (native vs label) for non-PR creates. PRs
+    # carry no native type and no `type:` label (the entity kind is the type).
+    backend_issue_type: str | None = None
+    type_extra_labels: list[str] = []
+    if not is_pr and issue_type is not None:
+        encoding = _resolve_encoding(ctx, backend)
+        if type_entry is not None:
+            if encoding == "native":
+                backend_issue_type = type_entry.github_issue_type
+            else:
                 type_extra_labels = [f"type:{issue_type}"]
+        elif encoding == "label":
+            # Fall back to `type:<id>` even without a directory entry.
+            type_extra_labels = [f"type:{issue_type}"]
 
-        # Create at the initial state with no claim label. Claiming, if
-        # requested, runs as a second operation so the state machine moves
-        # resting → working properly (sets wip:<role> AND last-state:<initial_state>).
-        # No collector-side `collects:` labels — the relationship lives solely
-        # on each contributor's `collected-by:` label (ADR-0003).
-        try:
-            new_id = backend.create_issue(
-                title=args.title,
-                body=body,
-                state=args.initial_state,
-                extra_labels=[*type_extra_labels],
-                issue_type=backend_issue_type,
-            )
-        except BackendError as exc:
-            _handle_workflow_error(exc)
-            return 2
-
-        # Mark each contributor `collected-by:<new_id>` — the sole record of
-        # the relationship; the cohort is found by querying this label.
-        if contributor_ids:
-            from workflow.backends.base import MarkerChange
-
-            for cid in contributor_ids:
-                try:
-                    backend.apply_marker_change(
-                        cid,
-                        MarkerChange(set_collected_by=str(new_id)),
-                        audit_comment=f"Collected into #{new_id}.",
-                    )
-                except BackendError as exc:
-                    # Issue exists; contributor link partially applied.
-                    print(
-                        f"Created #{new_id} but failed to mark contributor "
-                        f"#{cid} as collected-by:{new_id} — {exc}",
-                        file=sys.stderr,
-                    )
+    # Create through the operation seam: the pure planner assembles the
+    # CreationSpec; the controller's create path opens the issue/PR and stamps
+    # any gathered contributors `collected-by:<new-id>` atomically (ADR-0003).
+    # Claiming, if requested, runs below as a second operation so the state
+    # machine moves resting → working with proper wip:/last-state: markers.
+    create_controller = Controller(
+        backend=backend,
+        state_machine=process.state_machine,
+        catalog=process.catalog,
+        grants=process.grants,
+        dry_run=False,
+        registry=registry,
+    )
+    try:
+        create_result = create_issue_op.run(
+            create_controller,
+            title=args.title,
+            body=body,
+            state=args.initial_state,
+            entity="pull_request" if is_pr else "issue",
+            issue_type=issue_type,
+            github_issue_type=backend_issue_type,
+            extra_labels=type_extra_labels,
+            head=args.head if is_pr else None,
+            base=args.base if is_pr else None,
+            draft=is_pr and args.initial_state == "draft",
+            collect_contributors=contributor_ids,
+        )
+    except WorkflowError as exc:
+        _handle_workflow_error(exc)
+        return 2
+    new_id = create_result.created_issue_id
 
     # 6. If --claim, immediately claim the new issue.
     claim_result = None
