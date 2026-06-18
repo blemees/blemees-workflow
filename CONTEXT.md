@@ -238,6 +238,19 @@ The mechanism by which a work item passes from one process to another. Two flavo
 
 Convention: the receiver declares the shared state's `reversibility`; the role-restriction lives on the receiver's working state(s) reached via CLAIM from this resting state. The sender declares the state exists with its class.
 
+## Cohort
+
+The set of dependent issues attached to one anchor issue. Two instances:
+
+- **Child cohort** — the children spawned from one parent (spawn relationship).
+- **Contributor cohort** — the contributors gathered into one collector (collect relationship).
+
+Both follow one rule (ADR-0003): the relationship is recorded by a **single label on the dependent side** — `parent-of:<parent>` on each child, `collected-by:<collector>` on each contributor. There is no anchor-side registry (no `subprocess:`, no `collects:`). One label, one source of truth.
+
+The label is the **trigger edge**: when a child enters a closing state, or a contributor changes state, the cascade reads that dependent's own label to find the anchor to advance or release. The **cohort** — all dependents of one anchor — is discovered on demand by querying `list_issues(label="parent-of:<parent>")` / `list_issues(label="collected-by:<collector>")`, never by reading the anchor. This is why the spawn cascade's **wait-for-all** semantics depend on the backend's list visibility covering closed issues and PRs (a closed dependent that just triggered the cascade must still appear in the cohort query).
+
+A dependent is always labelled, even when its spawn/collect declares no `advance_on` rule (uniform labeling; the link is then informational only).
+
 ## Workflow directory (`--workflow-dir`)
 
 The on-disk directory containing one workflow: every `<name>-states.json`, `<name>-human-gates.json`, the shared `roles.json`, the `trust-grants/` subdirectory, and any `agent_prepares` template files referenced from catalogs.
