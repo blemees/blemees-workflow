@@ -78,6 +78,19 @@ class Controller:
     registry: Workflow | None = None
 
     def execute(self, request: OperationRequest) -> OperationResult:
+        # create-issue opens a brand-new issue — there is no existing issue to
+        # read. Every other operation (including spawn, which targets the
+        # parent) reads its subject's pre-state first.
+        if request.operation is Operation.CREATE_ISSUE:
+            pre_state = IssueState(issue_id="", state=None, agent_claim=None)
+            plan = plan_operation(
+                request=request,
+                state=pre_state,
+                state_machine=self.state_machine,
+                catalog=self.catalog,
+                grants=self.grants,
+            )
+            return self._execute_create(request, plan, pre_state, findings=[])
         try:
             pre_state = self.backend.read_issue(request.issue_id)
         except Exception as exc:
@@ -225,6 +238,15 @@ class Controller:
 
         if plan.change != MarkerChange():
             self.backend.apply_marker_change(new_id, plan.change, audit_comment=plan.audit_comment)
+
+        # Stamp gathered contributors `collected-by:<new-id>` — the new id only
+        # exists now, so this is the create-with-collect secondary effect.
+        for contributor_id in spec.collect_contributors:
+            self.backend.apply_marker_change(
+                contributor_id,
+                MarkerChange(set_collected_by=new_id),
+                audit_comment=f"Collected into #{new_id}.",
+            )
 
         child_state = self.backend.read_issue(new_id)
 

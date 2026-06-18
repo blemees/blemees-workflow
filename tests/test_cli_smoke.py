@@ -682,6 +682,8 @@ def test_create_pr_invokes_backend_pull_request_path(
 ) -> None:
     """A successful PR create calls backend.create_pull_request (not
     create_issue) and the body carries the framework's Refs footer."""
+    from workflow.backends.base import IssueState
+
     with (
         mock.patch(
             "workflow.backends.github.GitHubBackend.create_issue",
@@ -690,6 +692,10 @@ def test_create_pr_invokes_backend_pull_request_path(
             "workflow.backends.github.GitHubBackend.create_pull_request",
             return_value="77",
         ) as create_pr_mock,
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_issue",
+            return_value=IssueState(issue_id="77", state="draft", agent_claim=None),
+        ),
     ):
         rc = cli(
             [
@@ -752,6 +758,8 @@ def test_create_invokes_backend_with_resolved_state(
     """A successful create returns the new id from the backend. When the
     capability probe returns existing Issue Types, encoding is `native` →
     issue_type is passed through as the GitHub type name."""
+    from workflow.backends.base import IssueState
+
     with (
         mock.patch(
             "workflow.backends.github.GitHubBackend.list_issue_types",
@@ -761,6 +769,10 @@ def test_create_invokes_backend_with_resolved_state(
             "workflow.backends.github.GitHubBackend.create_issue",
             return_value="123",
         ) as create_mock,
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_issue",
+            return_value=IssueState(issue_id="123", state="raw", agent_claim=None),
+        ),
     ):
         rc = cli(
             [
@@ -823,7 +835,8 @@ def test_create_with_claim_creates_then_claims(
         ) as create_mock,
         mock.patch(
             "workflow.backends.github.GitHubBackend.read_issue",
-            side_effect=[raw_state, raw_state, refining_state],
+            # child_state read (create path) + claim context + claim pre/post.
+            side_effect=[raw_state, raw_state, raw_state, refining_state],
         ),
         mock.patch("workflow.backends.github.GitHubBackend.apply_marker_change") as apply_mock,
     ):

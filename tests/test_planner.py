@@ -1357,3 +1357,45 @@ def test_plan_collect_force_bypasses_eligibility() -> None:
     req = _collect_req("7", {"collector_id": "REL-1", "from_states": ("staged",), "force": True})
     plan = plan_operation(req, contributor, _build_workflow())
     assert plan.change.set_collected_by == "REL-1"
+
+
+# --------------------------------------------------------------------------- #
+# create — creating operation (pure CreationSpec assembly)
+
+
+def test_plan_creation_builds_issue_spec() -> None:
+    req = OperationRequest(
+        operation=Operation.CREATE_ISSUE,
+        issue_id="",
+        extras={
+            "title": "T",
+            "body": "B",
+            "state": "raw",
+            "entity": "issue",
+            "github_issue_type": "Bug",
+            "extra_labels": ("type:bug",),
+            "collect_contributors": ("7", "8"),
+        },
+    )
+    plan = plan_operation(
+        req, IssueState(issue_id="", state=None, agent_claim=None), _build_workflow()
+    )
+    assert plan.operation is Operation.CREATE_ISSUE
+    spec = plan.create
+    assert spec is not None
+    assert spec.state == "raw" and spec.entity == "issue"
+    assert spec.github_issue_type == "Bug"
+    assert spec.extra_labels == ("type:bug",)
+    assert spec.collect_contributors == ("7", "8")
+
+
+def test_plan_creation_pr_requires_head() -> None:
+    req = OperationRequest(
+        operation=Operation.CREATE_ISSUE,
+        issue_id="",
+        extras={"title": "T", "state": "draft", "entity": "pull_request"},
+    )
+    with pytest.raises(OperationError):
+        plan_operation(
+            req, IssueState(issue_id="", state=None, agent_claim=None), _build_workflow()
+        )

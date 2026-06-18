@@ -59,6 +59,7 @@ class Operation(Enum):
     RESPOND_REQUEST = "respond-request"
     # Creating — opens a new issue (no in-place mutation of issue_id)
     SPAWN_ISSUE = "spawn-issue"
+    CREATE_ISSUE = "create-issue"
     # Fan-in — marks a contributor as collected by a collector
     COLLECT_INTO = "collect-into"
 
@@ -98,6 +99,10 @@ class CreationSpec:
     head: str | None = None  # PR source branch
     base: str | None = None  # PR target branch
     draft: bool = False
+    # Contributors to gather into the new issue (when it lands on a `collects`
+    # state). The controller stamps each with `collected-by:<new-id>` after
+    # creation, since the new id isn't known until then (ADR-0003).
+    collect_contributors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -160,6 +165,8 @@ def plan_operation(
             return _plan_revoke(request, state, catalog)
         case Operation.SPAWN_ISSUE:
             return _plan_spawn(request, state)
+        case Operation.CREATE_ISSUE:
+            return _plan_creation(request)
         case Operation.COLLECT_INTO:
             return _plan_collect(request, state)
         case Operation.REQUEST_INPUT:
@@ -1114,6 +1121,52 @@ def _plan_spawn(request: OperationRequest, parent_state: IssueState) -> Operatio
     )
     return OperationPlan(
         operation=Operation.SPAWN_ISSUE,
+        change=MarkerChange(),
+        audit_comment=audit,
+        create=spec,
+    )
+
+
+def _plan_creation(request: OperationRequest) -> OperationPlan:
+    """Plan a create-issue — open a new issue/PR (optionally a collector).
+
+    Pure: the impure resolution (registry/process, issue-type encoding via the
+    capability cache, contributor-candidate query) happens at the operation
+    boundary and arrives via `request.extras`:
+
+    - `title` / `body` / `state` — the new issue's fields
+    - `entity`            — "issue" | "pull_request"
+    - `issue_type`        — framework type id (for display)
+    - `github_issue_type` — native GitHub Issue Type name, or None
+    - `extra_labels`      — already-encoded labels (e.g. `type:<id>`)
+    - `head` / `base` / `draft` — PR fields
+    - `collect_contributors` — ids to stamp `collected-by:` after creation
+    """
+    extras = request.extras
+    state = extras.get("state")
+    if not state:
+        raise OperationError("create-issue requires a target state.")
+    entity = extras.get("entity", "issue")
+    head = extras.get("head")
+    if entity == "pull_request" and not head:
+        raise OperationError("--head is required for pull requests (PRs need a source branch).")
+
+    spec = CreationSpec(
+        title=extras["title"],
+        body=extras.get("body", ""),
+        state=state,
+        entity=entity,
+        issue_type=extras.get("issue_type"),
+        github_issue_type=extras.get("github_issue_type"),
+        extra_labels=tuple(extras.get("extra_labels", ())),
+        head=head,
+        base=extras.get("base"),
+        draft=bool(extras.get("draft", False)),
+        collect_contributors=tuple(extras.get("collect_contributors", ())),
+    )
+    audit = f"## create: {entity} in state {state!r}"
+    return OperationPlan(
+        operation=Operation.CREATE_ISSUE,
         change=MarkerChange(),
         audit_comment=audit,
         create=spec,
