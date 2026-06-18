@@ -464,6 +464,7 @@ def test_plan_approve_verdict_requires_destination() -> None:
         state="implementing",
         agent_claim="po",
         awaiting_gate="experiment-verdict",
+        reviewing=True,
     )
     with pytest.raises(OperationError, match="requires --destination"):
         plan_operation(
@@ -486,6 +487,7 @@ def test_plan_approve_verdict_with_destination() -> None:
         state="implementing",
         agent_claim="po",
         awaiting_gate="experiment-verdict",
+        reviewing=True,
     )
     plan = plan_operation(
         OperationRequest(
@@ -514,6 +516,7 @@ def test_plan_reject(tmp_path: Path) -> None:
         state="refining",
         agent_claim="product-manager",
         awaiting_gate="ready_for_dev",
+        reviewing=True,
     )
     plan = plan_operation(
         OperationRequest(
@@ -1437,3 +1440,93 @@ def test_advance_rejects_event_transition_unless_event_fired() -> None:
         sm,
     )
     assert plan.change.set_state == "b"
+
+
+# --------------------------------------------------------------------------- #
+# #24 — human-side operation preconditions
+
+
+def test_plan_approve_requires_review_claim() -> None:
+    wf, cat = _build_workflow(), _build_catalog()
+    state = IssueState(
+        issue_id="1", state="refining", agent_claim="pm", awaiting_gate="ready_for_dev"
+    )  # no reviewing
+    with pytest.raises(OperationError, match="no review claim"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.APPROVE_BLOCKED, issue_id="1", gate="ready_for_dev"
+            ),
+            state,
+            wf,
+            cat,
+        )
+
+
+def test_plan_approve_rejects_source_state_drift() -> None:
+    wf, cat = _build_workflow(), _build_catalog()
+    # gate ready_for_dev fires from refining; the issue drifted to ready_for_dev.
+    state = IssueState(
+        issue_id="1",
+        state="ready_for_dev",
+        agent_claim="pm",
+        awaiting_gate="ready_for_dev",
+        reviewing=True,
+    )
+    with pytest.raises(OperationError, match="fires from"):
+        plan_operation(
+            OperationRequest(
+                operation=Operation.APPROVE_BLOCKED, issue_id="1", gate="ready_for_dev"
+            ),
+            state,
+            wf,
+            cat,
+        )
+
+
+def test_plan_approve_captures_body() -> None:
+    wf, cat = _build_workflow(), _build_catalog()
+    state = IssueState(
+        issue_id="1",
+        state="refining",
+        agent_claim="pm",
+        awaiting_gate="ready_for_dev",
+        reviewing=True,
+    )
+    plan = plan_operation(
+        OperationRequest(
+            operation=Operation.APPROVE_BLOCKED,
+            issue_id="1",
+            gate="ready_for_dev",
+            body_text="LGTM — ship it.",
+        ),
+        state,
+        wf,
+        cat,
+    )
+    assert plan.packet_body == "LGTM — ship it."
+
+
+def test_plan_confirm_requires_audit_claim() -> None:
+    wf = _build_workflow()
+    state = IssueState(
+        issue_id="1", state="refining", agent_claim=None, audit_pending="ready_for_dev"
+    )  # no auditing
+    with pytest.raises(OperationError, match="no audit claim"):
+        plan_operation(
+            OperationRequest(operation=Operation.APPROVE_AUDIT, issue_id="1", gate="ready_for_dev"),
+            state,
+            wf,
+        )
+
+
+def test_plan_respond_requires_advise_claim() -> None:
+    wf = _build_workflow()
+    state = IssueState(
+        issue_id="1", state="refining", agent_claim=None, awaiting_input=True
+    )  # no advising
+    with pytest.raises(OperationError, match="no advise claim"):
+        plan_operation(
+            OperationRequest(operation=Operation.RESPOND_REQUEST, issue_id="1", body_text="answer"),
+            state,
+            wf,
+        )

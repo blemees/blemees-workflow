@@ -174,7 +174,7 @@ def _cases():
         ),
         "PLAN_GATE_DESTINATION_RESOLVES": (
             _req(Operation.APPROVE_BLOCKED, gate="experiment-verdict", destination=None),
-            _state(state="implementing", awaiting_gate="experiment-verdict"),
+            _state(state="implementing", awaiting_gate="experiment-verdict", reviewing=True),
             wf,
             cat,
         ),

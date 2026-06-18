@@ -153,7 +153,7 @@ def plan_operation(
         case Operation.APPROVE_BLOCKED:
             return _plan_approve(request, state, state_machine, catalog)
         case Operation.REJECT_BLOCKED:
-            return _plan_reject(request, state, catalog)
+            return _plan_reject(request, state, state_machine, catalog)
         case Operation.RECORD_ACTION:
             # Internal primitive — exposed for tests/composition; not a CLI command.
             return _plan_record_action(request, state, state_machine, catalog)
@@ -768,6 +768,16 @@ def _plan_approve(
         raise OperationError(
             f"Cannot approve {gate.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
         )
+    if not state.reviewing:
+        raise OperationError(
+            f"Cannot approve {gate.gate_name!r}: no review claim is held — run review-blocked first."
+        )
+    gate_source = state_machine.gate_source(gate.gate_name)
+    if state.state and gate_source and state.state != gate_source:
+        raise OperationError(
+            f"Cannot approve {gate.gate_name!r}: issue is at {state.state!r} but the gate "
+            f"fires from {gate_source!r} (the marker has drifted)."
+        )
     destination = request.destination
     gate_destinations = state_machine.gate_destinations(gate.gate_name)
     is_verdict_style = state_machine.gate_is_verdict_style(gate.gate_name)
@@ -815,12 +825,15 @@ def _plan_approve(
         operation=request.operation,
         change=change,
         audit_comment=audit,
+        # The approver's note (--body), if any, is posted alongside the verdict.
+        packet_body=request.body_text,
     )
 
 
 def _plan_reject(
     request: OperationRequest,
     state: IssueState,
+    state_machine: StateMachine,
     catalog: HumanGateCatalog | None,
 ) -> OperationPlan:
     if not request.gate:
@@ -829,6 +842,16 @@ def _plan_reject(
     if state.awaiting_gate != gate.gate_name:
         raise OperationError(
             f"Cannot reject {gate.gate_name!r}: current awaiting gate is {state.awaiting_gate!r}."
+        )
+    if not state.reviewing:
+        raise OperationError(
+            f"Cannot reject {gate.gate_name!r}: no review claim is held — run review-blocked first."
+        )
+    gate_source = state_machine.gate_source(gate.gate_name)
+    if state.state and gate_source and state.state != gate_source:
+        raise OperationError(
+            f"Cannot reject {gate.gate_name!r}: issue is at {state.state!r} but the gate "
+            f"fires from {gate_source!r} (the marker has drifted)."
         )
     feedback = request.body_text
     # State unchanged; clear queue and review markers; agent retains its claim
@@ -930,6 +953,10 @@ def _plan_confirm(request: OperationRequest, state: IssueState) -> OperationPlan
         raise OperationError(
             f"Cannot check {request.gate!r}: audit-pending is {state.audit_pending!r}."
         )
+    if not state.auditing:
+        raise OperationError(
+            f"Cannot check {request.gate!r}: no audit claim is held — run review-audit first."
+        )
     change = MarkerChange(
         clear_audit_pending=True,
         set_auditing=False,
@@ -953,6 +980,10 @@ def _plan_revoke(
     if state.audit_pending != request.gate:
         raise OperationError(
             f"Cannot revoke {request.gate!r}: audit-pending is {state.audit_pending!r}."
+        )
+    if not state.auditing:
+        raise OperationError(
+            f"Cannot revoke {request.gate!r}: no audit claim is held — run review-audit first."
         )
     concern = request.body_text
     change = MarkerChange(
@@ -1052,6 +1083,8 @@ def _plan_advise(request: OperationRequest, state: IssueState) -> OperationPlan:
 def _plan_respond(request: OperationRequest, state: IssueState) -> OperationPlan:
     if not state.awaiting_input:
         raise OperationError("Cannot resolve: no awaiting-input marker active.")
+    if not state.advising:
+        raise OperationError("Cannot respond: no advise claim is held — run review-request first.")
     if not request.body_text:
         raise OperationError("respond requires --body or --body-from.")
     response = request.body_text
