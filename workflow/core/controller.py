@@ -158,11 +158,15 @@ class Controller:
 
         post_state = self.backend.read_issue(request.issue_id)
 
-        # Cascade pass — propagate cross-process advance_on chains. Only
-        # runs when the registry is available (the runtime needs it to
-        # look up sibling-process spawn / collect definitions).
+        # Cascade pass — propagate cross-process advance_on chains. Edge-, not
+        # level-triggered: only fire when this operation actually changed the
+        # state. Otherwise a state-orthogonal op (review-blocked, respond, …) on
+        # an issue sitting at a collector trigger state would re-fire the rule
+        # and yank contributors that have moved on (#18). Needs the registry to
+        # look up sibling-process spawn / collect definitions.
         cascade_applications: list[CascadeApplication] = []
-        if self.registry is not None:
+        state_changed = post_state.state != pre_state.state
+        if self.registry is not None and state_changed:
             cascade_applications = cascade_after_state_change(
                 self.registry,
                 self.backend,
@@ -170,7 +174,7 @@ class Controller:
                 post_state,
                 actor=request.actor,
             )
-        else:
+        elif self.registry is None:
             logger.debug("controller: no registry attached; skipping cross-process cascade pass.")
 
         return OperationResult(
