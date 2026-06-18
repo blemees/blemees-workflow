@@ -175,3 +175,34 @@ def test_controller_create_with_collect_marks_contributors() -> None:
     # The new collector's contributors are stamped collected-by:<new-id>.
     marked = {iid: change.set_collected_by for iid, change in backend.applied}
     assert marked == {"7": "200", "8": "200"}
+
+
+def test_controller_skips_cascade_when_state_unchanged() -> None:
+    """A state-orthogonal op (e.g. review-blocked) must not trigger the cascade —
+    only an actual state change does (#18)."""
+    from workflow.core.operations import review_blocked as review_blocked_op
+
+    consulted: list[str] = []
+
+    class _RecordingRegistry:
+        def find_process_for_state(self, state_name):  # noqa: ANN001
+            consulted.append(state_name)
+            return None
+
+        def get_process(self, name):  # noqa: ANN001
+            raise AssertionError("cascade should not run on a no-state-change op")
+
+    backend = _CreateMockBackend()
+    backend.issues["1"] = IssueState(
+        issue_id="1", state="refining", agent_claim="pm", awaiting_gate="g"
+    )
+    controller = Controller(
+        backend=backend, state_machine=StateMachine(name="t"), registry=_RecordingRegistry()
+    )
+
+    result = review_blocked_op.run(controller, issue_id="1")
+
+    # review-blocked sets the reviewing singleton; state is unchanged → no cascade.
+    assert result.post_state is not None and result.post_state.state == "refining"
+    assert result.cascade_applications == []
+    assert consulted == []  # the registry was never consulted
