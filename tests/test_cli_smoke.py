@@ -1211,3 +1211,159 @@ def test_differentiated_exit_codes(
     with pytest.raises(SystemExit) as exc_info:
         cli(["advance-issue", "--nonsense"])
     assert exc_info.value.code == 2
+
+
+# #14 — CLI dispatch coverage for event-fired / spawn-issue / collect-into
+
+
+def _state(issue_id: str, state_name: str, issue_type: str | None = None):
+    from workflow.backends.base import IssueState
+
+    return IssueState(issue_id=issue_id, state=state_name, agent_claim=None, issue_type=issue_type)
+
+
+def test_event_fired_cli_fires_event_transition(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`event-fired` drives an EVENT transition (refinement spiking →
+    spike_returned) through the CLI dispatch (#14)."""
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_issue",
+            return_value=_state("5", "spiking"),
+        ),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.apply_marker_change",
+        ) as apply_mock,
+        mock.patch("workflow.backends.github.GitHubBackend.post_comment"),
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "event-fired",
+                "--issue",
+                "5",
+                "--to",
+                "spike_returned",
+                "--triggered-by",
+                "inner-loop #9",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert apply_mock.called
+
+
+def test_event_fired_cli_rejects_non_event_transition(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`event-fired` on a non-EVENT transition (raw → refining is CLAIM) is
+    refused so automations can't trip agent-driven paths (#14)."""
+    with mock.patch(
+        "workflow.backends.github.GitHubBackend.read_issue",
+        return_value=_state("5", "raw"),
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "event-fired",
+                "--issue",
+                "5",
+                "--to",
+                "refining",
+            ]
+        )
+    captured = capsys.readouterr()
+    assert rc != 0
+    assert "not `event`" in (captured.out + captured.err)
+
+
+def test_spawn_issue_cli_labels_child_with_parent(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`spawn-issue` from inner-loop `implementing` opens a child PR carrying the
+    `child-of:<parent>` label — the sole record of the relationship (#14)."""
+    with (
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.read_issue",
+            return_value=_state("5", "implementing"),
+        ),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.create_pull_request",
+            return_value="200",
+        ) as create_mock,
+        mock.patch("workflow.backends.github.GitHubBackend.apply_marker_change"),
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "spawn-issue",
+                "--issue",
+                "5",
+                "--head",
+                "feat/x",
+                "--body",
+                "implement it",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert create_mock.called
+    extra_labels = create_mock.call_args.kwargs.get("extra_labels", [])
+    assert "child-of:5" in extra_labels
+
+
+def test_collect_into_cli_marks_contributors(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`collect-into` (release `cut` collects from `staged`) stamps each
+    contributor `collected-by:<collector>` through the CLI dispatch (#14)."""
+
+    def _read(issue_id: str):
+        # The collector lives on `cut`; contributors live on `staged`.
+        return _state(issue_id, "cut" if issue_id == "100" else "staged", issue_type="bug")
+
+    applied: list[tuple[str, object]] = []
+
+    def _apply(issue_id, change, audit_comment=None):
+        applied.append((issue_id, change))
+
+    with (
+        mock.patch("workflow.backends.github.GitHubBackend.read_issue", side_effect=_read),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.apply_marker_change", side_effect=_apply
+        ),
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "owner/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "collect-into",
+                "--issue",
+                "100",
+                "--refs",
+                "101",
+                "--refs",
+                "102",
+                "--force",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    marked = {iid: getattr(change, "set_collected_by", None) for iid, change in applied}
+    assert marked == {"101": "100", "102": "100"}
