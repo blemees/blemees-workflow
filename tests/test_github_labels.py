@@ -40,11 +40,22 @@ def test_child_of_value_can_contain_slashes() -> None:
 
 @pytest.mark.parametrize(
     "label",
-    ["", "  ", "needs-triage", "priority/P1", "documentation", "state:raw", "wip:dev"],
+    [
+        "",
+        "  ",
+        "needs-triage",
+        "priority/P1",
+        "documentation",
+        "state:raw",
+        "wip:dev",
+        # Empty value is malformed — every marker requires a non-empty <value>.
+        "state/",
+        "hitl-input/",
+    ],
 )
 def test_non_marker_labels_parse_to_none(label: str) -> None:
-    """Labels outside the grammar — including the pre-ADR-0005 `:` form — are
-    not framework markers."""
+    """Labels outside the grammar — including the pre-ADR-0005 `:` form and a
+    classifier with an empty value — are not framework markers."""
     assert gh.parse_label(label) is None
 
 

@@ -167,9 +167,11 @@ def parse_label(raw: str) -> ParsedLabel | None:
     """Parse a label into (kind, value). Returns None for non-marker labels.
 
     Partitions on the FIRST `/`, so an id that itself contains `/` (e.g.
-    `child-of/owner/repo#1`) survives intact.
+    `child-of/owner/repo#1`) survives intact. A classifier with an empty value
+    (e.g. `state/`) is malformed — every framework marker requires a non-empty
+    value — so it is not treated as a marker.
     """
     classifier, sep, value = raw.strip().partition(SEP)
-    if sep and classifier in _CLASSIFIERS:
+    if sep and value and classifier in _CLASSIFIERS:
         return ParsedLabel(classifier, value)
     return None
