@@ -42,6 +42,26 @@ from workflow.errors import BackendError, OperationError
 logger = logging.getLogger(__name__)
 
 
+# Native-tier Issue Field names (ADR-0005). The single source of truth for both
+# provisioning (CLI) and the native read/write path. Names are ≤25 chars
+# (GitHub's field-name cap). The framework markers map onto these fields:
+#   Workflow State ← state          Last State ← last_state
+#   Agent          ← agent_claim    HITL Blocked ← awaiting_gate
+#   HITL Audit     ← audit_pending  HITL Input  ← awaiting_input + topic
+#   HITL Claim     ← reviewing/auditing/advising (one single-select)
+#   HITL Signal    ← approved/rejected/checked/revoked/resolved
+#   Collected By   ← collected_by (text; written via the #74 relationship path)
+FIELD_STATE = "Workflow State"
+FIELD_LAST_STATE = "Last State"
+FIELD_AGENT = "Agent"
+FIELD_HITL_BLOCKED = "HITL Blocked"
+FIELD_HITL_AUDIT = "HITL Audit"
+FIELD_HITL_INPUT = "HITL Input"
+FIELD_HITL_CLAIM = "HITL Claim"
+FIELD_HITL_SIGNAL = "HITL Signal"
+FIELD_COLLECTED_BY = "Collected By"
+
+
 # Matches every git remote URL form for GitHub / GHES:
 #
 #   https://[user@]host[:port]/owner/repo[.git]
@@ -162,8 +182,15 @@ class GitHubBackend:
     gh_bin: str = "gh"
     host: str | None = None
     name: str = "github"
+    # Capability tier (ADR-0005): "label" encodes markers as labels; "native"
+    # encodes them as org Issue Fields / native Issue Type / sub-issues. The CLI
+    # resolves this per (host, owner) and constructs the backend with it.
+    tier: str = "label"
     # Cached per-session: labels we've already ensured exist on this repo.
     _known_labels: set[str] = field(default_factory=set)
+    # Cached per-session (native tier): org field metadata —
+    # {field_name: {"id": <field node id>, "options": {opt_name: opt_id}}}.
+    _field_meta: dict | None = field(default=None)
 
     # ----- backend protocol -----
 
@@ -191,7 +218,13 @@ class GitHubBackend:
         For wildcard awaiting / audit filters and `awaiting_input` that `gh`
         can't express with a single label match, the backend filters in Python
         after fetching.
+
+        In the native tier this routes to `_list_issues_native`, which uses
+        `field."<name>":<value>` / `type:` search qualifiers instead of labels.
         """
+        if self.tier == "native":
+            return self._list_issues_native(filters)
+
         wildcard_awaiting = filters.awaiting_gate == "*"
         wildcard_audit = filters.audit_pending == "*"
 
@@ -316,7 +349,13 @@ class GitHubBackend:
 
         The issue URL printed by `gh` is parsed back into the issue number
         and returned as a string.
+
+        In the native tier the state (and any claim) is written as Issue Field
+        values after creation rather than as labels — see `_create_issue_native`.
         """
+        if self.tier == "native":
+            return self._create_issue_native(title, body, state, extra_labels, issue_type)
+
         labels = [gh_labels.state_label(state)]
         if extra_labels:
             labels.extend(extra_labels)
@@ -451,6 +490,8 @@ class GitHubBackend:
         return url.rsplit("/", 1)[-1]
 
     def read_issue(self, issue_id: str) -> IssueState:
+        if self.tier == "native":
+            return self._read_native(issue_id)[1]
         result = self._gh(
             "issue",
             "view",
@@ -479,6 +520,9 @@ class GitHubBackend:
         change: MarkerChange,
         audit_comment: str | None = None,
     ) -> None:
+        if self.tier == "native":
+            self._apply_marker_change_native(issue_id, change, audit_comment)
+            return
         # This is NOT a single atomic transaction (gh has no multi-resource
         # transaction). Only the label swap is atomic (one `gh issue edit` →
         # GraphQL `replaceLabels`); it carries the state change, so it goes
@@ -1284,3 +1328,406 @@ class GitHubBackend:
         )
         self._graphql(mutation, {"input": field_input})
         return True
+
+    # ----- native tier: read/write marker values as Issue Fields -----
+
+    def _load_field_meta(self) -> dict:
+        """Lazily load (and cache) the org's Issue Field metadata for writes.
+
+        Returns `{field_name: {"id": <node id>, "options": {opt_name: opt_id}}}`.
+        Single-select writes need the option *id*, not its name, so options are
+        resolved here. Paginated so >100 fields aren't truncated.
+        """
+        if self._field_meta is not None:
+            return self._field_meta
+        org = self.repo.split("/", 1)[0]
+        query = (
+            "query($l:String!,$after:String){organization(login:$l){"
+            "issueFields(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{"
+            "__typename "
+            "... on IssueFieldText{id name} "
+            "... on IssueFieldSingleSelect{id name options{id name}} "
+            "... on IssueFieldNumber{id name} "
+            "... on IssueFieldDate{id name}"
+            "}}}}"
+        )
+        meta: dict = {}
+        cursor: str | None = None
+        while True:
+            data = self._graphql(query, {"l": org, "after": cursor})
+            conn = (data.get("organization") or {}).get("issueFields") or {}
+            for n in conn.get("nodes") or []:
+                name = n.get("name") if isinstance(n, dict) else None
+                if not name:
+                    continue
+                options = {o["name"]: o["id"] for o in (n.get("options") or []) if o.get("name")}
+                meta[name] = {"id": n.get("id"), "options": options}
+            page = conn.get("pageInfo") or {}
+            if not page.get("hasNextPage"):
+                break
+            cursor = page.get("endCursor")
+            if not cursor:
+                break
+        self._field_meta = meta
+        return meta
+
+    def _single_select_op(self, field_name: str, value: str) -> dict:
+        """Build a setIssueFieldValue op selecting `value` on a single-select field."""
+        meta = self._load_field_meta()
+        fm = meta.get(field_name)
+        if fm is None:
+            raise BackendError(
+                f"Native field {field_name!r} is not provisioned on this org — "
+                f"run `workflow capabilities --provision`."
+            )
+        option_id = fm["options"].get(value)
+        if option_id is None:
+            raise BackendError(
+                f"Field {field_name!r} has no option {value!r} — re-provision to add it."
+            )
+        return {"fieldId": fm["id"], "singleSelectOptionId": option_id}
+
+    def _clear_op(self, field_name: str) -> dict:
+        """Build a setIssueFieldValue op clearing a field.
+
+        Fails fast (like `_single_select_op`) when the field isn't provisioned —
+        silently dropping a clear would leave the marker set while follow-ups
+        (assignment, close) still run, creating inconsistent state.
+        """
+        fm = self._load_field_meta().get(field_name)
+        if fm is None:
+            raise BackendError(
+                f"Native field {field_name!r} is not provisioned on this org — "
+                f"run `workflow capabilities --provision`."
+            )
+        return {"fieldId": fm["id"], "delete": True}
+
+    def _read_native(self, issue_id: str) -> tuple[str, IssueState]:
+        """Read an issue's node id + framework state from its native fields.
+
+        Resolves the GraphQL node id (needed for writes), the native Issue Type,
+        and every single-select field value, mapping each back to its
+        `IssueState` field.
+        """
+        owner, _, name = self.repo.partition("/")
+        query = (
+            "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){"
+            "id issueType{name} "
+            "issueFieldValues(first:50){nodes{__typename "
+            "... on IssueFieldSingleSelectValue{name field{... on IssueFieldSingleSelect{name}}}"
+            "}}}}}"
+        )
+        data = self._graphql(query, {"o": owner, "r": name, "n": int(issue_id)})
+        issue = ((data.get("repository") or {}).get("issue")) or {}
+        node_id = issue.get("id")
+        if not node_id:
+            raise BackendError(f"Could not resolve issue #{issue_id} on {self.repo}.")
+        values: dict[str, str] = {}
+        for node in (issue.get("issueFieldValues") or {}).get("nodes") or []:
+            fld = (node.get("field") or {}).get("name")
+            if fld and node.get("name") is not None:
+                values[fld] = node["name"]
+        native_type = (issue.get("issueType") or {}).get("name")
+        claim = values.get(FIELD_HITL_CLAIM)
+        state = IssueState(
+            issue_id=str(issue_id),
+            state=values.get(FIELD_STATE),
+            agent_claim=values.get(FIELD_AGENT),
+            last_state=values.get(FIELD_LAST_STATE),
+            issue_type=None,
+            native_issue_type=native_type,
+            awaiting_gate=values.get(FIELD_HITL_BLOCKED),
+            audit_pending=values.get(FIELD_HITL_AUDIT),
+            reviewing=claim == gh_labels.CLAIM_REVIEWING,
+            auditing=claim == gh_labels.CLAIM_AUDITING,
+            advising=claim == gh_labels.CLAIM_ADVISING,
+            awaiting_input=FIELD_HITL_INPUT in values,
+            human_input=values.get(FIELD_HITL_INPUT),
+        )
+        return node_id, state
+
+    def _marker_change_to_field_ops(self, change: MarkerChange) -> list[dict]:
+        """Translate an abstract MarkerChange into setIssueFieldValue ops.
+
+        Mirrors `_marker_change_to_labels` for the native tier. Clears use the
+        field's `delete` op.
+        """
+        # `collected_by` rides the #74 relationship path — reject rather than
+        # silently no-op, so `collect` can't appear to succeed without recording.
+        if change.set_collected_by or change.clear_collected_by:
+            raise BackendError("Native collected_by writes are not yet implemented (#74).")
+
+        ops: list[dict] = []
+
+        def set_ss(field_name: str, value: str) -> None:
+            ops.append(self._single_select_op(field_name, value))
+
+        def clear(field_name: str) -> None:
+            ops.append(self._clear_op(field_name))
+
+        if change.set_state is not None:
+            set_ss(FIELD_STATE, change.set_state)
+        if change.set_agent_claim:
+            set_ss(FIELD_AGENT, change.set_agent_claim)
+        elif change.clear_agent_claim:
+            clear(FIELD_AGENT)
+        if change.set_last_state:
+            set_ss(FIELD_LAST_STATE, change.set_last_state)
+        elif change.clear_last_state:
+            clear(FIELD_LAST_STATE)
+        if change.set_awaiting_gate:
+            set_ss(FIELD_HITL_BLOCKED, change.set_awaiting_gate)
+        elif change.clear_awaiting_gate:
+            clear(FIELD_HITL_BLOCKED)
+        if change.set_audit_pending:
+            set_ss(FIELD_HITL_AUDIT, change.set_audit_pending)
+        elif change.clear_audit_pending:
+            clear(FIELD_HITL_AUDIT)
+
+        # The three claim singletons collapse to ONE HITL Claim field op: set it
+        # to whichever flag is True, else clear it once if any flag is False
+        # (release sets all three False — must not emit duplicate delete ops).
+        claim_flags = (
+            (gh_labels.CLAIM_REVIEWING, change.set_reviewing),
+            (gh_labels.CLAIM_AUDITING, change.set_auditing),
+            (gh_labels.CLAIM_ADVISING, change.set_advising),
+        )
+        claim_value = next((v for v, f in claim_flags if f is True), None)
+        if claim_value is not None:
+            set_ss(FIELD_HITL_CLAIM, claim_value)
+        elif any(f is False for _, f in claim_flags):
+            clear(FIELD_HITL_CLAIM)
+
+        if change.set_human_input:
+            set_ss(FIELD_HITL_INPUT, change.set_human_input)
+        elif change.clear_human_input or change.set_awaiting_input is False:
+            clear(FIELD_HITL_INPUT)
+
+        for value, flag in (
+            (gh_labels.SIGNAL_APPROVED, change.record_approval),
+            (gh_labels.SIGNAL_REJECTED, change.record_rejection),
+            (gh_labels.SIGNAL_CHECKED, change.record_confirm),
+            (gh_labels.SIGNAL_REVOKED, change.record_revoke),
+        ):
+            if flag:
+                set_ss(FIELD_HITL_SIGNAL, value)
+        if change.record_response:
+            set_ss(FIELD_HITL_SIGNAL, gh_labels.SIGNAL_RESOLVED)
+
+        return ops
+
+    def _apply_marker_change_native(
+        self, issue_id: str, change: MarkerChange, audit_comment: str | None
+    ) -> None:
+        """Native-tier marker change: set Issue Field values via one
+        `setIssueFieldValue`, then the same best-effort follow-ups as the label
+        path (assignment, close, pr-ready, audit comment)."""
+        node_id, _current = self._read_native(issue_id)
+        ops = self._marker_change_to_field_ops(change)
+        if ops:
+            self._graphql(
+                "mutation($input:SetIssueFieldValueInput!)"
+                "{setIssueFieldValue(input:$input){clientMutationId}}",
+                {"input": {"issueId": node_id, "issueFields": ops}},
+            )
+        try:
+            if change.set_agent_claim:
+                role_handle = self.resolve_role(change.set_agent_claim)
+                if role_handle:
+                    self.assign(issue_id, role_handle)
+            if change.clear_agent_claim:
+                self.unassign(issue_id)
+            if change.close_issue:
+                self.close_issue(issue_id, reason=change.close_reason)
+            if change.set_pr_ready:
+                self.mark_pr_ready(issue_id)
+        except BackendError as exc:
+            raise BackendError(
+                f"Issue #{issue_id}: field values were updated but a follow-up step "
+                f"failed ({exc}). Re-run the same operation (field writes are idempotent) "
+                f"or repair the assignment/close state by hand."
+            ) from exc
+        if audit_comment:
+            try:
+                self.post_comment(issue_id, audit_comment)
+            except BackendError as exc:
+                logger.warning(
+                    "Issue #%s: state applied but audit comment failed to post: %s",
+                    issue_id,
+                    exc,
+                )
+
+    def _create_issue_native(
+        self,
+        title: str,
+        body: str,
+        state: str,
+        extra_labels: list[str] | None,
+        issue_type: str | None,
+    ) -> str:
+        """Native create: open the issue with its native Issue Type, then set
+        the Workflow State (and any claim) field value.
+
+        Unlike the label tier this is not a single atomic call — `gh issue
+        create --type` sets the type atomically, but the Workflow State value is
+        a follow-up `setIssueFieldValue`, so there is a one-call window where the
+        issue has its type but not yet its state value; on failure there the
+        error names the created issue so it can be repaired. Relationship
+        extra-labels (`child-of` / `collected-by`) are rejected here — they ride
+        the #74 sub-issue / Collected-By path."""
+        ops_specs: list[tuple[str, str]] = [(FIELD_STATE, state)]
+        for raw in extra_labels or []:
+            parsed = gh_labels.parse_label(raw)
+            if parsed is None:
+                continue
+            if parsed.kind == gh_labels.CLAIM and parsed.value:
+                ops_specs.append((FIELD_AGENT, parsed.value))
+            elif parsed.kind in (gh_labels.CHILD_OF, gh_labels.COLLECTED_BY):
+                raise BackendError(
+                    f"Native relationship writes ({parsed.kind}) are not yet "
+                    f"implemented (#74); cannot create with {raw!r}."
+                )
+
+        new_id = self._create_bare_issue(title, body, issue_type)
+        try:
+            node_id, _ = self._read_native(new_id)
+            ops = [self._single_select_op(field, value) for field, value in ops_specs]
+            self._graphql(
+                "mutation($input:SetIssueFieldValueInput!)"
+                "{setIssueFieldValue(input:$input){clientMutationId}}",
+                {"input": {"issueId": node_id, "issueFields": ops}},
+            )
+        except BackendError as exc:
+            raise BackendError(
+                f"Issue #{new_id} was created but setting its field values failed "
+                f"({exc}). Set the Workflow State on #{new_id} by hand, or re-run "
+                f"once the org fields are provisioned."
+            ) from exc
+        return new_id
+
+    def _create_bare_issue(self, title: str, body: str, issue_type: str | None) -> str:
+        """`gh issue create` with no framework labels (native sets fields after)."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".md", delete=False
+        ) as tmp:
+            tmp.write(body or "")
+            tmp_path = tmp.name
+        try:
+            args = [
+                "issue",
+                "create",
+                "--repo",
+                self.repo,
+                f"--title={title}",
+                "--body-file",
+                tmp_path,
+            ]
+            if issue_type:
+                args += [f"--type={issue_type}"]
+            output = self._gh(*args)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        return self._parse_created_number(output, "/issues/")
+
+    def _parse_created_number(self, output: str, marker: str) -> str:
+        """Parse the issue/PR number from the URL `gh ... create` prints last."""
+        url = ""
+        for line in reversed(output.splitlines()):
+            stripped = line.strip()
+            if stripped:
+                url = stripped
+                break
+        if not url:
+            raise BackendError(f"`gh create` returned no output: {output!r}")
+        if marker not in url:
+            raise BackendError(
+                f"`gh create` returned unexpected output (no {marker} in URL): {url!r}"
+            )
+        return url.rsplit("/", 1)[-1]
+
+    def _list_issues_native(self, filters: IssueFilters) -> list[IssueState]:
+        """Native list: translate filters to `field."<name>":<value>` /
+        `type:` search qualifiers and resolve each match's fields.
+
+        Relationship-cohort filters (`child_of` / `collected_by`) are not yet
+        supported here — they ride the #74 sub-issue / Collected-By path.
+
+        NOTE: this reads each match's fields individually (`_read_native` per
+        number) — an N+1 pattern. Acceptable for now (matches are usually few);
+        a follow-up can fold the field read into a single GraphQL `search` query
+        to collapse it to one round-trip.
+        """
+        if filters.child_of or filters.collected_by:
+            raise BackendError(
+                "Native cohort queries (child_of / collected_by) are not yet implemented (#74)."
+            )
+        quals: list[str] = []
+        if filters.state:
+            quals.append(f'field."{FIELD_STATE.lower()}":"{filters.state}"')
+        if filters.claim_role:
+            quals.append(f'field."{FIELD_AGENT.lower()}":"{filters.claim_role}"')
+        if filters.awaiting_gate and filters.awaiting_gate != "*":
+            quals.append(f'field."{FIELD_HITL_BLOCKED.lower()}":"{filters.awaiting_gate}"')
+        if filters.audit_pending and filters.audit_pending != "*":
+            quals.append(f'field."{FIELD_HITL_AUDIT.lower()}":"{filters.audit_pending}"')
+        search = " ".join(quals)
+
+        numbers: list[str] = []
+        for kind in ("issue", "pr"):
+            args = [
+                kind,
+                "list",
+                "--repo",
+                self.repo,
+                "--state",
+                "all",
+                "--limit",
+                str(filters.limit),
+            ]
+            if search:
+                args += ["--search", search]
+            args += ["--json", "number"]
+            try:
+                entries = json.loads(self._gh(*args))
+            except json.JSONDecodeError as exc:
+                raise BackendError(f"gh returned non-JSON for native {kind} list: {exc}") from exc
+            numbers += [str(e["number"]) for e in entries if e.get("number") is not None]
+            # Post-filters below run after the --limit cap; if the fetch filled
+            # the cap, matches beyond it were never seen — warn (parity with the
+            # label tier, #26).
+            post_filtering = (
+                filters.awaiting_gate == "*"
+                or filters.audit_pending == "*"
+                or filters.awaiting_input is not None
+            )
+            if post_filtering and len(entries) >= filters.limit:
+                logger.warning(
+                    "list_issues hit the --limit %d cap on %ss (native) while a post-fetch "
+                    "filter is active; matches beyond the first %d may be missed. "
+                    "Raise --limit to widen the window.",
+                    filters.limit,
+                    kind,
+                    filters.limit,
+                )
+
+        results: list[IssueState] = []
+        seen: set[str] = set()
+        for num in numbers:
+            if num in seen:
+                continue
+            seen.add(num)
+            _node, state = self._read_native(num)
+            # Post-filter the markers that have no single search qualifier.
+            if filters.awaiting_gate == "*" and not state.awaiting_gate:
+                continue
+            if filters.audit_pending == "*" and not state.audit_pending:
+                continue
+            if filters.awaiting_input is True and not state.awaiting_input:
+                continue
+            if filters.awaiting_input is False and state.awaiting_input:
+                continue
+            results.append(state)
+        return results
