@@ -1641,3 +1641,46 @@ def test_native_list_issues_rejects_cohort_filters() -> None:
     backend = GitHubBackend(repo="blemees/repo", tier="native")
     with pytest.raises(BackendError, match="not yet implemented"):
         backend.list_issues(IssueFilters(child_of="100"))
+
+
+def test_native_collected_by_write_rejected_pending_74() -> None:
+    backend = _native_backend()
+    with pytest.raises(BackendError, match="collected_by.*#74"):
+        backend._marker_change_to_field_ops(MarkerChange(set_collected_by="42"))
+
+
+def test_native_clear_unprovisioned_field_fails_fast() -> None:
+    """An unprovisioned field must error on clear, not silently drop the op."""
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+    backend._field_meta = {}  # nothing provisioned
+    with pytest.raises(BackendError, match="not provisioned"):
+        backend._marker_change_to_field_ops(MarkerChange(clear_agent_claim=True))
+
+
+def test_native_claim_release_emits_single_clear() -> None:
+    """Release sets all three claim flags False — exactly one HITL Claim delete."""
+    backend = _native_backend()
+    ops = backend._marker_change_to_field_ops(
+        MarkerChange(set_reviewing=False, set_auditing=False, set_advising=False)
+    )
+    assert ops == [{"fieldId": "HC", "delete": True}]
+
+
+def test_native_create_rejects_relationship_extra_labels() -> None:
+    backend = _native_backend()
+    with (
+        mock.patch.object(backend, "_create_bare_issue") as bare,
+        pytest.raises(BackendError, match="#74"),
+    ):
+        backend.create_issue(title="T", body="B", state="raw", extra_labels=["child-of/5"])
+    bare.assert_not_called()  # rejected before any issue is created
+
+
+def test_native_create_failure_names_created_issue() -> None:
+    backend = _native_backend()
+    with (
+        mock.patch.object(backend, "_create_bare_issue", return_value="9"),
+        mock.patch.object(backend, "_read_native", side_effect=BackendError("boom")),
+        pytest.raises(BackendError, match="#9 was created"),
+    ):
+        backend.create_issue(title="T", body="B", state="raw")

@@ -1387,11 +1387,19 @@ class GitHubBackend:
             )
         return {"fieldId": fm["id"], "singleSelectOptionId": option_id}
 
-    def _clear_op(self, field_name: str) -> dict | None:
-        """Build a setIssueFieldValue op clearing a field; None if not provisioned."""
+    def _clear_op(self, field_name: str) -> dict:
+        """Build a setIssueFieldValue op clearing a field.
+
+        Fails fast (like `_single_select_op`) when the field isn't provisioned —
+        silently dropping a clear would leave the marker set while follow-ups
+        (assignment, close) still run, creating inconsistent state.
+        """
         fm = self._load_field_meta().get(field_name)
         if fm is None:
-            return None
+            raise BackendError(
+                f"Native field {field_name!r} is not provisioned on this org — "
+                f"run `workflow capabilities --provision`."
+            )
         return {"fieldId": fm["id"], "delete": True}
 
     def _read_native(self, issue_id: str) -> tuple[str, IssueState]:
@@ -1442,18 +1450,20 @@ class GitHubBackend:
         """Translate an abstract MarkerChange into setIssueFieldValue ops.
 
         Mirrors `_marker_change_to_labels` for the native tier. Clears use the
-        field's `delete` op. `collected_by` is intentionally not handled here —
-        it rides the #74 relationship path.
+        field's `delete` op.
         """
+        # `collected_by` rides the #74 relationship path — reject rather than
+        # silently no-op, so `collect` can't appear to succeed without recording.
+        if change.set_collected_by or change.clear_collected_by:
+            raise BackendError("Native collected_by writes are not yet implemented (#74).")
+
         ops: list[dict] = []
 
         def set_ss(field_name: str, value: str) -> None:
             ops.append(self._single_select_op(field_name, value))
 
         def clear(field_name: str) -> None:
-            op = self._clear_op(field_name)
-            if op is not None:
-                ops.append(op)
+            ops.append(self._clear_op(field_name))
 
         if change.set_state is not None:
             set_ss(FIELD_STATE, change.set_state)
@@ -1474,16 +1484,19 @@ class GitHubBackend:
         elif change.clear_audit_pending:
             clear(FIELD_HITL_AUDIT)
 
-        # The three claim singletons collapse to one HITL Claim field.
-        for value, flag in (
+        # The three claim singletons collapse to ONE HITL Claim field op: set it
+        # to whichever flag is True, else clear it once if any flag is False
+        # (release sets all three False — must not emit duplicate delete ops).
+        claim_flags = (
             (gh_labels.CLAIM_REVIEWING, change.set_reviewing),
             (gh_labels.CLAIM_AUDITING, change.set_auditing),
             (gh_labels.CLAIM_ADVISING, change.set_advising),
-        ):
-            if flag is True:
-                set_ss(FIELD_HITL_CLAIM, value)
-            elif flag is False:
-                clear(FIELD_HITL_CLAIM)
+        )
+        claim_value = next((v for v, f in claim_flags if f is True), None)
+        if claim_value is not None:
+            set_ss(FIELD_HITL_CLAIM, claim_value)
+        elif any(f is False for _, f in claim_flags):
+            clear(FIELD_HITL_CLAIM)
 
         if change.set_human_input:
             set_ss(FIELD_HITL_INPUT, change.set_human_input)
@@ -1558,20 +1571,38 @@ class GitHubBackend:
         Unlike the label tier this is not a single atomic call — `gh issue
         create --type` sets the type atomically, but the Workflow State value is
         a follow-up `setIssueFieldValue`, so there is a one-call window where the
-        issue has its type but not yet its state value. `child-of` extra-labels
-        are ignored here (they ride the #74 sub-issue path)."""
-        new_id = self._create_bare_issue(title, body, issue_type)
-        node_id, _ = self._read_native(new_id)
-        ops = [self._single_select_op(FIELD_STATE, state)]
+        issue has its type but not yet its state value; on failure there the
+        error names the created issue so it can be repaired. Relationship
+        extra-labels (`child-of` / `collected-by`) are rejected here — they ride
+        the #74 sub-issue / Collected-By path."""
+        ops_specs: list[tuple[str, str]] = [(FIELD_STATE, state)]
         for raw in extra_labels or []:
             parsed = gh_labels.parse_label(raw)
-            if parsed is not None and parsed.kind == gh_labels.CLAIM and parsed.value:
-                ops.append(self._single_select_op(FIELD_AGENT, parsed.value))
-        self._graphql(
-            "mutation($input:SetIssueFieldValueInput!)"
-            "{setIssueFieldValue(input:$input){clientMutationId}}",
-            {"input": {"issueId": node_id, "issueFields": ops}},
-        )
+            if parsed is None:
+                continue
+            if parsed.kind == gh_labels.CLAIM and parsed.value:
+                ops_specs.append((FIELD_AGENT, parsed.value))
+            elif parsed.kind in (gh_labels.CHILD_OF, gh_labels.COLLECTED_BY):
+                raise BackendError(
+                    f"Native relationship writes ({parsed.kind}) are not yet "
+                    f"implemented (#74); cannot create with {raw!r}."
+                )
+
+        new_id = self._create_bare_issue(title, body, issue_type)
+        try:
+            node_id, _ = self._read_native(new_id)
+            ops = [self._single_select_op(field, value) for field, value in ops_specs]
+            self._graphql(
+                "mutation($input:SetIssueFieldValueInput!)"
+                "{setIssueFieldValue(input:$input){clientMutationId}}",
+                {"input": {"issueId": node_id, "issueFields": ops}},
+            )
+        except BackendError as exc:
+            raise BackendError(
+                f"Issue #{new_id} was created but setting its field values failed "
+                f"({exc}). Set the Workflow State on #{new_id} by hand, or re-run "
+                f"once the org fields are provisioned."
+            ) from exc
         return new_id
 
     def _create_bare_issue(self, title: str, body: str, issue_type: str | None) -> str:
@@ -1623,6 +1654,11 @@ class GitHubBackend:
 
         Relationship-cohort filters (`child_of` / `collected_by`) are not yet
         supported here — they ride the #74 sub-issue / Collected-By path.
+
+        NOTE: this reads each match's fields individually (`_read_native` per
+        number) — an N+1 pattern. Acceptable for now (matches are usually few);
+        a follow-up can fold the field read into a single GraphQL `search` query
+        to collapse it to one round-trip.
         """
         if filters.child_of or filters.collected_by:
             raise BackendError(
@@ -1659,6 +1695,23 @@ class GitHubBackend:
             except json.JSONDecodeError as exc:
                 raise BackendError(f"gh returned non-JSON for native {kind} list: {exc}") from exc
             numbers += [str(e["number"]) for e in entries if e.get("number") is not None]
+            # Post-filters below run after the --limit cap; if the fetch filled
+            # the cap, matches beyond it were never seen — warn (parity with the
+            # label tier, #26).
+            post_filtering = (
+                filters.awaiting_gate == "*"
+                or filters.audit_pending == "*"
+                or filters.awaiting_input is not None
+            )
+            if post_filtering and len(entries) >= filters.limit:
+                logger.warning(
+                    "list_issues hit the --limit %d cap on %ss (native) while a post-fetch "
+                    "filter is active; matches beyond the first %d may be missed. "
+                    "Raise --limit to widen the window.",
+                    filters.limit,
+                    kind,
+                    filters.limit,
+                )
 
         results: list[IssueState] = []
         seen: set[str] = set()
