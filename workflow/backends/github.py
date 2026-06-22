@@ -1205,7 +1205,9 @@ class GitHubBackend:
         so each concrete field type is selected via an inline fragment.
         """
         query = (
-            "query($l:String!){organization(login:$l){issueFields(first:100){nodes{"
+            "query($l:String!,$after:String){organization(login:$l){"
+            "issueFields(first:100,after:$after){"
+            "pageInfo{hasNextPage endCursor} nodes{"
             "__typename "
             "... on IssueFieldText{name} "
             "... on IssueFieldSingleSelect{name} "
@@ -1214,13 +1216,26 @@ class GitHubBackend:
             "... on IssueFieldMultiSelect{name}"
             "}}}}"
         )
-        try:
-            data = self._graphql(query, {"l": org})
-        except BackendError:
-            return None
-        org_obj = data.get("organization") or {}
-        nodes = (org_obj.get("issueFields") or {}).get("nodes") or []
-        return [n["name"] for n in nodes if isinstance(n, dict) and n.get("name")]
+        names: list[str] = []
+        cursor: str | None = None
+        # Paginate the connection so orgs with >100 fields aren't truncated —
+        # a truncated list would break ensure_issue_field's idempotence check.
+        while True:
+            try:
+                data = self._graphql(query, {"l": org, "after": cursor})
+            except BackendError:
+                return None
+            conn = (data.get("organization") or {}).get("issueFields") or {}
+            for n in conn.get("nodes") or []:
+                if isinstance(n, dict) and n.get("name"):
+                    names.append(n["name"])
+            page = conn.get("pageInfo") or {}
+            if not page.get("hasNextPage"):
+                break
+            cursor = page.get("endCursor")
+            if not cursor:
+                break
+        return names
 
     def ensure_issue_field(
         self,
@@ -1248,6 +1263,10 @@ class GitHubBackend:
             )
         if name in existing:
             return False
+        if data_type == "SINGLE_SELECT" and not options:
+            # GitHub rejects a single-select with no options; fail fast with a
+            # clear error rather than making a request that always errors.
+            raise BackendError(f"Cannot create single-select issue field {name!r} with no options.")
         field_input: dict = {
             "ownerId": self.org_node_id(org),
             "name": name,

@@ -3868,16 +3868,33 @@ def _provision_native(ctx: dict, cache: Any) -> int:
     except WorkflowError as exc:
         return _handle_workflow_error(exc)
 
+    # Preflight: both native reads must succeed (non-None). `None` means the
+    # feature is absent or we lack permission — provisioning would fail and the
+    # plan would be misleading ("create everything"). Verifying here also means
+    # a later cache-pin to native is backed by a confirmed-capable org, even
+    # when the registry happens to declare no issue types.
+    try:
+        existing_type_list = backend.list_issue_types(owner)
+        existing_field_list = backend.list_issue_fields(owner)
+    except WorkflowError as exc:
+        return _handle_workflow_error(exc)
+    if existing_type_list is None or existing_field_list is None:
+        missing = "Issue Types" if existing_type_list is None else "Issue Fields"
+        print(
+            f"Cannot provision {host}/{owner}: native {missing} are unavailable "
+            f"(feature not enabled, or the token lacks org permission). "
+            f"This org is on the label tier.",
+            file=sys.stderr,
+        )
+        return 1
+    existing_types = set(existing_type_list)
+    existing_fields = set(existing_field_list)
+
     # Single-selects need ≥1 option; an empty option set can't be provisioned.
     creatable = [f for f in fields if not (f["data_type"] == "SINGLE_SELECT" and not f["options"])]
     empty = [f["name"] for f in fields if f["data_type"] == "SINGLE_SELECT" and not f["options"]]
 
     if ctx["dry_run"]:
-        try:
-            existing_types = set(backend.list_issue_types(owner) or [])
-            existing_fields = set(backend.list_issue_fields(owner) or [])
-        except WorkflowError as exc:
-            return _handle_workflow_error(exc)
         types_to_create = [t[0] for t in issue_types if t[0] not in existing_types]
         fields_to_create = [f["name"] for f in creatable if f["name"] not in existing_fields]
         if ctx["json_output"]:

@@ -1428,3 +1428,53 @@ def test_ensure_issue_field_creates_text_without_options() -> None:
     inp = json.loads(patched.call_args_list[-1].kwargs["input"])["variables"]["input"]
     assert inp["dataType"] == "TEXT"
     assert "options" not in inp
+
+
+def test_ensure_issue_field_rejects_empty_single_select() -> None:
+    """A single-select with no options can't be created — fail fast (#71 review)."""
+    backend = GitHubBackend(repo="blemees/repo")
+    with (
+        mock.patch(
+            "workflow.backends.github.subprocess.run",
+            return_value=_proc(
+                stdout=json.dumps({"data": {"organization": {"issueFields": {"nodes": []}}}})
+            ),
+        ),
+        pytest.raises(BackendError, match="no options"),
+    ):
+        backend.ensure_issue_field("blemees", "HITL Blocked", "SINGLE_SELECT", options=[])
+
+
+def test_list_issue_fields_paginates() -> None:
+    """>100 fields: the connection is followed via pageInfo/endCursor (#71 review)."""
+    backend = GitHubBackend(repo="blemees/repo")
+    page1 = {
+        "data": {
+            "organization": {
+                "issueFields": {
+                    "pageInfo": {"hasNextPage": True, "endCursor": "C1"},
+                    "nodes": [{"__typename": "IssueFieldText", "name": "A"}],
+                }
+            }
+        }
+    }
+    page2 = {
+        "data": {
+            "organization": {
+                "issueFields": {
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    "nodes": [{"__typename": "IssueFieldText", "name": "B"}],
+                }
+            }
+        }
+    }
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(
+            [_proc(stdout=json.dumps(page1)), _proc(stdout=json.dumps(page2))]
+        ),
+    ) as patched:
+        assert backend.list_issue_fields("blemees") == ["A", "B"]
+    # Second request carried the cursor.
+    body2 = json.loads(patched.call_args_list[1].kwargs["input"])
+    assert body2["variables"]["after"] == "C1"
