@@ -28,7 +28,8 @@
         "description": {
           "type": "string",
           "minLength": 1,
-          "description": "Prose description of what this type means. Often references the work-types catalog."
+          "maxLength": 256,
+          "description": "Prose description of what this type means. Often references the work-types catalog. Capped at 256 chars — GitHub's org issue-types API limit."
         },
         "github_issue_type": {
           "type": "string",

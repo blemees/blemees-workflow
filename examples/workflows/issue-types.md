@@ -40,31 +40,31 @@ Flag-gated feature shipped to a cohort for measurement. Branch prefix `exp/`. Re
 
 ## `pr` — Pull Request
 
-A proposed code change. Spawned by a developer running `workflow spawn-issue` from inner-loop's implementing state (the CLI in turn invokes `gh pr create` against the backend). One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). The framework owns the spawn relationship and the cross-process modelling.
+A proposed code change. Spawned by a developer running `workflow spawn-issue` from inner-loop's implementing state (which invokes `gh pr create`). One ticket can spawn zero, one, or many PRs; the framework owns the spawn relationship.
 
 **GitHub entity**: pull request (no native Issue Type)
 
 ## `incident` — Incident
 
-Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident-mitigation`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
+Live production incident. Opened by the IC at declaration; runs through incident-response to stabilization. Mitigation work is spawned as separate `incident-mitigation` tickets. Closes at `stabilized`; the postmortem is a separate spawned ticket.
 
 **GitHub Issue Type**: `Incident` · **Color**: `red`
 
 ## `incident-mitigation` — Incident mitigation
 
-A mitigation work item spawned from an incident. The responder drafts a plan in `plan_mitigation` and then in `execute_mitigation` dispatches one or more sub-mitigations (any combination of `hotfix`, `config-change`, `data-change`) as child issues on their respective processes. Tied to the parent incident via `parent-of:<incident>`. Closes at `mitigated` only when every spawned child reaches its applied / shipped closing state — wait-for-all — at which point the parent incident cascades to `needs_verification`.
+A mitigation work item spawned from an incident. The responder plans in `plan_mitigation`, then `execute_mitigation` dispatches sub-mitigations (hotfix/config-change/data-change) as children. Closes at `mitigated` when all children reach a closing state.
 
 **GitHub Issue Type**: `Incident mitigation` · **Color**: `orange`
 
 ## `config-change` — Config change
 
-A runtime configuration change applied as part of an incident mitigation: feature-flag toggle, kill switch, config-value tweak, rate-limit adjustment. No code change, no PR. Tied to the parent incident-mitigation via `parent-of:<incident-mitigation>`. Closes at `config_applied`, cascading the parent mitigation toward `mitigated`.
+A runtime configuration change for an incident mitigation: feature-flag toggle, kill switch, config-value tweak, rate-limit adjustment. No code change, no PR. Closes at `config_applied`, cascading the parent mitigation toward `mitigated`.
 
 **GitHub Issue Type**: `Config change` · **Color**: `yellow`
 
 ## `data-change` — Data change
 
-A data mutation applied as part of an incident mitigation: corruption repair, manual update, backfill, event replay. Always preceded by a backup step (`creating_backup` → `backup_ready`) — the workflow enforces the safety net. Tied to the parent incident-mitigation via `parent-of:<incident-mitigation>`. Closes at `data_change_applied`, cascading the parent mitigation toward `mitigated`.
+A data mutation for an incident mitigation: corruption repair, manual update, backfill, event replay. Always preceded by a backup (`creating_backup` → `backup_ready`). Closes at `data_change_applied`, cascading the parent mitigation toward `mitigated`.
 
 **GitHub Issue Type**: `Data change` · **Color**: `purple`
 

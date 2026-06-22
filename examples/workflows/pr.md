@@ -6,7 +6,7 @@ The pull-request lifecycle: draft → review → merged. Spawned from inner-loop
 
 ## Issue types accepted
 
-- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `workflow spawn-issue` from inner-loop's implementing state (the CLI in turn invokes `gh pr create` against the backend). One ticket can spawn zero (spike findings doc), one (typical), or many PRs (incident mitigation chains, multi-component features). The framework owns the spawn relationship and the cross-process modelling.
+- `pr` — **Pull Request**: A proposed code change. Spawned by a developer running `workflow spawn-issue` from inner-loop's implementing state (which invokes `gh pr create`). One ticket can spawn zero, one, or many PRs; the framework owns the spawn relationship.
 
 ## State diagram
 

@@ -39,6 +39,9 @@ from workflow.errors import ParseError
 
 logger = logging.getLogger(__name__)
 
+# GitHub's org issue-types API caps the description at 256 characters.
+_MAX_DESCRIPTION = 256
+
 
 def parse_issue_type_directory(source: str | Path) -> IssueTypeDirectory:
     """Parse an issue-types file or JSON string into an `IssueTypeDirectory`.
@@ -109,6 +112,15 @@ def _parse_type(type_id: str, entry: dict[str, Any]) -> IssueType:
         raise ParseError(
             f"Issue type {type_id!r}: `description` is required and must be a non-empty string."
         )
+    description = description.strip()
+    # GitHub's org issue-types API caps the description at 256 chars; enforce it
+    # at the source so authors fix the JSON rather than have it silently
+    # truncated at provision time.
+    if len(description) > _MAX_DESCRIPTION:
+        raise ParseError(
+            f"Issue type {type_id!r}: `description` must be ≤ {_MAX_DESCRIPTION} characters "
+            f"(got {len(description)}); GitHub Issue Type descriptions are capped there."
+        )
 
     github_issue_type = entry.get("github_issue_type")
     if github_issue_type is not None:
@@ -148,7 +160,7 @@ def _parse_type(type_id: str, entry: dict[str, Any]) -> IssueType:
     return IssueType(
         type_id=type_id,
         name=name.strip(),
-        description=description.strip(),
+        description=description,
         github_issue_type=github_issue_type,
         github_issue_type_color=github_issue_type_color,
         github_entity=github_entity,

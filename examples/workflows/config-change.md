@@ -6,7 +6,7 @@ Apply a configuration change as an incident mitigation: feature-flag toggle, kil
 
 ## Issue types accepted
 
-- `config-change` — **Config change**: A runtime configuration change applied as part of an incident mitigation: feature-flag toggle, kill switch, config-value tweak, rate-limit adjustment. No code change, no PR. Tied to the parent incident-mitigation via `parent-of:<incident-mitigation>`. Closes at `config_applied`, cascading the parent mitigation toward `mitigated`.
+- `config-change` — **Config change**: A runtime configuration change for an incident mitigation: feature-flag toggle, kill switch, config-value tweak, rate-limit adjustment. No code change, no PR. Closes at `config_applied`, cascading the parent mitigation toward `mitigated`.
 
 ## State diagram
 

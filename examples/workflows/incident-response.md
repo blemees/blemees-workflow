@@ -6,7 +6,7 @@ Coordinate the live response to a production incident: declare, mitigate, stabil
 
 ## Issue types accepted
 
-- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; carries through incident-response from declaration to stabilization. Mitigation work is spawned as separate `incident-mitigation`-typed tickets on the mitigation process — the IC stays on the parent in `mitigating` until a mitigation child returns. Closes at `stabilized`; postmortem is another separate (spawned) ticket.
+- `incident` — **Incident**: Live production incident. Opened by the IC at declaration; runs through incident-response to stabilization. Mitigation work is spawned as separate `incident-mitigation` tickets. Closes at `stabilized`; the postmortem is a separate spawned ticket.
 
 ## State diagram
 
