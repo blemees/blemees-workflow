@@ -1793,7 +1793,34 @@ def test_ensure_issue_type_updates_drifted_description() -> None:
         status = backend.ensure_issue_type("blemees", name="Bug", description="new desc")
     assert status == "updated"
     body = json.loads(patched.call_args_list[-1].kwargs["input"])
-    assert body["variables"]["i"] == {"issueTypeId": "IT_abc", "description": "new desc"}
+    assert body["variables"]["i"] == {
+        "issueTypeId": "IT_abc",
+        "name": "Bug",
+        "description": "new desc",
+    }
+
+
+def test_ensure_issue_type_reconciles_name_casing() -> None:
+    """An existing 'Config change' is renamed in place to a desired
+    'Config Change' (case-insensitive match), not recreated."""
+    backend = GitHubBackend(repo="blemees/repo")
+    existing = [{"name": "Config change", "node_id": "IT_cc", "description": "d"}]
+    responses = [
+        _proc(stdout=json.dumps(existing)),  # fetch_issue_types
+        _proc(stdout=json.dumps({"data": {"updateIssueType": {"issueType": {"id": "IT_cc"}}}})),
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        status = backend.ensure_issue_type("blemees", name="Config Change", description="d")
+    assert status == "updated"
+    # Two calls only: the fetch, then the updateIssueType mutation — no create POST.
+    assert len(patched.call_args_list) == 2
+    update_cmd = patched.call_args_list[-1].args[0]
+    assert "graphql" in update_cmd
+    body = json.loads(patched.call_args_list[-1].kwargs["input"])
+    assert body["variables"]["i"]["name"] == "Config Change"
 
 
 def test_ensure_issue_type_unchanged_when_description_matches() -> None:

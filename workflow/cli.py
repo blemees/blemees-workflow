@@ -3907,7 +3907,10 @@ def _provision_native(ctx: dict, cache: Any) -> int:
             file=sys.stderr,
         )
         return 1
-    existing_type_desc = {t["name"]: (t.get("description") or "") for t in existing_types_full}
+    # Keyed case-insensitively — GitHub enforces case-insensitive type-name
+    # uniqueness, so a desired "Config Change" reconciles an existing
+    # "Config change" rather than creating a duplicate.
+    existing_types_by_lower = {(t.get("name") or "").lower(): t for t in existing_types_full}
     existing_fields = set(existing_field_list)
 
     # Single-selects need ≥1 option; an empty option set can't be provisioned.
@@ -3915,12 +3918,16 @@ def _provision_native(ctx: dict, cache: Any) -> int:
     empty = [f["name"] for f in fields if f["data_type"] == "SINGLE_SELECT" and not f["options"]]
 
     if ctx["dry_run"]:
-        types_to_create = [t[0] for t in issue_types if t[0] not in existing_type_desc]
-        # Existing types whose description has drifted from the definition.
+        types_to_create = [t[0] for t in issue_types if t[0].lower() not in existing_types_by_lower]
+        # Existing types whose name casing or description has drifted.
         types_to_update = [
             t[0]
             for t in issue_types
-            if t[0] in existing_type_desc and existing_type_desc[t[0]] != (t[1] or "")
+            if t[0].lower() in existing_types_by_lower
+            and (
+                (existing_types_by_lower[t[0].lower()].get("name") or "") != t[0]
+                or (existing_types_by_lower[t[0].lower()].get("description") or "") != (t[1] or "")
+            )
         ]
         fields_to_create = [f["name"] for f in creatable if f["name"] not in existing_fields]
         if ctx["json_output"]:

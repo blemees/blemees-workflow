@@ -1068,8 +1068,12 @@ class GitHubBackend:
         `BackendError` if the org's types can't be listed (feature/permission)
         — the provisioning path expects loud failures.
 
-        Match is by name. Description length is bounded at the source (the
-        issue-types.json parser caps it at 256), so it's never truncated here.
+        Match is **case-insensitive** — GitHub enforces case-insensitive name
+        uniqueness, so a type stored as "Config change" is reconciled (renamed)
+        to a desired "Config Change" rather than colliding on a create. The
+        reconcile sets both the name (fixes casing) and the description.
+        Description length is bounded at the source (the issue-types.json parser
+        caps it at 256), so it's never truncated here.
         """
         existing = self.fetch_issue_types(org)
         if existing is None:
@@ -1077,7 +1081,7 @@ class GitHubBackend:
                 f"Cannot list issue types for org {org!r}; feature may not "
                 f"be enabled or you may lack permission."
             )
-        current = next((t for t in existing if t.get("name") == name), None)
+        current = next((t for t in existing if (t.get("name") or "").lower() == name.lower()), None)
         if current is None:
             # Create. `is_enabled` is a JSON boolean — use `-F` (typed field) so
             # gh sends `true`, not the string "true" (the API rejects the latter
@@ -1096,16 +1100,19 @@ class GitHubBackend:
                 args += ["-f", f"color={color}"]
             self._gh(*args)
             return "created"
-        # Reconcile the description on an existing type when it has drifted from
-        # the workflow definition, via the `updateIssueType` GraphQL mutation
-        # (keyed on the type's node id).
-        if (current.get("description") or "") != (description or ""):
+        # Reconcile an existing type when its name casing or description has
+        # drifted from the workflow definition, via the `updateIssueType`
+        # GraphQL mutation (keyed on the type's node id). Setting `name` fixes
+        # casing in place (e.g. "Config change" → "Config Change").
+        if (current.get("name") or "") != name or (current.get("description") or "") != (
+            description or ""
+        ):
             node_id = current.get("node_id")
             if not node_id:
                 raise BackendError(f"Issue type {name!r} has no node id to update.")
             self._graphql(
                 "mutation($i:UpdateIssueTypeInput!){updateIssueType(input:$i){issueType{id}}}",
-                {"i": {"issueTypeId": node_id, "description": description}},
+                {"i": {"issueTypeId": node_id, "name": name, "description": description}},
             )
             return "updated"
         return "unchanged"
