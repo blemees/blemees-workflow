@@ -1074,6 +1074,18 @@ class GitHubBackend:
             )
         if name in existing:
             return False
+        # The org issue-types API caps the description at 256 chars (HTTP 422
+        # otherwise). Process issue-type descriptions can be longer than that;
+        # truncate to the limit (the full text lives in the workflow docs).
+        max_desc = 256
+        if len(description) > max_desc:
+            logger.warning(
+                "Issue type %r description truncated to %d chars (was %d) for provisioning.",
+                name,
+                max_desc,
+                len(description),
+            )
+            description = description[:max_desc]
         # `is_enabled` is a JSON boolean — use `-F` (typed field) so gh sends
         # `true`, not the string "true" (the API rejects the latter with HTTP
         # 422). name/description/color stay `-f` (raw strings) so a description
