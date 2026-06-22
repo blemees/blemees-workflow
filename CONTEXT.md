@@ -156,18 +156,23 @@ Refs #<ticket>[, #<ticket>...]
 
 GitHub auto-links the `#N` references as cross-references on the parent ticket. The footer is mandatory and not user-configurable at this layer — projects that want richer templates should compose their body before passing it to `--body`.
 
-### Type encoding (native vs label)
+### Capability tier (native vs label)
 
-How the type is recorded on the tracker depends on what the org supports:
+A single binary **tier** per (host, owner) decides how the whole marker projection is encoded (ADR-0005). It is all-or-nothing — one bit per org, not a per-feature matrix:
+
+- **Native** — the org supports the native metadata set (Issue Fields + Issue Types + sub-issues). *(The native read/write path is built incrementally on top of this seam; today the tier's runtime effect is the issue-type encoding below.)*
+- **Label** — the fallback: every marker, including type, is a `<classifier>/<value>` label. Works on every tracker without preconditions.
+
+How the type is recorded on the tracker follows the tier:
 
 - **Native** — GitHub's first-class Issue Type field (`gh issue create --type "Bug"`). Requires GHES ≥ ?? / GitHub.com, the org to have Issue Types enabled, and the user to have read access to the types.
-- **Label** — `type/<framework_id>` regular label (e.g., `type/bug`). Works on every tracker without preconditions.
+- **Label** — `type/<framework_id>` regular label (e.g., `type/bug`).
 
 All framework labels follow one grammar, `<kebab-classifier>/<value>` (ADR-0005): `state/<name>`, `claimed/<role>`, `last-state/<name>`, `type/<id>`, `child-of/<id>`, `collected-by/<id>`, `hitl-blocked/<gate>`, `hitl-audit/<gate>`, `hitl-input/<topic>`, `hitl-claim/<reviewing|auditing|advising>`, `hitl-signal/<approved|rejected|checked|revoked|resolved>`. The grammar lives in `workflow/backends/github_labels.py` — the single source of truth for encoding and parsing.
 
-The choice is **auto-detected** per (host, owner) by probing the org's `/issue-types` endpoint via `gh api`. A non-empty type list → native; anything else (404, 403, empty list, network error) → label. The decision is cached in `~/.config/blemees-workflow/capabilities.json` with a 30-day TTL.
+The tier is **auto-detected** per (host, owner) by probing the org's `/issue-types` endpoint via `gh api` (the native-capability signal; hardened to also confirm Issue Fields + sub-issues when the native GraphQL path lands). A non-empty type list → native; anything else (404, 403, empty list, network error) → label. The decision is cached in `~/.config/blemees-workflow/capabilities.json` (key `tier`) with a 30-day TTL.
 
-A manual override is set via `workflow capabilities --set-encoding native|label` — `manual=true` on the entry pins it so refreshes don't touch it. `--clear` wipes the cache. `--refresh` re-probes non-manual entries.
+A manual override is set via `workflow capabilities --set-tier native|label` — `manual=true` on the entry pins it so refreshes don't touch it. `--clear` wipes the cache. `--refresh` re-probes non-manual entries.
 
 ### `workflow setup-github`
 
