@@ -165,7 +165,7 @@ A single binary **tier** per (host, owner) decides how the whole marker projecti
 
 How the type is recorded on the tracker follows the tier:
 
-- **Native** — GitHub's first-class Issue Type field (`gh issue create --type "Bug"`). Requires GHES ≥ ?? / GitHub.com, the org to have Issue Types enabled, and the user to have read access to the types.
+- **Native** — GitHub's first-class Issue Type field (`gh issue create --type "Bug"`). Requires GitHub.com (or a GitHub Enterprise Server version that supports Issue Types), the org to have Issue Types enabled, and the user to have read access to the types.
 - **Label** — `type/<framework_id>` regular label (e.g., `type/bug`).
 
 All framework labels follow one grammar, `<kebab-classifier>/<value>` (ADR-0005): `state/<name>`, `claimed/<role>`, `last-state/<name>`, `type/<id>`, `child-of/<id>`, `collected-by/<id>`, `hitl-blocked/<gate>`, `hitl-audit/<gate>`, `hitl-input/<topic>`, `hitl-claim/<reviewing|auditing|advising>`, `hitl-signal/<approved|rejected|checked|revoked|resolved>`. The grammar lives in `workflow/backends/github_labels.py` — the single source of truth for encoding and parsing.

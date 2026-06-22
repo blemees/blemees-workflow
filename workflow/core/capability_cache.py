@@ -1,4 +1,4 @@
-"""Capability cache — per-(host, owner) record of the encoding tier.
+"""Capability cache — per-(host, owner) record of the capability tier.
 
 The tool needs to know, for each tracker org, which **tier** to use for the
 whole marker projection (ADR-0005):
