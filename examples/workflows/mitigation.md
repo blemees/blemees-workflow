@@ -6,7 +6,7 @@ Plan and execute a mitigation strategy during an active incident. The responder 
 
 ## Issue types accepted
 
-- `incident-mitigation` — **Incident mitigation**: A mitigation work item spawned from an incident. The responder plans in `plan_mitigation`, then `execute_mitigation` dispatches sub-mitigations (hotfix/config-change/data-change) as children. Closes at `mitigated` when all children reach a closing state.
+- `incident-mitigation` — **Mitigation**: A mitigation work item spawned from an incident. The responder plans in `plan_mitigation`, then `execute_mitigation` dispatches sub-mitigations (hotfix/config-change/data-change) as children. Closes at `mitigated` when all children reach a closing state.
 
 ## State diagram
 

@@ -1382,13 +1382,13 @@ def test_capabilities_provision_dry_run_lists_without_creating(
     """--provision --dry-run reports the plan and creates nothing."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     with (
-        mock.patch("workflow.backends.github.GitHubBackend.list_issue_types", return_value=[]),
+        mock.patch("workflow.backends.github.GitHubBackend.fetch_issue_types", return_value=[]),
         mock.patch("workflow.backends.github.GitHubBackend.list_issue_fields", return_value=[]),
         mock.patch(
             "workflow.backends.github.GitHubBackend.ensure_issue_field", return_value=True
         ) as ensure_field,
         mock.patch(
-            "workflow.backends.github.GitHubBackend.ensure_issue_type", return_value=True
+            "workflow.backends.github.GitHubBackend.ensure_issue_type", return_value="created"
         ) as ensure_type,
     ):
         rc = cli(
@@ -1424,12 +1424,14 @@ def test_capabilities_provision_creates_fields_and_pins_native(
     """--provision creates missing fields/types and pins the tier to native."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     with (
-        mock.patch("workflow.backends.github.GitHubBackend.list_issue_types", return_value=[]),
+        mock.patch("workflow.backends.github.GitHubBackend.fetch_issue_types", return_value=[]),
         mock.patch("workflow.backends.github.GitHubBackend.list_issue_fields", return_value=[]),
         mock.patch(
             "workflow.backends.github.GitHubBackend.ensure_issue_field", return_value=True
         ) as ensure_field,
-        mock.patch("workflow.backends.github.GitHubBackend.ensure_issue_type", return_value=True),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.ensure_issue_type", return_value="created"
+        ),
     ):
         rc = cli(
             [

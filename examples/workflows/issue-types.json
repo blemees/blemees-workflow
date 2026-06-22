@@ -49,21 +49,21 @@
       "github_issue_type_color": "red"
     },
     "incident-mitigation": {
-      "name": "Incident mitigation",
+      "name": "Mitigation",
       "description": "A mitigation work item spawned from an incident. The responder plans in `plan_mitigation`, then `execute_mitigation` dispatches sub-mitigations (hotfix/config-change/data-change) as children. Closes at `mitigated` when all children reach a closing state.",
-      "github_issue_type": "Incident mitigation",
+      "github_issue_type": "Mitigation",
       "github_issue_type_color": "orange"
     },
     "config-change": {
-      "name": "Config change",
+      "name": "Config Change",
       "description": "A runtime configuration change for an incident mitigation: feature-flag toggle, kill switch, config-value tweak, rate-limit adjustment. No code change, no PR. Closes at `config_applied`, cascading the parent mitigation toward `mitigated`.",
-      "github_issue_type": "Config change",
+      "github_issue_type": "Config Change",
       "github_issue_type_color": "yellow"
     },
     "data-change": {
-      "name": "Data change",
+      "name": "Data Change",
       "description": "A data mutation for an incident mitigation: corruption repair, manual update, backfill, event replay. Always preceded by a backup (`creating_backup` → `backup_ready`). Closes at `data_change_applied`, cascading the parent mitigation toward `mitigated`.",
-      "github_issue_type": "Data change",
+      "github_issue_type": "Data Change",
       "github_issue_type_color": "purple"
     },
     "postmortem": {

@@ -320,10 +320,11 @@ class TrackerBackend(Protocol):
         name: str,
         description: str,
         color: str | None = None,
-    ) -> bool:
-        """Create the named issue type at the org if it doesn't exist.
+    ) -> str:
+        """Create or reconcile the named issue type at the org.
 
-        Returns True if a new type was created, False if it already existed.
+        Returns `"created"` (newly made), `"updated"` (existed but its
+        description differed and was reconciled to match), or `"unchanged"`.
         Backends that don't support issue types should raise `BackendError`
         rather than silently succeeding — the CLI's `--setup-org` path
         wants loud failures so the admin can fix permissions or feature flags.

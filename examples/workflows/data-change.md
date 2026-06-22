@@ -6,7 +6,7 @@ Apply a data change as an incident mitigation: corruption repair, manual update,
 
 ## Issue types accepted
 
-- `data-change` — **Data change**: A data mutation for an incident mitigation: corruption repair, manual update, backfill, event replay. Always preceded by a backup (`creating_backup` → `backup_ready`). Closes at `data_change_applied`, cascading the parent mitigation toward `mitigated`.
+- `data-change` — **Data Change**: A data mutation for an incident mitigation: corruption repair, manual update, backfill, event replay. Always preceded by a backup (`creating_backup` → `backup_ready`). Closes at `data_change_applied`, cascading the parent mitigation toward `mitigated`.
 
 ## State diagram
 
