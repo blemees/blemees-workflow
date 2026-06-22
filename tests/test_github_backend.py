@@ -1754,3 +1754,40 @@ def test_native_read_rejects_non_numeric_issue_id() -> None:
     backend = GitHubBackend(repo="blemees/repo", tier="native")
     with pytest.raises(BackendError, match="numeric issue id"):
         backend.read_issue("not-a-number")
+
+
+def test_ensure_issue_type_sends_is_enabled_as_typed_boolean() -> None:
+    """is_enabled must be a JSON boolean (-F), not the string "true" (-f) —
+    the API rejects the string form with HTTP 422."""
+    backend = GitHubBackend(repo="blemees/repo")
+    responses = [
+        _proc(stdout=json.dumps([])),  # list_issue_types (empty → not present)
+        _proc(stdout=""),  # create
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        created = backend.ensure_issue_type("blemees", name="Bug", description="d", color="red")
+    assert created is True
+    create_cmd = patched.call_args_list[-1].args[0]
+    assert "-F" in create_cmd
+    assert create_cmd[create_cmd.index("-F") + 1] == "is_enabled=true"
+    # And it must NOT be passed as a raw -f string field.
+    raw_values = [create_cmd[i + 1] for i, x in enumerate(create_cmd) if x == "-f"]
+    assert "is_enabled=true" not in raw_values
+
+
+def test_ensure_issue_type_truncates_long_description() -> None:
+    """Descriptions over the 256-char API cap are truncated, not rejected."""
+    backend = GitHubBackend(repo="blemees/repo")
+    long_desc = "x" * 400
+    responses = [_proc(stdout=json.dumps([])), _proc(stdout="")]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        backend.ensure_issue_type("blemees", name="Config change", description=long_desc)
+    create_cmd = patched.call_args_list[-1].args[0]
+    desc_arg = next(a for a in create_cmd if a.startswith("description="))
+    assert len(desc_arg[len("description=") :]) == 256
