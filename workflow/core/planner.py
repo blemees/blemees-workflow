@@ -18,6 +18,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
+from workflow.backends import github_labels as gh_labels
 from workflow.backends.base import IssueState, MarkerChange
 from workflow.core.model.human_gate import HumanGate, HumanGateCatalog
 from workflow.core.model.state_machine import (
@@ -86,7 +87,7 @@ class CreationSpec:
     The controller's create-then-apply path turns this into a
     `backend.create_issue` / `create_pull_request` call. `change` on the same
     plan (if non-empty) is then applied to the new issue; for spawn it is empty
-    because the only marker — `child-of:<parent>` — rides in `extra_labels`.
+    because the only marker — `child-of/<parent>` — rides in `extra_labels`.
     """
 
     title: str
@@ -100,7 +101,7 @@ class CreationSpec:
     base: str | None = None  # PR target branch
     draft: bool = False
     # Contributors to gather into the new issue (when it lands on a `collects`
-    # state). The controller stamps each with `collected-by:<new-id>` after
+    # state). The controller stamps each with `collected-by/<new-id>` after
     # creation, since the new id isn't known until then (ADR-0003).
     collect_contributors: tuple[str, ...] = ()
 
@@ -1130,7 +1131,7 @@ def _plan_spawn(request: OperationRequest, parent_state: IssueState) -> Operatio
     - `github_issue_type`  — native GitHub Issue Type name, or None
     - `title` / `head` / `base` — optional CLI inputs
 
-    The child carries only `child-of:<parent>` (ADR-0003); the parent is left
+    The child carries only `child-of/<parent>` (ADR-0003); the parent is left
     untouched (empty `change`).
     """
     if parent_state.state is None:
@@ -1154,9 +1155,11 @@ def _plan_spawn(request: OperationRequest, parent_state: IssueState) -> Operatio
     )
     body = (request.body_text or "").rstrip() + footer
 
-    extra_labels = [f"child-of:{parent_id}"]
+    # `extra_labels` are GitHub-encoded labels carried on the CreationSpec; use
+    # the shared grammar so the encoding stays in one place (ADR-0005).
+    extra_labels = [gh_labels.child_of_label(parent_id)]
     if entity != "pull_request":
-        extra_labels.append(f"type:{spawn.issue_type}")
+        extra_labels.append(gh_labels.type_label(spawn.issue_type))
 
     spec = CreationSpec(
         title=title,
@@ -1193,9 +1196,9 @@ def _plan_creation(request: OperationRequest) -> OperationPlan:
     - `entity`            — "issue" | "pull_request"
     - `issue_type`        — framework type id (for display)
     - `github_issue_type` — native GitHub Issue Type name, or None
-    - `extra_labels`      — already-encoded labels (e.g. `type:<id>`)
+    - `extra_labels`      — already-encoded labels (e.g. `type/<id>`)
     - `head` / `base` / `draft` — PR fields
-    - `collect_contributors` — ids to stamp `collected-by:` after creation
+    - `collect_contributors` — ids to stamp `collected-by/` after creation
     """
     extras = request.extras
     state = extras.get("state")
@@ -1239,7 +1242,7 @@ def _plan_collect(request: OperationRequest, contributor_state: IssueState) -> O
     - `issue_types`   — types the collector accepts (empty = any)
     - `force`         — bypass eligibility checks
 
-    The contributor (`request.issue_id`) is stamped `collected-by:<collector>`
+    The contributor (`request.issue_id`) is stamped `collected-by/<collector>`
     (ADR-0003); the collector is not touched.
     """
     extras = request.extras

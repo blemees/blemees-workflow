@@ -173,7 +173,7 @@ class Collects:
 
     `advance_on` is selective contributor-side feedback: when the
     collector reaches a listed state, every contributor (bearing the
-    `collected-by:<collector>` marker) auto-advances to a target state
+    `collected-by/<collector>` marker) auto-advances to a target state
     on the source process. The target can be a single string (all
     contributor types advance to the same state) OR a per-type map (a
     contributor's target depends on its issue type, with `*` as the
@@ -197,7 +197,7 @@ class Collects:
     advance_on: tuple[CollectAdvanceRule, ...] = ()
     # Collector states that **drop** the collection without moving the
     # contributors. The contributor's state is unchanged; the framework
-    # clears the `collected-by:<collector>` label so the contributor is
+    # clears the `collected-by/<collector>` label so the contributor is
     # eligible for future collectors. Use this when the collector
     # outcome (e.g., release abandoned) means "this collection didn't
     # happen — the items are still candidates."
@@ -333,7 +333,7 @@ class Transition:
       pattern (one gate, several possible destinations, human picks on
       approve). The validator enforces single-origin.
     - Sharing a `gate_name` across transitions with different source states
-      is forbidden — the `hitl:awaiting-<gate>` label would be ambiguous.
+      is forbidden — the `hitl-blocked/<gate>` label would be ambiguous.
 
     Cross-process relationships no longer use a transition type — shared
     handovers live on resting states (`handoff: true`) and subprocess /

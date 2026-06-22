@@ -11,12 +11,16 @@ from workflow.backends.base import (
     MarkerChange,
     TrackerBackend,
 )
-from workflow.backends.github import GitHubBackend
+
+# NOTE: concrete backends (e.g. GitHubBackend) are intentionally NOT imported
+# here. Importing this package — e.g. `from workflow.backends import
+# github_labels` in core code — must stay lightweight and not pull in a backend
+# implementation and its dependencies. Import concrete backends from their
+# submodule: `from workflow.backends.github import GitHubBackend`.
 
 __all__ = [
     "MarkerChange",
     "TrackerBackend",
     "IssueFilters",
     "IssueState",
-    "GitHubBackend",
 ]

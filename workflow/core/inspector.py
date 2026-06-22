@@ -177,9 +177,9 @@ def inbox_for_role(
     1. **Inbox** — items in those discovered resting states with no current
        claim. Aggregated across all workflows.
 
-    2. **Actionable wip** — items with `wip:{role}` where the agent is not
-       blocked waiting on a human: no `hitl:awaiting-*`, no `hitl:audit-*`,
-       no `hitl:awaiting-input`. (Backend-level filter; not workflow-scoped.)
+    2. **Actionable wip** — items with `claimed/{role}` where the agent is not
+       blocked waiting on a human: no `hitl-blocked/*`, no `hitl-audit/*`,
+       no `hitl-input/*`. (Backend-level filter; not workflow-scoped.)
 
     Excludes items where the agent is blocked on a human signal, and items
     already claimed by another role. Read-only: never mutates issue or backend.
@@ -204,7 +204,7 @@ def inbox_for_role(
             if item.agent_claim is None and item.issue_id not in seen:
                 seen[item.issue_id] = item
 
-    # 2. Actionable wip: wip:{role} AND no awaiting/audit/awaiting-input markers.
+    # 2. Actionable wip: claimed/{role} AND no awaiting/audit/awaiting-input markers.
     for item in backend.list_issues(IssueFilters(claim_role=role, limit=limit)):
         if (
             item.awaiting_gate is None

@@ -62,7 +62,7 @@ class IssueTypeDirectory:
         """Map a native GitHub Issue Type name back to its framework type id.
 
         Used to resolve an issue read under native encoding (where there's no
-        `type:` label) to the framework id the state machine reasons about.
+        `type/` label) to the framework id the state machine reasons about.
         Returns None when no entry declares that GitHub type.
         """
         for type_id, entry in self.types.items():

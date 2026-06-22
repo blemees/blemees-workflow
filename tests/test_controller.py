@@ -15,8 +15,8 @@ from workflow.core.operations import spawn_issue as spawn_issue_op
 
 def _parent_from(labels: list[str] | None) -> str | None:
     for label in labels or []:
-        if label.startswith("child-of:"):
-            return label[len("child-of:") :]
+        if label.startswith("child-of/"):
+            return label[len("child-of/") :]
     return None
 
 
@@ -88,7 +88,7 @@ def test_controller_spawn_creates_child_and_leaves_parent_untouched() -> None:
     assert result.created_issue_id == "200"
     new_id, state, labels, gh_type = backend.created_issues[0]
     assert state == "ready_for_dev"
-    assert "child-of:100" in labels and "type:hotfix" in labels
+    assert "child-of/100" in labels and "type/hotfix" in labels
     assert gh_type == "Hotfix"
     # The parent (100) was read but never mutated.
     assert backend.mutations == []
@@ -115,7 +115,7 @@ def test_controller_spawn_pr_uses_create_pull_request() -> None:
     new_id, head, draft, labels = backend.created_prs[0]
     assert head == "feat/x"
     assert draft is True
-    assert labels == ("child-of:5",)
+    assert labels == ("child-of/5",)
     assert backend.mutations == []
 
 

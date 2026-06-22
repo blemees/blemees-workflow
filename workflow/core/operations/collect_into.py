@@ -5,7 +5,7 @@ impure lookup) and passes it via `extras`; the pure `_plan_collect` validates
 the contributor's eligibility and produces the `set_collected_by` marker change;
 the controller's in-place path applies it to the contributor. The collector is
 never touched — the relationship lives solely on the contributor's
-`collected-by:<collector>` label (ADR-0003).
+`collected-by/<collector>` label (ADR-0003).
 """
 
 from __future__ import annotations

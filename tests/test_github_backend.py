@@ -34,9 +34,9 @@ def test_create_issue_invokes_gh_issue_create_with_state_label() -> None:
     backend = GitHubBackend(repo="owner/repo")
     # gh issue create prints the URL of the new issue on stdout.
     new_issue_url = "https://github.com/owner/repo/issues/42\n"
-    # First call is ensure_label (state:raw); second is gh issue create.
+    # First call is ensure_label (state/raw); second is gh issue create.
     responses = [
-        _proc(stdout=""),  # label create (state:raw)
+        _proc(stdout=""),  # label create (state/raw)
         _proc(stdout=new_issue_url),  # gh issue create
     ]
     with mock.patch(
@@ -53,18 +53,18 @@ def test_create_issue_invokes_gh_issue_create_with_state_label() -> None:
     calls = [args.args[0] for args in patched.call_args_list]
     create_cmd = [c for c in calls if "issue" in c and "create" in c][0]
     # Title (=form so a leading-dash title isn't parsed as a flag), --body-file,
-    # and one --label=state:raw flag all present.
+    # and one --label=state/raw flag all present.
     assert "--title=Fix the login bug" in create_cmd
     assert "--body-file" in create_cmd
-    assert "--label=state:raw" in create_cmd
+    assert "--label=state/raw" in create_cmd
 
 
-def test_create_issue_with_claim_adds_wip_label() -> None:
+def test_create_issue_with_claim_adds_claimed_label() -> None:
     backend = GitHubBackend(repo="owner/repo")
-    # Two ensure_label calls (state:raw, wip:product-manager) then gh issue create.
+    # Two ensure_label calls (state/raw, claimed/product-manager) then gh issue create.
     responses = [
-        _proc(stdout=""),  # ensure state:raw
-        _proc(stdout=""),  # ensure wip:product-manager
+        _proc(stdout=""),  # ensure state/raw
+        _proc(stdout=""),  # ensure claimed/product-manager
         _proc(stdout="https://github.com/owner/repo/issues/7\n"),
     ]
     with mock.patch(
@@ -75,14 +75,14 @@ def test_create_issue_with_claim_adds_wip_label() -> None:
             title="New thing",
             body="",
             state="raw",
-            extra_labels=["wip:product-manager"],
+            extra_labels=["claimed/product-manager"],
         )
 
     assert new_id == "7"
     create_cmd = [c.args[0] for c in patched.call_args_list if "create" in c.args[0]][-1]
     # One --label flag per label (=form), not a comma-joined value.
-    assert "--label=state:raw" in create_cmd
-    assert "--label=wip:product-manager" in create_cmd
+    assert "--label=state/raw" in create_cmd
+    assert "--label=claimed/product-manager" in create_cmd
 
 
 def test_create_issue_raises_on_unexpected_gh_output() -> None:
@@ -107,10 +107,10 @@ def test_read_issue_translates_labels() -> None:
     issue_payload = {
         "number": 1,
         "labels": [
-            {"name": "state:refining"},
-            {"name": "wip:product-manager"},
-            {"name": "hitl:awaiting-ready_for_dev"},
-            {"name": "type:feat"},
+            {"name": "state/refining"},
+            {"name": "claimed/product-manager"},
+            {"name": "hitl-blocked/ready_for_dev"},
+            {"name": "type/feat"},
         ],
         "assignees": [],
         "state": "OPEN",
@@ -133,13 +133,133 @@ def test_read_issue_translates_labels() -> None:
     assert "owner/repo" in cmd
 
 
+def test_read_issue_parses_full_marker_set() -> None:
+    """read_issue resolves every classifier into the IssueState fields (#68)."""
+    backend = GitHubBackend(repo="owner/repo")
+    payload = {
+        "number": 5,
+        "labels": [
+            {"name": "state/refining"},
+            {"name": "claimed/product-manager"},
+            {"name": "hitl-blocked/ready_for_dev"},
+            {"name": "hitl-audit/ship"},
+            {"name": "hitl-input/scope"},
+            {"name": "type/bug"},
+            {"name": "child-of/100"},
+        ],
+        "assignees": [],
+        "state": "OPEN",
+        "comments": [],
+    }
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        return_value=_proc(stdout=json.dumps(payload)),
+    ):
+        state = backend.read_issue("5")
+
+    assert state.state == "refining"
+    assert state.agent_claim == "product-manager"
+    assert state.awaiting_gate == "ready_for_dev"
+    assert state.audit_pending == "ship"
+    assert state.awaiting_input is True
+    assert state.human_input == "scope"
+    assert state.issue_type == "bug"
+    assert state.child_of == "100"
+
+
+def _apply_run_factory(pre_labels: list[str]):
+    """side_effect for apply_marker_change: pre-state for any view, "" otherwise."""
+    pre = {
+        "number": 1,
+        "labels": [{"name": n} for n in pre_labels],
+        "assignees": [],
+        "state": "OPEN",
+        "comments": [],
+    }
+
+    def _run(*args, **kwargs):
+        cmd = args[0]
+        if "view" in cmd:
+            return _proc(stdout=json.dumps(pre))
+        return _proc(stdout="")
+
+    return _run
+
+
+def test_request_input_emits_single_merged_hitl_input_label() -> None:
+    """request-input writes one `hitl-input/<topic>` carrying both the queue
+    marker and the topic — not a separate awaiting-input + topic pair (#68)."""
+    backend = GitHubBackend(repo="owner/repo")
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_apply_run_factory(["state/refining"]),
+    ) as patched:
+        backend.apply_marker_change(
+            "1",
+            MarkerChange(set_awaiting_input=True, set_human_input="scope"),
+            audit_comment="## request-input: scope",
+        )
+    edit_cmd = [
+        c.args[0] for c in patched.call_args_list if "edit" in c.args[0] and "issue" in c.args[0]
+    ][0]
+    assert "--add-label=hitl-input/scope" in edit_cmd
+    # Exactly one hitl-input label — the queue marker and topic are merged.
+    add_input = [a for a in edit_cmd if a.startswith("--add-label=hitl-input/")]
+    assert add_input == ["--add-label=hitl-input/scope"]
+
+
+def test_respond_removes_merged_hitl_input_label() -> None:
+    """respond clears the merged `hitl-input/<topic>` and the advising claim,
+    and drops a `hitl-signal/resolved` breadcrumb (#68)."""
+    backend = GitHubBackend(repo="owner/repo")
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_apply_run_factory(
+            ["state/refining", "hitl-input/scope", "hitl-claim/advising"]
+        ),
+    ) as patched:
+        backend.apply_marker_change(
+            "1",
+            MarkerChange(
+                set_awaiting_input=False,
+                set_advising=False,
+                clear_human_input=True,
+                record_response=True,
+            ),
+            audit_comment="## resolve",
+        )
+    edit_cmd = [
+        c.args[0] for c in patched.call_args_list if "edit" in c.args[0] and "issue" in c.args[0]
+    ][0]
+    assert "--remove-label=hitl-input/scope" in edit_cmd
+    assert "--remove-label=hitl-claim/advising" in edit_cmd
+    assert "--add-label=hitl-signal/resolved" in edit_cmd
+
+
+def test_transition_swaps_state_label() -> None:
+    """Advancing swaps the single state label: add the new, remove the old."""
+    backend = GitHubBackend(repo="owner/repo")
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_apply_run_factory(["state/refining", "claimed/product-manager"]),
+    ) as patched:
+        backend.apply_marker_change("1", MarkerChange(set_state="ready_for_dev"))
+    edit_cmd = [
+        c.args[0] for c in patched.call_args_list if "edit" in c.args[0] and "issue" in c.args[0]
+    ][0]
+    assert "--add-label=state/ready_for_dev" in edit_cmd
+    assert "--remove-label=state/refining" in edit_cmd
+    # The untouched claim is left alone.
+    assert not any("--remove-label=claimed/product-manager" in a for a in edit_cmd)
+
+
 def test_apply_marker_change_constructs_add_remove_labels() -> None:
     backend = GitHubBackend(repo="owner/repo")
-    # Pre-state: state:refining + wip:product-manager.
+    # Pre-state: state/refining + claimed/product-manager.
     pre = {
         "labels": [
-            {"name": "state:refining"},
-            {"name": "wip:product-manager"},
+            {"name": "state/refining"},
+            {"name": "claimed/product-manager"},
         ],
         "assignees": [],
         "state": "OPEN",
@@ -154,7 +274,7 @@ def test_apply_marker_change_constructs_add_remove_labels() -> None:
     #   4. gh issue edit (add/remove labels)
     responses = [
         _proc(stdout=json.dumps(pre)),  # read pre-state
-        _proc(stdout=""),  # label create (state:ready_for_dev)
+        _proc(stdout=""),  # label create (state/ready_for_dev)
         _proc(stdout=""),  # gh issue comment
         _proc(stdout=""),  # gh issue edit
     ]
@@ -176,18 +296,19 @@ def test_apply_marker_change_constructs_add_remove_labels() -> None:
     edit_calls = [c for c in calls if c[0] == "gh" and "edit" in c and "issue" in c]
     assert edit_calls
     edit_cmd = edit_calls[0]
-    # Expected add/remove flags (=form, one per label).
-    assert "--add-label=state:ready_for_dev" in edit_cmd
-    assert "--remove-label=state:refining" in edit_cmd
+    # Expected add/remove flags (=form, one per label): the state label swaps,
+    # so the issue ends with exactly one state label.
+    assert "--add-label=state/ready_for_dev" in edit_cmd
+    assert "--remove-label=state/refining" in edit_cmd
 
 
 def test_apply_marker_change_singletons_and_audit() -> None:
     backend = GitHubBackend(repo="owner/repo")
     pre = {
         "labels": [
-            {"name": "state:refining"},
-            {"name": "wip:product-manager"},
-            {"name": "hitl:awaiting-ready_for_dev"},
+            {"name": "state/refining"},
+            {"name": "claimed/product-manager"},
+            {"name": "hitl-blocked/ready_for_dev"},
         ],
         "assignees": [],
         "state": "OPEN",
@@ -197,8 +318,8 @@ def test_apply_marker_change_singletons_and_audit() -> None:
     # approve: set_state, clear_awaiting_gate, set_reviewing=False, record_approval
     responses = [
         _proc(stdout=json.dumps(pre)),  # read pre-state
-        _proc(stdout=""),  # label create (state:ready_for_dev)
-        _proc(stdout=""),  # label create (hitl:approved-ready_for_dev)
+        _proc(stdout=""),  # label create (state/ready_for_dev)
+        _proc(stdout=""),  # label create (hitl-signal/approved)
         _proc(stdout=""),  # comment
         _proc(stdout=""),  # edit
     ]
@@ -218,18 +339,18 @@ def test_apply_marker_change_singletons_and_audit() -> None:
 
     calls = [args.args[0] for args in patched.call_args_list]
     edit_cmd = [c for c in calls if "edit" in c and "issue" in c][0]
-    assert "--add-label=state:ready_for_dev" in edit_cmd
-    assert "--add-label=hitl:approved-ready_for_dev" in edit_cmd
-    assert "--remove-label=state:refining" in edit_cmd
-    assert "--remove-label=hitl:awaiting-ready_for_dev" in edit_cmd
+    assert "--add-label=state/ready_for_dev" in edit_cmd
+    assert "--add-label=hitl-signal/approved" in edit_cmd
+    assert "--remove-label=state/refining" in edit_cmd
+    assert "--remove-label=hitl-blocked/ready_for_dev" in edit_cmd
 
 
 def test_apply_marker_change_clear_claim_does_not_unassign_without_mapping() -> None:
     backend = GitHubBackend(repo="owner/repo")
     pre = {
         "labels": [
-            {"name": "state:refining"},
-            {"name": "wip:product-manager"},
+            {"name": "state/refining"},
+            {"name": "claimed/product-manager"},
         ],
         "assignees": [{"login": "alice"}],
         "state": "OPEN",
@@ -249,7 +370,7 @@ def test_apply_marker_change_clear_claim_does_not_unassign_without_mapping() -> 
         backend.apply_marker_change("1", MarkerChange(clear_agent_claim=True))
 
     calls = [args.args[0] for args in patched.call_args_list]
-    assert any("--remove-label=wip:product-manager" in c for c in calls)
+    assert any("--remove-label=claimed/product-manager" in c for c in calls)
     assert not any("--remove-assignee" in c for c in calls)
 
 
@@ -298,8 +419,8 @@ def test_list_issues_translates_filters_to_label_flags() -> None:
             "number": 7,
             "title": "Some issue",
             "labels": [
-                {"name": "state:refining"},
-                {"name": "wip:product-manager"},
+                {"name": "state/refining"},
+                {"name": "claimed/product-manager"},
             ],
         }
     ]
@@ -322,8 +443,8 @@ def test_list_issues_translates_filters_to_label_flags() -> None:
     # Filters become --label entries (identical on both queries).
     label_indices = [i for i, x in enumerate(issue_cmd) if x == "--label"]
     label_values = [issue_cmd[i + 1] for i in label_indices]
-    assert "state:refining" in label_values
-    assert "wip:product-manager" in label_values
+    assert "state/refining" in label_values
+    assert "claimed/product-manager" in label_values
     # Limit is respected.
     assert "--limit" in issue_cmd
     assert issue_cmd[issue_cmd.index("--limit") + 1] == "20"
@@ -344,14 +465,14 @@ def test_list_issues_wildcard_awaiting_post_filters() -> None:
             "number": 1,
             "title": "has awaiting",
             "labels": [
-                {"name": "state:refining"},
-                {"name": "hitl:awaiting-ready_for_dev"},
+                {"name": "state/refining"},
+                {"name": "hitl-blocked/ready_for_dev"},
             ],
         },
         {
             "number": 2,
             "title": "no awaiting",
-            "labels": [{"name": "state:refining"}],
+            "labels": [{"name": "state/refining"}],
         },
     ]
     with mock.patch(
@@ -381,10 +502,10 @@ def test_list_issues_merges_prs_and_queries_all_states() -> None:
     --state all, and merges — so closed issues and PRs are both visible."""
     backend = GitHubBackend(repo="owner/repo")
     issue_response = [
-        {"number": 1, "title": "a closed issue", "labels": [{"name": "state:shipped"}]},
+        {"number": 1, "title": "a closed issue", "labels": [{"name": "state/shipped"}]},
     ]
     pr_response = [
-        {"number": 2, "title": "a merged PR", "labels": [{"name": "state:merged"}]},
+        {"number": 2, "title": "a merged PR", "labels": [{"name": "state/merged"}]},
     ]
     with mock.patch(
         "workflow.backends.github.subprocess.run",
@@ -408,14 +529,14 @@ def test_list_issues_merges_prs_and_queries_all_states() -> None:
 
 
 def test_list_issues_cohort_query_by_child_of_returns_closed_and_pr_children() -> None:
-    """A cohort query (`child-of:<id>`) finds children regardless of whether
+    """A cohort query (`child-of/<id>`) finds children regardless of whether
     they are closed issues or PRs — wait-for-all depends on this (ADR-0003)."""
     backend = GitHubBackend(repo="owner/repo")
     closed_child = [
-        {"number": 11, "title": "closed child", "labels": [{"name": "child-of:100"}]},
+        {"number": 11, "title": "closed child", "labels": [{"name": "child-of/100"}]},
     ]
     pr_child = [
-        {"number": 12, "title": "PR child", "labels": [{"name": "child-of:100"}]},
+        {"number": 12, "title": "PR child", "labels": [{"name": "child-of/100"}]},
     ]
     with mock.patch(
         "workflow.backends.github.subprocess.run",
@@ -432,7 +553,7 @@ def test_list_issues_cohort_query_by_child_of_returns_closed_and_pr_children() -
     # The cohort label is passed to both queries.
     for c in [c.args[0] for c in patched.call_args_list]:
         label_vals = [c[i + 1] for i, x in enumerate(c) if x == "--label"]
-        assert "child-of:100" in label_vals
+        assert "child-of/100" in label_vals
 
 
 # --------------------------------------------------------------------------- #
@@ -484,29 +605,29 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
     #   2. Actionable wip: claim_role=product-manager label (then filter to no
     #      awaiting markers)
     inbox_response = [
-        {"number": 10, "title": "raw unclaimed", "labels": [{"name": "state:raw"}]},
+        {"number": 10, "title": "raw unclaimed", "labels": [{"name": "state/raw"}]},
         # This one is already claimed by someone else — must be excluded.
         {
             "number": 11,
             "title": "raw claimed",
-            "labels": [{"name": "state:raw"}, {"name": "wip:peer-reviewer"}],
+            "labels": [{"name": "state/raw"}, {"name": "claimed/peer-reviewer"}],
         },
     ]
     wip_response = [
-        # Actionable: wip:product-manager with no HITL markers.
+        # Actionable: claimed/product-manager with no HITL markers.
         {
             "number": 20,
             "title": "wip actionable",
-            "labels": [{"name": "state:refining"}, {"name": "wip:product-manager"}],
+            "labels": [{"name": "state/refining"}, {"name": "claimed/product-manager"}],
         },
-        # Blocked: wip:product-manager with hitl:awaiting-ready_for_dev — must be excluded.
+        # Blocked: claimed/product-manager with hitl-blocked/ready_for_dev — must be excluded.
         {
             "number": 21,
             "title": "wip blocked",
             "labels": [
-                {"name": "state:refining"},
-                {"name": "wip:product-manager"},
-                {"name": "hitl:awaiting-ready_for_dev"},
+                {"name": "state/refining"},
+                {"name": "claimed/product-manager"},
+                {"name": "hitl-blocked/ready_for_dev"},
             ],
         },
     ]
@@ -534,9 +655,9 @@ def test_list_for_role_returns_inbox_and_actionable_wip() -> None:
 
     ids = sorted(item.issue_id for item in results)
     # 10 (raw, unclaimed): in inbox.
-    # 20 (wip:product-manager, no HITL): actionable wip.
-    # 11 (wip:peer-reviewer): excluded — wrong claim role.
-    # 21 (wip:product-manager, awaiting gate): excluded — blocked.
+    # 20 (claimed/product-manager, no HITL): actionable wip.
+    # 11 (claimed/peer-reviewer): excluded — wrong claim role.
+    # 21 (claimed/product-manager, awaiting gate): excluded — blocked.
     assert ids == ["10", "20"]
 
 
@@ -574,7 +695,7 @@ def test_list_for_role_no_inbox_states_when_no_working_state_accepts_role() -> N
     backend = GitHubBackend(repo="owner/repo")
     with mock.patch(
         "workflow.backends.github.subprocess.run",
-        # Only one subprocess.run call: the wip:developer filter
+        # Only one subprocess.run call: the claimed/developer filter
         # (no inbox states means no per-state backend calls).
         return_value=_proc(stdout=json.dumps([])),
     ):
@@ -747,9 +868,9 @@ def test_discover_remote_from_git_returns_none_for_unparseable_url() -> None:
 def test_list_labels_returns_names_and_seeds_cache() -> None:
     backend = GitHubBackend(repo="owner/repo")
     fake_response = [
-        {"name": "state:raw"},
-        {"name": "wip:product-manager"},
-        {"name": "hitl:reviewing"},
+        {"name": "state/raw"},
+        {"name": "claimed/product-manager"},
+        {"name": "hitl-claim/reviewing"},
     ]
     with mock.patch(
         "workflow.backends.github.subprocess.run",
@@ -761,10 +882,10 @@ def test_list_labels_returns_names_and_seeds_cache() -> None:
     assert cmd[0] == "gh"
     assert "label" in cmd and "list" in cmd
     assert "--repo" in cmd and "owner/repo" in cmd
-    assert sorted(names) == ["hitl:reviewing", "state:raw", "wip:product-manager"]
+    assert sorted(names) == ["claimed/product-manager", "hitl-claim/reviewing", "state/raw"]
     # Cache was seeded so subsequent ensure_label calls are no-ops.
-    assert "state:raw" in backend._known_labels
-    assert "wip:product-manager" in backend._known_labels
+    assert "state/raw" in backend._known_labels
+    assert "claimed/product-manager" in backend._known_labels
 
 
 def test_ensure_label_creates_missing() -> None:
@@ -773,13 +894,13 @@ def test_ensure_label_creates_missing() -> None:
         "workflow.backends.github.subprocess.run",
         return_value=_proc(stdout=""),
     ) as patched:
-        created = backend.ensure_label("state:new_state")
+        created = backend.ensure_label("state/new_state")
 
     assert created is True
     cmd = patched.call_args[0][0]
     assert cmd[0] == "gh"
     assert "label" in cmd and "create" in cmd
-    assert "state:new_state" in cmd
+    assert "state/new_state" in cmd
     assert "--color" in cmd
     # Color came from the state namespace default (blue).
     color_idx = cmd.index("--color") + 1
@@ -790,11 +911,11 @@ def test_ensure_label_creates_missing() -> None:
 
 def test_ensure_label_is_idempotent_via_cache() -> None:
     backend = GitHubBackend(repo="owner/repo")
-    backend._known_labels.add("state:raw")
+    backend._known_labels.add("state/raw")
     with mock.patch(
         "workflow.backends.github.subprocess.run",
     ) as patched:
-        created = backend.ensure_label("state:raw")
+        created = backend.ensure_label("state/raw")
 
     assert created is False
     assert not patched.called  # cache hit, no subprocess call
@@ -809,11 +930,11 @@ def test_ensure_label_handles_already_exists_from_gh() -> None:
             stderr="HTTP 422: Validation failed (label already exists)",
         ),
     ):
-        created = backend.ensure_label("state:raw")
+        created = backend.ensure_label("state/raw")
 
     # `gh` reported "already exists"; the method treats that as benign.
     assert created is False
-    assert "state:raw" in backend._known_labels
+    assert "state/raw" in backend._known_labels
 
 
 def test_registry_find_workflow_for_state(workflow_dir) -> None:
@@ -1012,7 +1133,7 @@ def test_apply_marker_change_partial_failure_raises_repair_error() -> None:
     applied — the backend raises a clear repair error, not a bare one (#20)."""
     backend = GitHubBackend(repo="owner/repo")
     pre = {
-        "labels": [{"name": "state:implementing"}],
+        "labels": [{"name": "state/implementing"}],
         "assignees": [],
         "state": "OPEN",
         "comments": [],
@@ -1060,7 +1181,7 @@ def test_create_issue_dash_title_not_parsed_as_flag() -> None:
     """A title starting with '-' is passed as --title=<value>, not a bare arg (#27)."""
     backend = GitHubBackend(repo="owner/repo")
     responses = [
-        _proc(stdout=""),  # ensure state:raw
+        _proc(stdout=""),  # ensure state/raw
         _proc(stdout="https://github.com/owner/repo/issues/9\n"),
     ]
     with mock.patch(
@@ -1080,8 +1201,8 @@ def test_list_issues_warns_when_post_filter_hits_limit(caplog) -> None:
     backend = GitHubBackend(repo="owner/repo")
     # Two issues, both awaiting some gate, returned at limit=2.
     issues = [
-        {"number": 1, "labels": [{"name": "hitl:awaiting-g1"}], "title": "a", "state": "OPEN"},
-        {"number": 2, "labels": [{"name": "hitl:awaiting-g2"}], "title": "b", "state": "OPEN"},
+        {"number": 1, "labels": [{"name": "hitl-blocked/g1"}], "title": "a", "state": "OPEN"},
+        {"number": 2, "labels": [{"name": "hitl-blocked/g2"}], "title": "b", "state": "OPEN"},
     ]
 
     def _run(*args, **kwargs):
@@ -1107,8 +1228,8 @@ def test_list_issues_no_warning_without_post_filter(caplog) -> None:
 
     backend = GitHubBackend(repo="owner/repo")
     issues = [
-        {"number": 1, "labels": [{"name": "state:raw"}], "title": "a", "state": "OPEN"},
-        {"number": 2, "labels": [{"name": "state:raw"}], "title": "b", "state": "OPEN"},
+        {"number": 1, "labels": [{"name": "state/raw"}], "title": "a", "state": "OPEN"},
+        {"number": 2, "labels": [{"name": "state/raw"}], "title": "b", "state": "OPEN"},
     ]
 
     def _run(*args, **kwargs):
@@ -1131,7 +1252,7 @@ def _claim_run_factory(verify_labels: list[str], pre_labels: list[str] | None = 
     are distinguished by the `--json` field set (`labels` only = the verify)."""
     pre = {
         "number": 1,
-        "labels": [{"name": lbl} for lbl in (pre_labels or ["state:raw"])],
+        "labels": [{"name": lbl} for lbl in (pre_labels or ["state/raw"])],
         "assignees": [],
         "state": "OPEN",
     }
@@ -1149,10 +1270,12 @@ def _claim_run_factory(verify_labels: list[str], pre_labels: list[str] | None = 
 
 
 def test_claim_race_lost_self_reverts_and_raises() -> None:
-    """A concurrent claim lands a second wip: label; the loser sees both, removes
+    """A concurrent claim lands a second claim label; the loser sees both, removes
     its own, and raises OperationError instead of believing it won (#21)."""
     backend = GitHubBackend(repo="owner/repo")
-    run = _claim_run_factory(verify_labels=["wip:product-manager", "wip:developer"])
+    # The live labels show two claims (a concurrent agent landed one); the claim
+    # parser counts both as contention.
+    run = _claim_run_factory(verify_labels=["claimed/product-manager", "claimed/developer"])
     with (
         mock.patch("workflow.backends.github.subprocess.run", side_effect=run) as patched,
         pytest.raises(OperationError, match="Lost claim race"),
@@ -1160,20 +1283,20 @@ def test_claim_race_lost_self_reverts_and_raises() -> None:
         backend.apply_marker_change(
             "1", MarkerChange(set_state="refining", set_agent_claim="product-manager")
         )
-    # Our own wip label was removed in the self-revert (and nobody else's).
+    # Our own claim label was removed in the self-revert (and nobody else's).
     edits = [c.args[0] for c in patched.call_args_list if "edit" in c.args[0]]
-    assert any("--remove-label=wip:product-manager" in e for e in edits)
-    assert not any("--remove-label=wip:developer" in e for e in edits)
+    assert any("--remove-label=claimed/product-manager" in e for e in edits)
+    assert not any("--remove-label=claimed/developer" in e for e in edits)
 
 
 def test_claim_clean_win_no_revert() -> None:
-    """When ours is the only wip: label after the write, the claim stands and no
-    self-revert fires (#21)."""
+    """When ours is the only claim label after the write, the claim stands and
+    no self-revert fires (#21)."""
     backend = GitHubBackend(repo="owner/repo")
-    run = _claim_run_factory(verify_labels=["wip:product-manager"])
+    run = _claim_run_factory(verify_labels=["claimed/product-manager"])
     with mock.patch("workflow.backends.github.subprocess.run", side_effect=run) as patched:
         backend.apply_marker_change(
             "1", MarkerChange(set_state="refining", set_agent_claim="product-manager")
         )
     edits = [c.args[0] for c in patched.call_args_list if "edit" in c.args[0]]
-    assert not any(any(a.startswith("--remove-label=wip:") for a in e) for e in edits)
+    assert not any(any(a.startswith("--remove-label=claimed/") for a in e) for e in edits)

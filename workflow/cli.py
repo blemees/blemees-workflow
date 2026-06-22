@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from workflow import __version__
+from workflow.backends import github_labels as gh_labels
 from workflow.backends.base import TrackerBackend
 from workflow.backends.github import GitHubBackend
 from workflow.config import Process, load_process
@@ -429,7 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Spawn a child issue on the target process declared by the "
             "parent state's `spawns` field. The child gets a Refs #<parent> "
-            "footer plus a `child-of:<parent>` label — the sole record of the "
+            "footer plus a `child-of/<parent>` label — the sole record of the "
             "relationship; the auto-advance on child close finds the cohort by "
             "querying that label (ADR-0003). For pr-typed spawns, --head is "
             "required (PRs need a source branch)."
@@ -536,8 +537,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Pause the working state and ask the human operator for input. "
             "The agent's current state must declare `human_inputs`; pass "
             "--topic <id> with one of the declared ids. The shared "
-            "`human-inputs.json` defines each topic. Adds `hitl:awaiting-"
-            "input` + `hitl:topic-<id>` so the operator can filter the queue."
+            "`human-inputs.json` defines each topic. Adds one "
+            "`hitl-input/<topic>` label so the operator can filter the queue."
         ),
     )
     p_request_input.add_argument("--issue", required=True)
@@ -573,9 +574,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Create a new issue. Requires a title and an initial state "
             "(--to STATE). The workflow is auto-resolved from --to via "
             "the registry (state names are unique). The new item is "
-            "created atomically with its `state:<name>` label so it never "
+            "created atomically with its `state/<name>` label so it never "
             "exists without a state. Optionally claim it for the agent in "
-            "the same step with --claim, which adds `wip:<agent-role>`."
+            "the same step with --claim, which adds `claimed/<agent-role>`."
         ),
     )
     p_create_issue.add_argument(
@@ -603,7 +604,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Atomically claim the new item for the agent's role "
-        "(adds `wip:<agent-role>` alongside the state label).",
+        "(adds `claimed/<agent-role>` alongside the state label).",
     )
     # PR-specific flags — applicable only when the resolved issue type maps to
     # the pull-request entity (e.g., type=pr). Validated at runtime, not via
@@ -627,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ticket id(s) referenced by this issue. For PR types: parents the "
         "PR addresses, rendered as 'Refs #N' in the message footer. For "
         "states declaring `collects`: contributor ids to gather into this "
-        "collector (each contributor gets a `collected-by:<new>` label — the "
+        "collector (each contributor gets a `collected-by/<new>` label — the "
         "sole record of the relationship).",
     )
     p_create_issue.add_argument(
@@ -663,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
             "collector must reside on a state declaring `collects`; each "
             "contributor must be in one of `collects.from_states` on the "
             "source process and not already collected (use --force to "
-            "override). Applies a `collected-by:<collector>` label to each "
+            "override). Applies a `collected-by/<collector>` label to each "
             "contributor — the sole record of the relationship (ADR-0003)."
         ),
     )
@@ -694,9 +695,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Show this agent's plate, computed from the workflow registry: "
             "(1) inbox — items in resting states whose `claim-role` matches "
             "the agent's role, not currently claimed by anyone; "
-            "(2) actionable wip — items with `wip:{role}` that are NOT "
+            "(2) actionable wip — items with `claimed/{role}` that are NOT "
             "blocked waiting for any HITL signal "
-            "(no `hitl:awaiting-*`, `hitl:audit-*`, or `hitl:awaiting-input`). "
+            "(no `hitl-blocked/*`, `hitl-audit/*`, or `hitl-input/*`). "
             "The role comes from --agent-role / AGENT_ROLE / the agent "
             "config's `agent-role` key; override per invocation with "
             "--agent-role to view a different role's inbox."
@@ -1524,7 +1525,7 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
         parent_state = backend.read_issue(args.issue)
         if parent_state.state is None:
             raise ConfigError(
-                f"Issue #{args.issue} has no `state:` label; cannot resolve spawn config."
+                f"Issue #{args.issue} has no `state/` label; cannot resolve spawn config."
             )
 
         registry = build_registry(
@@ -1605,7 +1606,7 @@ def _do_spawn_issue(args: argparse.Namespace) -> int:
         # Hand the resolved spawn off to the operation seam: the pure planner
         # assembles the CreationSpec, the controller's create path opens the
         # child and runs the cascade. The parent is never marked — the
-        # relationship lives solely on the child's `child-of:` label (ADR-0003).
+        # relationship lives solely on the child's `child-of/` label (ADR-0003).
         controller = Controller(
             backend=backend,
             state_machine=parent_ctx.state_machine,
@@ -1816,7 +1817,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
 
     The workflow is resolved from `--to` via the registry (state names are
     unique across the registry). If `--claim` is passed, the agent's role
-    is added as a `wip:<role>` label atomically with creation.
+    is added as a `claimed/<role>` label atomically with creation.
     """
     from workflow.config import build_registry
 
@@ -2028,14 +2029,14 @@ def _do_create_issue(args: argparse.Namespace) -> int:
 
     # 5. Dry run path: print the plan, don't touch the backend.
     if ctx["dry_run"]:
-        extras = [f"wip:{claim_role}"] if claim_role else []
+        extras = [gh_labels.claim_label(claim_role)] if claim_role else []
         if ctx["json_output"]:
             payload: dict[str, Any] = {
                 "workflow": process_name,
                 "initial_state": args.initial_state,
                 "title": args.title,
                 "type": issue_type,
-                "labels": [f"state:{args.initial_state}", *extras],
+                "labels": [gh_labels.state_label(args.initial_state), *extras],
                 "body_chars": len(body),
                 "dry_run": True,
             }
@@ -2136,7 +2137,7 @@ def _do_create_issue(args: argparse.Namespace) -> int:
                 )
 
     # Resolve issue-type encoding (native vs label) for non-PR creates. PRs
-    # carry no native type and no `type:` label (the entity kind is the type).
+    # carry no native type and no `type/` label (the entity kind is the type).
     backend_issue_type: str | None = None
     type_extra_labels: list[str] = []
     if not is_pr and issue_type is not None:
@@ -2145,16 +2146,16 @@ def _do_create_issue(args: argparse.Namespace) -> int:
             if encoding == "native":
                 backend_issue_type = type_entry.github_issue_type
             else:
-                type_extra_labels = [f"type:{issue_type}"]
+                type_extra_labels = [gh_labels.type_label(issue_type)]
         elif encoding == "label":
-            # Fall back to `type:<id>` even without a directory entry.
-            type_extra_labels = [f"type:{issue_type}"]
+            # Fall back to `type/<id>` even without a directory entry.
+            type_extra_labels = [gh_labels.type_label(issue_type)]
 
     # Create through the operation seam: the pure planner assembles the
     # CreationSpec; the controller's create path opens the issue/PR and stamps
-    # any gathered contributors `collected-by:<new-id>` atomically (ADR-0003).
+    # any gathered contributors `collected-by/<new-id>` atomically (ADR-0003).
     # Claiming, if requested, runs below as a second operation so the state
-    # machine moves resting → working with proper wip:/last-state: markers.
+    # machine moves resting → working with proper claimed/ + last-state/ markers.
     create_controller = Controller(
         backend=backend,
         state_machine=process.state_machine,
@@ -2270,7 +2271,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
     Validates that the collector resides on a state declaring `collects`,
     that each contributor lives on one of the declared `from_states`, and
     (unless --force) is not already collected. Marks each contributor with a
-    single `collected-by:<collector>` label (ADR-0003).
+    single `collected-by/<collector>` label (ADR-0003).
     """
     from workflow.backends.base import IssueFilters
 
@@ -2292,7 +2293,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
         return _handle_workflow_error(exc)
     if collector_state_obj.state is None:
         return _handle_workflow_error(
-            ConfigError(f"Issue #{args.issue} has no `state:` label; cannot resolve `collects`.")
+            ConfigError(f"Issue #{args.issue} has no `state/` label; cannot resolve `collects`.")
         )
     collector_state_def = collector_ctx.state_machine.states.get(collector_state_obj.state)
     collects = collector_state_def.collects if collector_state_def is not None else None
@@ -2360,7 +2361,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
                 print(f"  #{cid}")
         return 0
 
-    # 4. Mark each contributor `collected-by:<collector>` through the operation
+    # 4. Mark each contributor `collected-by/<collector>` through the operation
     #    seam: the pure planner validates eligibility, the controller applies the
     #    marker. The collector is never touched (ADR-0003). Step 2 already
     #    validated the whole set, so this loop is all-or-nothing in practice.
@@ -2379,7 +2380,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
             marked.append(cid)
         except WorkflowError as exc:
             # Partial application: contributors are marked one at a time, so the
-            # ones before this failure already carry `collected-by:<collector>`.
+            # ones before this failure already carry `collected-by/<collector>`.
             # The marker write is idempotent, so re-running the same command is
             # the repair — name what landed and what didn't so the operator
             # isn't left guessing (#26).
@@ -2387,7 +2388,7 @@ def _do_collect_into(args: argparse.Namespace) -> int:
             print(
                 f"Failed to collect contributor #{cid} into #{args.issue} — {exc}\n"
                 f"Partially applied: {len(marked)} of {len(contributor_ids)} contributor(s) "
-                f"already marked collected-by:{args.issue} ({', '.join('#' + m for m in marked) or 'none'}). "
+                f"already marked collected-by/{args.issue} ({', '.join('#' + m for m in marked) or 'none'}). "
                 f"Not yet marked: {', '.join('#' + r for r in remaining)}. "
                 f"Re-run the same `collect-into` to finish — the marker is idempotent.",
                 file=sys.stderr,
@@ -3376,29 +3377,27 @@ def _do_init_agent(args: argparse.Namespace) -> int:
 def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
     """Compute the full set of label names the framework requires for a repo.
 
-    Sources, aggregated across every workflow in the registry:
+    Sources, aggregated across every workflow in the registry (ADR-0005
+    label grammar — `<kebab-classifier>/<value>`):
 
-    - `state:<name>` for every state in every workflow.
-    - `wip:<role_id>` for every role in roles.json.
-    - `last-state:<state>` for every resting state (origin marker).
-    - The five HITL singleton labels (`hitl:reviewing`, `hitl:auditing`,
-      `hitl:advising`, `hitl:awaiting-input`, `hitl:resolved`).
-    - `hitl:awaiting-<gate>` / `hitl:audit-<gate>` per catalogued HumanGate.
-    - `type:<type_id>` per declared issue type WHEN encoding is `"label"`.
+    - `state/<name>` for every state in every workflow.
+    - `claimed/<role_id>` for every role in roles.json.
+    - `last-state/<state>` for every resting state (origin marker).
+    - `hitl-claim/<reviewing|auditing|advising>` (the human-claim singletons).
+    - `hitl-signal/<approved|rejected|checked|revoked|resolved>` (the bounded
+      transient signal outcomes — now pre-provisioned since they no longer
+      carry a per-gate suffix).
+    - `hitl-blocked/<gate>` / `hitl-audit/<gate>` per catalogued HumanGate.
+    - `type/<type_id>` per declared issue type WHEN encoding is `"label"`.
 
-    Signal markers (`hitl:approved-*`, `hitl:rejected-*`, etc.) are
-    transient audit-trace labels created on first use; they aren't
-    pre-provisioned here.
+    `hitl-input/<topic>` is NOT pre-provisioned: the topic is open-ended, so
+    those labels are created lazily on first use.
     """
     from workflow.config import build_registry
     from workflow.core.model.human_gate import HumanGateLevel
 
-    labels: set[str] = {
-        "hitl:reviewing",
-        "hitl:auditing",
-        "hitl:advising",
-        "hitl:awaiting-input",
-        "hitl:resolved",
+    labels: set[str] = {gh_labels.hitl_claim_label(v) for v in gh_labels.CLAIM_VALUES} | {
+        gh_labels.hitl_signal_label(v) for v in gh_labels.SIGNAL_VALUES
     }
 
     registry = build_registry(
@@ -3421,27 +3420,27 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
             continue
 
         for state_name, state in wf_context.state_machine.states.items():
-            labels.add(f"state:{state_name}")
+            labels.add(gh_labels.state_label(state_name))
             # Closing states are resting but are sinks — a closed issue has no
-            # origin to return to, so they get no `last-state:` marker.
+            # origin to return to, so they get no `last-state/` marker.
             if state.state_class.value == "resting" and not state.is_closing:
-                labels.add(f"last-state:{state_name}")
+                labels.add(gh_labels.last_state_label(state_name))
 
         if wf_context.catalog:
             for gate in wf_context.catalog.entries.values():
                 if HumanGateLevel.BLOCK in gate.allowed_levels:
-                    labels.add(f"hitl:awaiting-{gate.gate_name}")
+                    labels.add(gh_labels.hitl_blocked_label(gate.gate_name))
                 if HumanGateLevel.AUDIT in gate.allowed_levels:
-                    labels.add(f"hitl:audit-{gate.gate_name}")
+                    labels.add(gh_labels.hitl_audit_label(gate.gate_name))
 
         if wf_context.role_directory:
             for role_id in wf_context.role_directory.roles:
-                labels.add(f"wip:{role_id}")
+                labels.add(gh_labels.claim_label(role_id))
 
-        # When encoding is `"label"`, type is conveyed via `type:<id>` labels.
+        # When encoding is `"label"`, type is conveyed via `type/<id>` labels.
         if encoding == "label" and wf_context.issue_type_directory:
             for type_id in wf_context.issue_type_directory.types:
-                labels.add(f"type:{type_id}")
+                labels.add(gh_labels.type_label(type_id))
 
     return labels
 

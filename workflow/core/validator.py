@@ -1712,7 +1712,7 @@ def _check_gates_have_unique_source(
     Multiple transitions can share a gate name only when they're verdict-style
     (same source, different destinations — the human picks the destination
     on approve). Sharing a gate across different source states is forbidden:
-    the gate's `hitl:awaiting-<gate>` label would be ambiguous about which
+    the gate's `hitl-blocked/<gate>` label would be ambiguous about which
     transition fires.
     """
     findings: list[ValidationFinding] = []
