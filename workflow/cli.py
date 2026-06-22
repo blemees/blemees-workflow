@@ -3881,6 +3881,15 @@ def _provision_native(ctx: dict, cache: Any) -> int:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
         return _handle_workflow_error(exc)
+    # Native provisioning uses GitHub-specific Issue Field / Issue Type calls
+    # that aren't on the tracker-agnostic `TrackerBackend` protocol, so narrow
+    # to the concrete backend (and fail clearly on any other tracker).
+    if not isinstance(backend, GitHubBackend):
+        print(
+            "Native provisioning is only supported on the GitHub backend.",
+            file=sys.stderr,
+        )
+        return 1
     host, owner = _host_and_owner(backend)
 
     try:
@@ -3894,12 +3903,12 @@ def _provision_native(ctx: dict, cache: Any) -> int:
     # a later cache-pin to native is backed by a confirmed-capable org, even
     # when the registry happens to declare no issue types.
     try:
-        existing_type_list = backend.list_issue_types(owner)
+        existing_types_full = backend.fetch_issue_types(owner)
         existing_field_list = backend.list_issue_fields(owner)
     except WorkflowError as exc:
         return _handle_workflow_error(exc)
-    if existing_type_list is None or existing_field_list is None:
-        missing = "Issue Types" if existing_type_list is None else "Issue Fields"
+    if existing_types_full is None or existing_field_list is None:
+        missing = "Issue Types" if existing_types_full is None else "Issue Fields"
         print(
             f"Cannot provision {host}/{owner}: native {missing} are unavailable "
             f"(feature not enabled, or the token lacks org permission). "
@@ -3907,7 +3916,10 @@ def _provision_native(ctx: dict, cache: Any) -> int:
             file=sys.stderr,
         )
         return 1
-    existing_types = set(existing_type_list)
+    # Keyed case-insensitively — GitHub enforces case-insensitive type-name
+    # uniqueness, so a desired "Config Change" reconciles an existing
+    # "Config change" rather than creating a duplicate.
+    existing_types_by_lower = {(t.get("name") or "").lower(): t for t in existing_types_full}
     existing_fields = set(existing_field_list)
 
     # Single-selects need ≥1 option; an empty option set can't be provisioned.
@@ -3915,7 +3927,17 @@ def _provision_native(ctx: dict, cache: Any) -> int:
     empty = [f["name"] for f in fields if f["data_type"] == "SINGLE_SELECT" and not f["options"]]
 
     if ctx["dry_run"]:
-        types_to_create = [t[0] for t in issue_types if t[0] not in existing_types]
+        types_to_create = [t[0] for t in issue_types if t[0].lower() not in existing_types_by_lower]
+        # Existing types whose name casing or description has drifted.
+        types_to_update = [
+            t[0]
+            for t in issue_types
+            if t[0].lower() in existing_types_by_lower
+            and (
+                (existing_types_by_lower[t[0].lower()].get("name") or "") != t[0]
+                or (existing_types_by_lower[t[0].lower()].get("description") or "") != (t[1] or "")
+            )
+        ]
         fields_to_create = [f["name"] for f in creatable if f["name"] not in existing_fields]
         if ctx["json_output"]:
             print(
@@ -3923,6 +3945,7 @@ def _provision_native(ctx: dict, cache: Any) -> int:
                     {
                         "org": owner,
                         "issue_types_to_create": types_to_create,
+                        "issue_types_to_update": types_to_update,
                         "fields_to_create": fields_to_create,
                         "skipped_empty_fields": empty,
                         "dry_run": True,
@@ -3931,22 +3954,27 @@ def _provision_native(ctx: dict, cache: Any) -> int:
                 )
             )
         else:
-            print(f"[dry-run] native provisioning for {host}/{owner} (nothing created):")
+            print(f"[dry-run] native provisioning for {host}/{owner} (nothing changed):")
             print(f"  issue types to create: {types_to_create or '(none)'}")
+            print(f"  issue type descriptions to update: {types_to_update or '(none)'}")
             print(f"  fields to create:      {fields_to_create or '(none)'}")
             if empty:
                 print(f"  skipped (no options):  {empty}")
         return 0
 
     created_types: list[str] = []
+    updated_types: list[str] = []
     created_fields: list[str] = []
     skipped: list[str] = []
     try:
         for name, description, color in issue_types:
-            if backend.ensure_issue_type(
+            status = backend.ensure_issue_type(
                 owner, name=name, description=description or "", color=color
-            ):
+            )
+            if status == "created":
                 created_types.append(name)
+            elif status == "updated":
+                updated_types.append(name)
             else:
                 skipped.append(f"type:{name}")
         for spec in creatable:
@@ -3969,6 +3997,7 @@ def _provision_native(ctx: dict, cache: Any) -> int:
                 {
                     "org": owner,
                     "created_issue_types": created_types,
+                    "updated_issue_types": updated_types,
                     "created_fields": created_fields,
                     "skipped": skipped,
                     "skipped_empty_fields": empty,
@@ -3979,8 +4008,9 @@ def _provision_native(ctx: dict, cache: Any) -> int:
         )
     else:
         print(f"Provisioned native metadata for {host}/{owner}:")
-        print(f"  issue types created: {created_types or '(none, all present)'}")
-        print(f"  fields created:      {created_fields or '(none, all present)'}")
+        print(f"  issue types created:     {created_types or '(none, all present)'}")
+        print(f"  issue type descriptions updated: {updated_types or '(none)'}")
+        print(f"  fields created:          {created_fields or '(none, all present)'}")
         if empty:
             print(f"  skipped (no options): {empty}")
         print("  tier pinned to: native")

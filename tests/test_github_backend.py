@@ -1768,11 +1768,69 @@ def test_ensure_issue_type_sends_is_enabled_as_typed_boolean() -> None:
         "workflow.backends.github.subprocess.run",
         side_effect=_fake_run_factory(responses),
     ) as patched:
-        created = backend.ensure_issue_type("blemees", name="Bug", description="d", color="red")
-    assert created is True
+        status = backend.ensure_issue_type("blemees", name="Bug", description="d", color="red")
+    assert status == "created"
     create_cmd = patched.call_args_list[-1].args[0]
     assert "-F" in create_cmd
     assert create_cmd[create_cmd.index("-F") + 1] == "is_enabled=true"
     # And it must NOT be passed as a raw -f string field.
     raw_values = [create_cmd[i + 1] for i, x in enumerate(create_cmd) if x == "-f"]
     assert "is_enabled=true" not in raw_values
+
+
+def test_ensure_issue_type_updates_drifted_description() -> None:
+    """An existing type whose description differs is reconciled via updateIssueType."""
+    backend = GitHubBackend(repo="blemees/repo")
+    existing = [{"name": "Bug", "node_id": "IT_abc", "description": "old desc"}]
+    responses = [
+        _proc(stdout=json.dumps(existing)),  # fetch_issue_types
+        _proc(stdout=json.dumps({"data": {"updateIssueType": {"issueType": {"id": "IT_abc"}}}})),
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        status = backend.ensure_issue_type("blemees", name="Bug", description="new desc")
+    assert status == "updated"
+    body = json.loads(patched.call_args_list[-1].kwargs["input"])
+    assert body["variables"]["i"] == {
+        "issueTypeId": "IT_abc",
+        "name": "Bug",
+        "description": "new desc",
+    }
+
+
+def test_ensure_issue_type_reconciles_name_casing() -> None:
+    """An existing 'Config change' is renamed in place to a desired
+    'Config Change' (case-insensitive match), not recreated."""
+    backend = GitHubBackend(repo="blemees/repo")
+    existing = [{"name": "Config change", "node_id": "IT_cc", "description": "d"}]
+    responses = [
+        _proc(stdout=json.dumps(existing)),  # fetch_issue_types
+        _proc(stdout=json.dumps({"data": {"updateIssueType": {"issueType": {"id": "IT_cc"}}}})),
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        status = backend.ensure_issue_type("blemees", name="Config Change", description="d")
+    assert status == "updated"
+    # Two calls only: the fetch, then the updateIssueType mutation — no create POST.
+    assert len(patched.call_args_list) == 2
+    update_cmd = patched.call_args_list[-1].args[0]
+    assert "graphql" in update_cmd
+    body = json.loads(patched.call_args_list[-1].kwargs["input"])
+    assert body["variables"]["i"]["name"] == "Config Change"
+
+
+def test_ensure_issue_type_unchanged_when_description_matches() -> None:
+    backend = GitHubBackend(repo="blemees/repo")
+    existing = [{"name": "Bug", "node_id": "IT_abc", "description": "same"}]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory([_proc(stdout=json.dumps(existing))]),
+    ) as patched:
+        status = backend.ensure_issue_type("blemees", name="Bug", description="same")
+    assert status == "unchanged"
+    # Only the fetch ran — no create, no update mutation.
+    assert len(patched.call_args_list) == 1

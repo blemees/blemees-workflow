@@ -1016,21 +1016,18 @@ class GitHubBackend:
 
         return add, remove
 
-    def list_issue_types(self, org: str) -> list[str] | None:
-        """Read org-level Issue Types via `gh api orgs/{org}/issue-types`.
+    def fetch_issue_types(self, org: str) -> list[dict] | None:
+        """Read org-level Issue Types as raw objects (id, node_id, name,
+        description, color), or `None` on 403/404/error.
 
-        Returns:
-          - `list[str]` (names) on success — empty list means feature on
-            but no types defined.
-          - `None` on 403 (no permission), 404 (feature absent), or any
-            backend error. The CLI treats `None` as "encode as labels".
+        `list_issue_types` is the names-only view of this; provisioning uses the
+        full objects to reconcile descriptions and to get each type's node id.
 
         Side effect: none — read-only.
         """
         try:
             # --paginate follows Link headers so orgs with >30 Issue Types
-            # aren't truncated (which would break ensure_issue_type's
-            # idempotence check) (#27). gh merges array pages into one array.
+            # aren't truncated (which would break the idempotence check) (#27).
             output = self._gh("api", f"orgs/{org}/issue-types", "--paginate", check=False)
         except BackendError:
             return None
@@ -1046,11 +1043,16 @@ class GitHubBackend:
             return None
         if not isinstance(data, list):
             return None
-        names: list[str] = []
-        for entry in data:
-            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
-                names.append(entry["name"])
-        return names
+        return [t for t in data if isinstance(t, dict) and isinstance(t.get("name"), str)]
+
+    def list_issue_types(self, org: str) -> list[str] | None:
+        """Read org-level Issue Type names, or `None` on 403/404/error.
+
+        The CLI treats `None` as "encode as labels". Empty list means the
+        feature is on but no types are defined.
+        """
+        types = self.fetch_issue_types(org)
+        return None if types is None else [t["name"] for t in types]
 
     def ensure_issue_type(
         self,
@@ -1058,43 +1060,62 @@ class GitHubBackend:
         name: str,
         description: str,
         color: str | None = None,
-    ) -> bool:
-        """Create the GitHub Issue Type at the org if missing.
+    ) -> str:
+        """Create or reconcile the GitHub Issue Type at the org.
 
-        Idempotent via a pre-check: list existing types, skip if present.
-        Otherwise calls `gh api orgs/{org}/issue-types -f name=...`.
-        Raises `BackendError` if the API call fails — the caller's
-        `setup-github --setup-org` path expects loud failures.
+        Returns `"created"` (newly made), `"updated"` (existed but the
+        description differed — reconciled to match), or `"unchanged"`. Raises
+        `BackendError` if the org's types can't be listed (feature/permission)
+        — the provisioning path expects loud failures.
+
+        Match is **case-insensitive** — GitHub enforces case-insensitive name
+        uniqueness, so a type stored as "Config change" is reconciled (renamed)
+        to a desired "Config Change" rather than colliding on a create. The
+        reconcile sets both the name (fixes casing) and the description.
+        Description length is bounded at the source (the issue-types.json parser
+        caps it at 256), so it's never truncated here.
         """
-        existing = self.list_issue_types(org)
+        existing = self.fetch_issue_types(org)
         if existing is None:
             raise BackendError(
                 f"Cannot list issue types for org {org!r}; feature may not "
                 f"be enabled or you may lack permission."
             )
-        if name in existing:
-            return False
-        # The org issue-types API caps the description at 256 chars. That limit
-        # is enforced at the source (the issue-types.json parser), so a long
-        # description never reaches here — we don't truncate.
-        # `is_enabled` is a JSON boolean — use `-F` (typed field) so gh sends
-        # `true`, not the string "true" (the API rejects the latter with HTTP
-        # 422). name/description/color stay `-f` (raw strings) so a description
-        # that happens to look like a number/bool isn't reinterpreted.
-        args = [
-            "api",
-            f"orgs/{org}/issue-types",
-            "-f",
-            f"name={name}",
-            "-f",
-            f"description={description}",
-            "-F",
-            "is_enabled=true",
-        ]
-        if color:
-            args += ["-f", f"color={color}"]
-        self._gh(*args)
-        return True
+        current = next((t for t in existing if (t.get("name") or "").lower() == name.lower()), None)
+        if current is None:
+            # Create. `is_enabled` is a JSON boolean — use `-F` (typed field) so
+            # gh sends `true`, not the string "true" (the API rejects the latter
+            # with HTTP 422). name/description/color stay `-f` raw strings.
+            args = [
+                "api",
+                f"orgs/{org}/issue-types",
+                "-f",
+                f"name={name}",
+                "-f",
+                f"description={description}",
+                "-F",
+                "is_enabled=true",
+            ]
+            if color:
+                args += ["-f", f"color={color}"]
+            self._gh(*args)
+            return "created"
+        # Reconcile an existing type when its name casing or description has
+        # drifted from the workflow definition, via the `updateIssueType`
+        # GraphQL mutation (keyed on the type's node id). Setting `name` fixes
+        # casing in place (e.g. "Config change" → "Config Change").
+        if (current.get("name") or "") != name or (current.get("description") or "") != (
+            description or ""
+        ):
+            node_id = current.get("node_id")
+            if not node_id:
+                raise BackendError(f"Issue type {name!r} has no node id to update.")
+            self._graphql(
+                "mutation($i:UpdateIssueTypeInput!){updateIssueType(input:$i){issueType{id}}}",
+                {"i": {"issueTypeId": node_id, "name": name, "description": description}},
+            )
+            return "updated"
+        return "unchanged"
 
     def list_labels(self) -> list[str]:
         """Return every label currently defined on the repo.

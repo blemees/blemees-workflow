@@ -50,23 +50,23 @@ Live production incident. Opened by the IC at declaration; runs through incident
 
 **GitHub Issue Type**: `Incident` · **Color**: `red`
 
-## `incident-mitigation` — Incident mitigation
+## `incident-mitigation` — Mitigation
 
 A mitigation work item spawned from an incident. The responder plans in `plan_mitigation`, then `execute_mitigation` dispatches sub-mitigations (hotfix/config-change/data-change) as children. Closes at `mitigated` when all children reach a closing state.
 
-**GitHub Issue Type**: `Incident mitigation` · **Color**: `orange`
+**GitHub Issue Type**: `Mitigation` · **Color**: `orange`
 
-## `config-change` — Config change
+## `config-change` — Config Change
 
 A runtime configuration change for an incident mitigation: feature-flag toggle, kill switch, config-value tweak, rate-limit adjustment. No code change, no PR. Closes at `config_applied`, cascading the parent mitigation toward `mitigated`.
 
-**GitHub Issue Type**: `Config change` · **Color**: `yellow`
+**GitHub Issue Type**: `Config Change` · **Color**: `yellow`
 
-## `data-change` — Data change
+## `data-change` — Data Change
 
 A data mutation for an incident mitigation: corruption repair, manual update, backfill, event replay. Always preceded by a backup (`creating_backup` → `backup_ready`). Closes at `data_change_applied`, cascading the parent mitigation toward `mitigated`.
 
-**GitHub Issue Type**: `Data change` · **Color**: `purple`
+**GitHub Issue Type**: `Data Change` · **Color**: `purple`
 
 ## `postmortem` — Postmortem
 
