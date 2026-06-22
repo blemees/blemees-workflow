@@ -127,3 +127,17 @@ def test_pull_request_with_github_issue_type_rejected() -> None:
     }
     with pytest.raises(ParseError, match="pull_request"):
         parse_issue_type_directory(json.dumps(bad))
+
+
+def test_rejects_description_over_256_chars() -> None:
+    """GitHub's org issue-types API caps the description at 256 chars; the parser
+    enforces it at the source so it can't be silently truncated at provision."""
+    data = {"types": {"bug": {"name": "Bug", "description": "x" * 257}}}
+    with pytest.raises(ParseError, match="256 characters"):
+        parse_issue_type_directory(json.dumps(data))
+
+
+def test_accepts_description_at_256_chars() -> None:
+    data = {"types": {"bug": {"name": "Bug", "description": "x" * 256}}}
+    directory = parse_issue_type_directory(json.dumps(data))
+    assert len(directory.get("bug").description) == 256
