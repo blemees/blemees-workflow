@@ -1074,6 +1074,10 @@ class GitHubBackend:
             )
         if name in existing:
             return False
+        # `is_enabled` is a JSON boolean — use `-F` (typed field) so gh sends
+        # `true`, not the string "true" (the API rejects the latter with HTTP
+        # 422). name/description/color stay `-f` (raw strings) so a description
+        # that happens to look like a number/bool isn't reinterpreted.
         args = [
             "api",
             f"orgs/{org}/issue-types",
@@ -1081,7 +1085,7 @@ class GitHubBackend:
             f"name={name}",
             "-f",
             f"description={description}",
-            "-f",
+            "-F",
             "is_enabled=true",
         ]
         if color:
