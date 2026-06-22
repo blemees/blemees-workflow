@@ -1412,13 +1412,25 @@ class GitHubBackend:
             )
         return {"fieldId": fm["id"], "textValue": value}
 
+    @staticmethod
+    def _issue_number(issue_id: str) -> int:
+        """Parse an issue id to its integer number, as a clean BackendError.
+
+        Guards the native GraphQL path against a malformed `child-of/<value>`
+        (or any non-numeric id) surfacing as a raw `ValueError`.
+        """
+        try:
+            return int(issue_id)
+        except (TypeError, ValueError) as exc:
+            raise BackendError(f"Expected a numeric issue id, got {issue_id!r}.") from exc
+
     def _issue_node_id(self, issue_id: str) -> str:
         """Resolve an issue number to its GraphQL node id (for sub-issue links)."""
         owner, _, name = self.repo.partition("/")
         data = self._graphql(
             "query($o:String!,$r:String!,$n:Int!)"
             "{repository(owner:$o,name:$r){issue(number:$n){id}}}",
-            {"o": owner, "r": name, "n": int(issue_id)},
+            {"o": owner, "r": name, "n": self._issue_number(issue_id)},
         )
         node_id = ((data.get("repository") or {}).get("issue") or {}).get("id")
         if not node_id:
@@ -1441,7 +1453,7 @@ class GitHubBackend:
             "... on IssueFieldTextValue{value field{... on IssueFieldText{name}}}"
             "}}}}}"
         )
-        data = self._graphql(query, {"o": owner, "r": name, "n": int(issue_id)})
+        data = self._graphql(query, {"o": owner, "r": name, "n": self._issue_number(issue_id)})
         issue = ((data.get("repository") or {}).get("issue")) or {}
         node_id = issue.get("id")
         if not node_id:

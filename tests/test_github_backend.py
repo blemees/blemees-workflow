@@ -1747,3 +1747,10 @@ def test_native_read_maps_parent_and_collected_by() -> None:
     assert state.state == "refining"
     assert state.child_of == "64"
     assert state.collected_by == "100"
+
+
+def test_native_read_rejects_non_numeric_issue_id() -> None:
+    """A malformed issue id surfaces a BackendError, not a raw ValueError (#74 review)."""
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+    with pytest.raises(BackendError, match="numeric issue id"):
+        backend.read_issue("not-a-number")
