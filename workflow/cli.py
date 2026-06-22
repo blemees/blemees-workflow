@@ -1056,7 +1056,17 @@ def _build_backend(ctx_obj: dict) -> TrackerBackend:
             "WORKFLOW_REPO, or run from inside a git checkout with an "
             "origin remote pointing at GitHub / GHES."
         )
-    return GitHubBackend(repo=repo, host=host)
+    backend = GitHubBackend(repo=repo, host=host)
+    # Tag the backend with the capability tier from the cache (no probe — the
+    # tier is established by `capabilities --provision` / `--refresh` and read
+    # here so operations route to the native vs label path; ADR-0005). An
+    # unprobed org has no entry and stays on the label tier.
+    from workflow.core.capability_cache import CapabilityCache
+
+    entry = CapabilityCache.load().get(*_host_and_owner(backend))
+    if entry is not None:
+        backend.tier = entry.tier
+    return backend
 
 
 def _build_context(
@@ -3625,6 +3635,7 @@ def _resolve_tier(
     entry = cache.get(host, owner)
     if entry is not None and not force_probe:
         if entry.manual or not entry.is_expired():
+            _tag_backend_tier(backend, entry.tier)
             return entry.tier
 
     types = backend.list_issue_types(owner)
@@ -3632,7 +3643,16 @@ def _resolve_tier(
     if persist:
         cache.set(host, owner, tier, manual=False)
         cache.save()
+    _tag_backend_tier(backend, tier)
     return tier
+
+
+def _tag_backend_tier(backend: Any, tier: str) -> None:
+    """Set the resolved tier on the backend so its operations route correctly."""
+    try:
+        backend.tier = tier
+    except AttributeError:  # a backend without a tier attribute
+        pass
 
 
 def _host_and_owner(backend: Any) -> tuple[str, str]:

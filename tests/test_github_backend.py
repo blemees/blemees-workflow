@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 
-from workflow.backends.base import IssueFilters, MarkerChange
+from workflow.backends.base import IssueFilters, IssueState, MarkerChange
 from workflow.backends.github import GitHubBackend
 from workflow.errors import BackendError, OperationError
 
@@ -1478,3 +1478,166 @@ def test_list_issue_fields_paginates() -> None:
     # Second request carried the cursor.
     body2 = json.loads(patched.call_args_list[1].kwargs["input"])
     assert body2["variables"]["after"] == "C1"
+
+
+# --------------------------------------------------------------------------- #
+# Native tier: read/write marker values as Issue Fields (#72/#73)
+
+
+def _native_backend() -> GitHubBackend:
+    """A native-tier backend with field metadata pre-seeded (no load query)."""
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+    backend._field_meta = {
+        "Workflow State": {"id": "FS", "options": {"raw": "o_raw", "refining": "o_ref"}},
+        "Last State": {"id": "LS", "options": {"raw": "o_lraw"}},
+        "Agent": {"id": "AG", "options": {"developer": "o_dev", "product-manager": "o_pm"}},
+        "HITL Blocked": {"id": "HB", "options": {"ready_for_dev": "o_rfd"}},
+        "HITL Audit": {"id": "HA", "options": {"ship": "o_ship"}},
+        "HITL Input": {"id": "HI", "options": {"scope": "o_scope"}},
+        "HITL Claim": {
+            "id": "HC",
+            "options": {"reviewing": "o_rev", "auditing": "o_aud", "advising": "o_adv"},
+        },
+        "HITL Signal": {"id": "HG", "options": {"approved": "o_app", "resolved": "o_res"}},
+    }
+    return backend
+
+
+def test_native_marker_change_to_field_ops_sets_and_clears() -> None:
+    backend = _native_backend()
+    ops = backend._marker_change_to_field_ops(
+        MarkerChange(set_state="refining", set_agent_claim="developer")
+    )
+    assert {"fieldId": "FS", "singleSelectOptionId": "o_ref"} in ops
+    assert {"fieldId": "AG", "singleSelectOptionId": "o_dev"} in ops
+
+    # Clears use the field's delete op.
+    assert backend._marker_change_to_field_ops(MarkerChange(clear_agent_claim=True)) == [
+        {"fieldId": "AG", "delete": True}
+    ]
+
+
+def test_native_marker_change_claim_and_signal() -> None:
+    backend = _native_backend()
+    # Reviewing singleton → HITL Claim.
+    assert backend._marker_change_to_field_ops(MarkerChange(set_reviewing=True)) == [
+        {"fieldId": "HC", "singleSelectOptionId": "o_rev"}
+    ]
+    # respond: clears advising + input, records resolved signal.
+    ops = backend._marker_change_to_field_ops(
+        MarkerChange(set_advising=False, clear_human_input=True, record_response=True)
+    )
+    assert {"fieldId": "HC", "delete": True} in ops
+    assert {"fieldId": "HI", "delete": True} in ops
+    assert {"fieldId": "HG", "singleSelectOptionId": "o_res"} in ops
+
+
+def test_native_single_select_errors_are_clear() -> None:
+    backend = _native_backend()
+    with pytest.raises(BackendError, match="not provisioned"):
+        backend._single_select_op("Nonexistent Field", "x")
+    with pytest.raises(BackendError, match="no option"):
+        backend._single_select_op("Workflow State", "unknown_state")
+
+
+def test_native_apply_marker_change_sets_field_value() -> None:
+    backend = _native_backend()
+    with (
+        mock.patch.object(
+            backend,
+            "_read_native",
+            return_value=("ISSUE_NODE", IssueState(issue_id="1", state="raw", agent_claim=None)),
+        ),
+        mock.patch.object(backend, "_graphql") as gql,
+    ):
+        backend.apply_marker_change("1", MarkerChange(set_state="refining"))
+    args, kwargs = gql.call_args
+    assert "setIssueFieldValue" in args[0]
+    var_input = args[1]["input"]
+    assert var_input["issueId"] == "ISSUE_NODE"
+    assert var_input["issueFields"] == [{"fieldId": "FS", "singleSelectOptionId": "o_ref"}]
+
+
+def test_native_read_issue_maps_fields_to_state() -> None:
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+    payload = {
+        "repository": {
+            "issue": {
+                "id": "ISSUE_NODE",
+                "issueType": {"name": "Bug"},
+                "issueFieldValues": {
+                    "nodes": [
+                        {
+                            "__typename": "IssueFieldSingleSelectValue",
+                            "name": "refining",
+                            "field": {"name": "Workflow State"},
+                        },
+                        {
+                            "__typename": "IssueFieldSingleSelectValue",
+                            "name": "developer",
+                            "field": {"name": "Agent"},
+                        },
+                        {
+                            "__typename": "IssueFieldSingleSelectValue",
+                            "name": "reviewing",
+                            "field": {"name": "HITL Claim"},
+                        },
+                    ]
+                },
+            }
+        }
+    }
+    with mock.patch.object(backend, "_graphql", return_value=payload):
+        state = backend.read_issue("1")
+    assert state.state == "refining"
+    assert state.agent_claim == "developer"
+    assert state.native_issue_type == "Bug"
+    assert state.reviewing is True and state.auditing is False
+
+
+def test_native_create_issue_sets_state_field() -> None:
+    backend = _native_backend()
+    with (
+        mock.patch.object(backend, "_create_bare_issue", return_value="7") as bare,
+        mock.patch.object(
+            backend,
+            "_read_native",
+            return_value=("N7", IssueState(issue_id="7", state=None, agent_claim=None)),
+        ),
+        mock.patch.object(backend, "_graphql") as gql,
+    ):
+        new_id = backend.create_issue(title="T", body="B", state="raw", issue_type="Bug")
+    assert new_id == "7"
+    bare.assert_called_once()
+    set_input = gql.call_args[0][1]["input"]
+    assert {"fieldId": "FS", "singleSelectOptionId": "o_raw"} in set_input["issueFields"]
+
+
+def test_native_list_issues_builds_search_qualifiers() -> None:
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+
+    def fake_gh(*args, **kwargs):
+        # issue list / pr list --search ... --json number
+        if "list" in args:
+            if "--search" in args:
+                search = args[args.index("--search") + 1]
+                assert 'field."workflow state":"refining"' in search
+            return json.dumps([{"number": 5}]) if args[0] == "issue" else json.dumps([])
+        return "{}"
+
+    with (
+        mock.patch.object(backend, "_gh", side_effect=fake_gh),
+        mock.patch.object(
+            backend,
+            "_read_native",
+            return_value=("N5", IssueState(issue_id="5", state="refining", agent_claim=None)),
+        ),
+    ):
+        results = backend.list_issues(IssueFilters(state="refining"))
+    assert [r.issue_id for r in results] == ["5"]
+
+
+def test_native_list_issues_rejects_cohort_filters() -> None:
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+    with pytest.raises(BackendError, match="not yet implemented"):
+        backend.list_issues(IssueFilters(child_of="100"))
