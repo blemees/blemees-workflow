@@ -1300,3 +1300,181 @@ def test_claim_clean_win_no_revert() -> None:
         )
     edits = [c.args[0] for c in patched.call_args_list if "edit" in c.args[0]]
     assert not any(any(a.startswith("--remove-label=claimed/") for a in e) for e in edits)
+
+
+# --------------------------------------------------------------------------- #
+# Native GraphQL path (ADR-0005 native tier, #71)
+
+
+def test_graphql_pipes_body_and_returns_data() -> None:
+    backend = GitHubBackend(repo="owner/repo")
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        return_value=_proc(stdout=json.dumps({"data": {"x": 1}})),
+    ) as patched:
+        data = backend._graphql("query($n:String!){__type(name:$n){name}}", {"n": "Foo"})
+
+    assert data == {"x": 1}
+    _, kwargs = patched.call_args
+    # The request body is piped on stdin as {query, variables}.
+    body = json.loads(kwargs["input"])
+    assert body["variables"] == {"n": "Foo"}
+    assert "query" in body
+    cmd = patched.call_args[0][0]
+    assert cmd[:4] == ["gh", "api", "graphql", "--input"]
+
+
+def test_graphql_raises_on_errors() -> None:
+    backend = GitHubBackend(repo="owner/repo")
+    with (
+        mock.patch(
+            "workflow.backends.github.subprocess.run",
+            return_value=_proc(stdout=json.dumps({"errors": [{"message": "boom"}]})),
+        ),
+        pytest.raises(BackendError, match="GraphQL errors"),
+    ):
+        backend._graphql("query{viewer{login}}")
+
+
+def test_org_node_id() -> None:
+    backend = GitHubBackend(repo="blemees/repo")
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        return_value=_proc(stdout=json.dumps({"data": {"organization": {"id": "O_abc"}}})),
+    ):
+        assert backend.org_node_id("blemees") == "O_abc"
+
+
+def test_list_issue_fields_parses_union_nodes() -> None:
+    backend = GitHubBackend(repo="blemees/repo")
+    payload = {
+        "data": {
+            "organization": {
+                "issueFields": {
+                    "nodes": [
+                        {"__typename": "IssueFieldSingleSelect", "name": "Priority"},
+                        {"__typename": "IssueFieldText", "name": "Collected By"},
+                    ]
+                }
+            }
+        }
+    }
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        return_value=_proc(stdout=json.dumps(payload)),
+    ):
+        assert backend.list_issue_fields("blemees") == ["Priority", "Collected By"]
+
+
+def test_list_issue_fields_returns_none_on_error() -> None:
+    backend = GitHubBackend(repo="blemees/repo")
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        return_value=_proc(stdout=json.dumps({"errors": [{"message": "nope"}]})),
+    ):
+        assert backend.list_issue_fields("blemees") is None
+
+
+def test_ensure_issue_field_skips_existing() -> None:
+    backend = GitHubBackend(repo="blemees/repo")
+    existing = {"data": {"organization": {"issueFields": {"nodes": [{"name": "Agent"}]}}}}
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        return_value=_proc(stdout=json.dumps(existing)),
+    ) as patched:
+        created = backend.ensure_issue_field("blemees", "Agent", "SINGLE_SELECT", options=["dev"])
+    assert created is False
+    # Only the list query ran — no org-id lookup, no create mutation.
+    assert len(patched.call_args_list) == 1
+
+
+def test_ensure_issue_field_creates_single_select_with_options() -> None:
+    backend = GitHubBackend(repo="blemees/repo")
+    responses = [
+        _proc(stdout=json.dumps({"data": {"organization": {"issueFields": {"nodes": []}}}})),
+        _proc(stdout=json.dumps({"data": {"organization": {"id": "O_1"}}})),
+        _proc(stdout=json.dumps({"data": {"createIssueField": {"issueField": {}}}})),
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        created = backend.ensure_issue_field(
+            "blemees", "Workflow State", "SINGLE_SELECT", options=["raw", "refining"]
+        )
+    assert created is True
+    create_body = json.loads(patched.call_args_list[-1].kwargs["input"])
+    inp = create_body["variables"]["input"]
+    assert inp["ownerId"] == "O_1"
+    assert inp["name"] == "Workflow State"
+    assert inp["dataType"] == "SINGLE_SELECT"
+    assert [o["name"] for o in inp["options"]] == ["raw", "refining"]
+    assert inp["options"][0]["priority"] == 0 and inp["options"][1]["priority"] == 1
+
+
+def test_ensure_issue_field_creates_text_without_options() -> None:
+    backend = GitHubBackend(repo="blemees/repo")
+    responses = [
+        _proc(stdout=json.dumps({"data": {"organization": {"issueFields": {"nodes": []}}}})),
+        _proc(stdout=json.dumps({"data": {"organization": {"id": "O_1"}}})),
+        _proc(stdout=json.dumps({"data": {"createIssueField": {"issueField": {}}}})),
+    ]
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(responses),
+    ) as patched:
+        created = backend.ensure_issue_field("blemees", "Collected By", "TEXT")
+    assert created is True
+    inp = json.loads(patched.call_args_list[-1].kwargs["input"])["variables"]["input"]
+    assert inp["dataType"] == "TEXT"
+    assert "options" not in inp
+
+
+def test_ensure_issue_field_rejects_empty_single_select() -> None:
+    """A single-select with no options can't be created — fail fast (#71 review)."""
+    backend = GitHubBackend(repo="blemees/repo")
+    with (
+        mock.patch(
+            "workflow.backends.github.subprocess.run",
+            return_value=_proc(
+                stdout=json.dumps({"data": {"organization": {"issueFields": {"nodes": []}}}})
+            ),
+        ),
+        pytest.raises(BackendError, match="no options"),
+    ):
+        backend.ensure_issue_field("blemees", "HITL Blocked", "SINGLE_SELECT", options=[])
+
+
+def test_list_issue_fields_paginates() -> None:
+    """>100 fields: the connection is followed via pageInfo/endCursor (#71 review)."""
+    backend = GitHubBackend(repo="blemees/repo")
+    page1 = {
+        "data": {
+            "organization": {
+                "issueFields": {
+                    "pageInfo": {"hasNextPage": True, "endCursor": "C1"},
+                    "nodes": [{"__typename": "IssueFieldText", "name": "A"}],
+                }
+            }
+        }
+    }
+    page2 = {
+        "data": {
+            "organization": {
+                "issueFields": {
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    "nodes": [{"__typename": "IssueFieldText", "name": "B"}],
+                }
+            }
+        }
+    }
+    with mock.patch(
+        "workflow.backends.github.subprocess.run",
+        side_effect=_fake_run_factory(
+            [_proc(stdout=json.dumps(page1)), _proc(stdout=json.dumps(page2))]
+        ),
+    ) as patched:
+        assert backend.list_issue_fields("blemees") == ["A", "B"]
+    # Second request carried the cursor.
+    body2 = json.loads(patched.call_args_list[1].kwargs["input"])
+    assert body2["variables"]["after"] == "C1"

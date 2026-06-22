@@ -1140,6 +1140,7 @@ class GitHubBackend:
         self,
         *args: str,
         check: bool = True,
+        input_text: str | None = None,
     ) -> str:
         cmd = [self.gh_bin, *args]
         env = None
@@ -1156,6 +1157,7 @@ class GitHubBackend:
                 text=True,
                 check=False,
                 env=env,
+                input=input_text,
             )
         except FileNotFoundError as exc:
             raise BackendError(f"`{self.gh_bin}` binary not found on PATH: {exc}") from exc
@@ -1165,3 +1167,120 @@ class GitHubBackend:
                 + (proc.stderr.strip() or proc.stdout.strip() or "no output")
             )
         return proc.stdout
+
+    # ----- native GraphQL path (ADR-0005 native tier) -----
+
+    def _graphql(self, query: str, variables: dict | None = None) -> dict:
+        """Run a GraphQL query/mutation via `gh api graphql --input -`.
+
+        The request body (`{"query": ..., "variables": ...}`) is piped on stdin
+        so object/array variables (e.g. an Issue Field's option list) survive
+        without shell-escaping. Returns the `data` object; raises `BackendError`
+        on a transport failure or any GraphQL `errors`.
+        """
+        body = json.dumps({"query": query, "variables": variables or {}})
+        out = self._gh("api", "graphql", "--input", "-", input_text=body)
+        try:
+            payload = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise BackendError(f"gh returned non-JSON for GraphQL: {exc}") from exc
+        if payload.get("errors"):
+            raise BackendError(f"GraphQL errors: {payload['errors']}")
+        return payload.get("data") or {}
+
+    def org_node_id(self, org: str) -> str:
+        """Resolve an org login to its GraphQL node id (the `ownerId` for fields)."""
+        data = self._graphql("query($l:String!){organization(login:$l){id}}", {"l": org})
+        node_id = (data.get("organization") or {}).get("id")
+        if not node_id:
+            raise BackendError(f"Could not resolve org node id for {org!r}.")
+        return node_id
+
+    def list_issue_fields(self, org: str) -> list[str] | None:
+        """Read org-level Issue Field names, or None if unavailable.
+
+        Returns `list[str]` of field names on success (empty list = feature on,
+        no fields). `None` on any error (feature absent / no permission) — the
+        caller treats that like the label tier. `issueFields` is a GraphQL union,
+        so each concrete field type is selected via an inline fragment.
+        """
+        query = (
+            "query($l:String!,$after:String){organization(login:$l){"
+            "issueFields(first:100,after:$after){"
+            "pageInfo{hasNextPage endCursor} nodes{"
+            "__typename "
+            "... on IssueFieldText{name} "
+            "... on IssueFieldSingleSelect{name} "
+            "... on IssueFieldNumber{name} "
+            "... on IssueFieldDate{name} "
+            "... on IssueFieldMultiSelect{name}"
+            "}}}}"
+        )
+        names: list[str] = []
+        cursor: str | None = None
+        # Paginate the connection so orgs with >100 fields aren't truncated —
+        # a truncated list would break ensure_issue_field's idempotence check.
+        while True:
+            try:
+                data = self._graphql(query, {"l": org, "after": cursor})
+            except BackendError:
+                return None
+            conn = (data.get("organization") or {}).get("issueFields") or {}
+            for n in conn.get("nodes") or []:
+                if isinstance(n, dict) and n.get("name"):
+                    names.append(n["name"])
+            page = conn.get("pageInfo") or {}
+            if not page.get("hasNextPage"):
+                break
+            cursor = page.get("endCursor")
+            if not cursor:
+                break
+        return names
+
+    def ensure_issue_field(
+        self,
+        org: str,
+        name: str,
+        data_type: str,
+        *,
+        description: str = "",
+        options: list[str] | None = None,
+    ) -> bool:
+        """Create the org-level Issue Field if missing. Idempotent by name.
+
+        Returns True if a new field was created, False if it already existed.
+        `data_type` is an `IssueFieldDataType` (e.g. "SINGLE_SELECT", "TEXT").
+        For single-select fields, `options` is the ordered list of option names
+        (each created GRAY, priority = position). Raises `BackendError` if the
+        org's fields can't be listed (feature/permission) — the provisioning
+        path wants loud failures.
+        """
+        existing = self.list_issue_fields(org)
+        if existing is None:
+            raise BackendError(
+                f"Cannot list issue fields for org {org!r}; feature may not be "
+                f"enabled or you may lack permission."
+            )
+        if name in existing:
+            return False
+        if data_type == "SINGLE_SELECT" and not options:
+            # GitHub rejects a single-select with no options; fail fast with a
+            # clear error rather than making a request that always errors.
+            raise BackendError(f"Cannot create single-select issue field {name!r} with no options.")
+        field_input: dict = {
+            "ownerId": self.org_node_id(org),
+            "name": name,
+            "dataType": data_type,
+        }
+        if description:
+            field_input["description"] = description
+        if data_type == "SINGLE_SELECT":
+            field_input["options"] = [
+                {"name": opt, "color": "GRAY", "priority": i} for i, opt in enumerate(options or [])
+            ]
+        mutation = (
+            "mutation($input:CreateIssueFieldInput!){createIssueField(input:$input)"
+            "{issueField{__typename}}}"
+        )
+        self._graphql(mutation, {"input": field_input})
+        return True
