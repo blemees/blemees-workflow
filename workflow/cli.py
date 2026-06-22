@@ -3881,6 +3881,15 @@ def _provision_native(ctx: dict, cache: Any) -> int:
         backend = _build_backend(ctx)
     except WorkflowError as exc:
         return _handle_workflow_error(exc)
+    # Native provisioning uses GitHub-specific Issue Field / Issue Type calls
+    # that aren't on the tracker-agnostic `TrackerBackend` protocol, so narrow
+    # to the concrete backend (and fail clearly on any other tracker).
+    if not isinstance(backend, GitHubBackend):
+        print(
+            "Native provisioning is only supported on the GitHub backend.",
+            file=sys.stderr,
+        )
+        return 1
     host, owner = _host_and_owner(backend)
 
     try:
