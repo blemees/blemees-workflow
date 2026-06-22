@@ -49,7 +49,7 @@ workflow <operation> --help                  # per-operation help
 workflow --agent-role product-manager init-agent               # scaffold .workflow/ for one role
 workflow setup-github                                          # ensure org Issue Types (best-effort) + repo labels
 workflow setup-github --setup-org                              # admin path — create org Issue Types and refresh cache
-workflow capabilities                                          # show the per-(host, owner) encoding cache
+workflow capabilities                                          # show the per-(host, owner) capability-tier cache
 workflow create-issue --to raw --title "Fix login bug"               # open a new work item in an initial state
 workflow view-inbox                                            # claimable items + actionable wip for the configured role
 workflow search-issues --state ready_for_dev --awaiting-gate '*'  # arbitrary filter combinations
@@ -285,7 +285,7 @@ workflow/
     controller.py              # operation orchestration
     cascade.py                 # cross-process advance_on propagation
     inspector.py               # next-action introspection for view-issue / view-inbox
-    capability_cache.py        # per-(host, owner) encoding cache
+    capability_cache.py        # per-(host, owner) capability-tier cache
     emitter/                   # generate-docs: mermaid + invariants doc emitters
     operations/                # one module per framework operation
   backends/

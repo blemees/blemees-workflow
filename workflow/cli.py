@@ -887,10 +887,11 @@ def build_parser() -> argparse.ArgumentParser:
         "capabilities",
         help="Inspect or manage the per-(host, owner) capability cache.",
         description=(
-            "The framework caches whether each tracker org supports native "
-            "Issue Types or needs label fallback. Default behavior prints "
-            "the cache. Use --clear to wipe; --refresh to re-probe "
-            "non-manual entries; --set-encoding to pin manually."
+            "The framework caches each tracker org's capability tier — "
+            "`native` (native Issue Fields/Types/sub-issues) or `label` "
+            "(label fallback). Default behavior prints the cache. Use "
+            "--clear to wipe; --refresh to re-probe non-manual entries; "
+            "--set-tier to pin manually."
         ),
     )
     caps_action = p_caps.add_mutually_exclusive_group()
@@ -905,15 +906,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Re-probe every non-manual cache entry against its backend. "
-        "Manual entries are left alone (use --set-encoding to change them).",
+        "Manual entries are left alone (use --set-tier to change them).",
     )
     caps_action.add_argument(
+        "--set-tier",
         "--set-encoding",
-        dest="set_encoding",
+        dest="set_tier",
         choices=("native", "label"),
         default=None,
-        help="Pin the encoding for the current --repo / --host. Sets "
-        "manual=true so it survives --refresh. Use --clear to undo.",
+        help="Pin the capability tier for the current --repo / --host. Sets "
+        "manual=true so it survives --refresh. Use --clear to undo. "
+        "(--set-encoding is a deprecated alias.)",
     )
     p_caps.set_defaults(func=_do_capabilities)
 
@@ -2141,13 +2144,13 @@ def _do_create_issue(args: argparse.Namespace) -> int:
     backend_issue_type: str | None = None
     type_extra_labels: list[str] = []
     if not is_pr and issue_type is not None:
-        encoding = _resolve_encoding(ctx, backend)
+        tier = _resolve_tier(ctx, backend)
         if type_entry is not None:
-            if encoding == "native":
+            if tier == "native":
                 backend_issue_type = type_entry.github_issue_type
             else:
                 type_extra_labels = [gh_labels.type_label(issue_type)]
-        elif encoding == "label":
+        elif tier == "label":
             # Fall back to `type/<id>` even without a directory entry.
             type_extra_labels = [gh_labels.type_label(issue_type)]
 
@@ -3374,7 +3377,7 @@ def _do_init_agent(args: argparse.Namespace) -> int:
     return 0
 
 
-def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
+def _enumerate_required_labels(ctx: dict, *, tier: str) -> set[str]:
     """Compute the full set of label names the framework requires for a repo.
 
     Sources, aggregated across every workflow in the registry (ADR-0005
@@ -3388,7 +3391,7 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
       transient signal outcomes — now pre-provisioned since they no longer
       carry a per-gate suffix).
     - `hitl-blocked/<gate>` / `hitl-audit/<gate>` per catalogued HumanGate.
-    - `type/<type_id>` per declared issue type WHEN encoding is `"label"`.
+    - `type/<type_id>` per declared issue type WHEN the tier is `"label"`.
 
     `hitl-input/<topic>` is NOT pre-provisioned: the topic is open-ended, so
     those labels are created lazily on first use.
@@ -3437,8 +3440,8 @@ def _enumerate_required_labels(ctx: dict, *, encoding: str) -> set[str]:
             for role_id in wf_context.role_directory.roles:
                 labels.add(gh_labels.claim_label(role_id))
 
-        # When encoding is `"label"`, type is conveyed via `type/<id>` labels.
-        if encoding == "label" and wf_context.issue_type_directory:
+        # When the tier is `"label"`, type is conveyed via `type/<id>` labels.
+        if tier == "label" and wf_context.issue_type_directory:
             for type_id in wf_context.issue_type_directory.types:
                 labels.add(gh_labels.type_label(type_id))
 
@@ -3498,14 +3501,18 @@ def _provision_labels(
     return 1 if failed else 0
 
 
-def _resolve_encoding(
+def _resolve_tier(
     ctx: dict, backend: Any, *, force_probe: bool = False, persist: bool = True
 ) -> str:
-    """Resolve the encoding for the current (host, owner), consulting the cache.
+    """Resolve the capability tier for the current (host, owner) via the cache.
 
     - Manual entries are returned as-is (unless `force_probe=True`).
     - Non-manual, non-expired entries are returned as-is.
-    - Otherwise, probes via `backend.list_issue_types(owner)` and caches.
+    - Otherwise, probes the org and caches the result.
+
+    The probe currently keys on Issue Types availability as the native-capability
+    signal (`backend.list_issue_types(owner)`); it is hardened to also confirm
+    Issue Fields + sub-issues when the native GraphQL path lands (ADR-0005).
 
     `persist=False` skips writing the probed result back to the cache — used by
     dry-run, which may read (probe) the tracker but must not leave side effects
@@ -3520,14 +3527,14 @@ def _resolve_encoding(
     entry = cache.get(host, owner)
     if entry is not None and not force_probe:
         if entry.manual or not entry.is_expired():
-            return entry.encoding
+            return entry.tier
 
     types = backend.list_issue_types(owner)
-    encoding = "native" if (types is not None and types) else "label"
+    tier = "native" if (types is not None and types) else "label"
     if persist:
-        cache.set(host, owner, encoding, manual=False)
+        cache.set(host, owner, tier, manual=False)
         cache.save()
-    return encoding
+    return tier
 
 
 def _host_and_owner(backend: Any) -> tuple[str, str]:
@@ -3581,7 +3588,7 @@ def _do_setup_github(args: argparse.Namespace) -> int:
 
     # Dry-run gate — BEFORE any cache write or org-type creation. Both the
     # default and --setup-org paths mutate (cache.save / ensure_issue_type), so
-    # the gate sits here, ahead of them. Encoding is resolved read-only and
+    # the gate sits here, ahead of them. The tier is resolved read-only and
     # nothing is created (#26).
     if ctx["dry_run"]:
         return _report_setup_github_dry_run(ctx, backend, host, owner, type_directory)
@@ -3644,11 +3651,11 @@ def _do_setup_github(args: argparse.Namespace) -> int:
         return 0
 
     # --- Default path: best-effort org, then repo labels ---
-    # First, resolve the encoding. If cache says native (or no entry yet and
+    # First, resolve the tier. If cache says native (or no entry yet and
     # probe says native), attempt org provisioning best-effort.
-    encoding = _resolve_encoding(ctx, backend)
+    tier = _resolve_tier(ctx, backend)
 
-    if encoding == "native" and type_directory is not None and type_directory.types:
+    if tier == "native" and type_directory is not None and type_directory.types:
         existing_types = backend.list_issue_types(owner) or []
         existing_set = set(existing_types)
         org_failed = False
@@ -3672,7 +3679,7 @@ def _do_setup_github(args: argparse.Namespace) -> int:
                 org_failed = True
                 break
         if org_failed:
-            encoding = "label"
+            tier = "label"
             cache = CapabilityCache.load()
             cache.set(host, owner, "label", manual=False)
             cache.save()
@@ -3684,10 +3691,10 @@ def _do_setup_github(args: argparse.Namespace) -> int:
             cache.save()
 
     if not ctx["json_output"]:
-        print(f"Encoding for {host}/{owner}: {encoding}")
+        print(f"Tier for {host}/{owner}: {tier}")
 
     try:
-        required = _enumerate_required_labels(ctx, encoding=encoding)
+        required = _enumerate_required_labels(ctx, tier=tier)
     except WorkflowError as exc:
         return _handle_workflow_error(exc)
 
@@ -3699,14 +3706,14 @@ def _report_setup_github_dry_run(
 ) -> int:
     """Report what `setup-github` would do, with no side effects (#26).
 
-    Resolves the encoding read-only (`persist=False` — may probe the tracker
+    Resolves the tier read-only (`persist=False` — may probe the tracker
     but never writes the capability cache) and lists the org types and repo
     labels that would be provisioned, without creating any.
     """
-    encoding = _resolve_encoding(ctx, backend, persist=False)
+    tier = _resolve_tier(ctx, backend, persist=False)
 
     types_to_create: list[str] = []
-    if encoding == "native" and type_directory is not None and type_directory.types:
+    if tier == "native" and type_directory is not None and type_directory.types:
         existing = set(backend.list_issue_types(owner) or [])
         types_to_create = sorted(
             entry.github_issue_type
@@ -3715,7 +3722,7 @@ def _report_setup_github_dry_run(
         )
 
     try:
-        required = _enumerate_required_labels(ctx, encoding=encoding)
+        required = _enumerate_required_labels(ctx, tier=tier)
     except WorkflowError as exc:
         return _handle_workflow_error(exc)
 
@@ -3723,7 +3730,7 @@ def _report_setup_github_dry_run(
         print(
             _json.dumps(
                 {
-                    "encoding": encoding,
+                    "tier": tier,
                     "org_types_to_create": types_to_create,
                     "labels": sorted(required),
                     "dry_run": True,
@@ -3732,7 +3739,7 @@ def _report_setup_github_dry_run(
             )
         )
     else:
-        print(f"[dry-run] encoding for {host}/{owner}: {encoding} (cache not written)")
+        print(f"[dry-run] tier for {host}/{owner}: {tier} (cache not written)")
         if types_to_create:
             print(f"[dry-run] would create {len(types_to_create)} org issue type(s):")
             for name in types_to_create:
@@ -3756,15 +3763,15 @@ def _do_capabilities(args: argparse.Namespace) -> int:
         print("Capability cache cleared.")
         return 0
 
-    if args.set_encoding:
+    if args.set_tier:
         try:
             backend = _build_backend(ctx)
         except WorkflowError as exc:
             return _handle_workflow_error(exc)
         host, owner = _host_and_owner(backend)
-        cache.set(host, owner, args.set_encoding, manual=True)
+        cache.set(host, owner, args.set_tier, manual=True)
         cache.save()
-        print(f"Pinned {host}/{owner} encoding to {args.set_encoding!r} (manual).")
+        print(f"Pinned {host}/{owner} tier to {args.set_tier!r} (manual).")
         return 0
 
     if args.refresh:
@@ -3789,9 +3796,9 @@ def _do_capabilities(args: argparse.Namespace) -> int:
                 skipped.append(key)
                 continue
             types = backend.list_issue_types(owner)
-            encoding = "native" if (types is not None and types) else "label"
-            cache.set(host, owner, encoding, manual=False)
-            refreshed.append(f"{key} → {encoding}")
+            tier = "native" if (types is not None and types) else "label"
+            cache.set(host, owner, tier, manual=False)
+            refreshed.append(f"{key} → {tier}")
         cache.save()
         if ctx["json_output"]:
             print(_json.dumps({"refreshed": refreshed, "skipped": skipped}, indent=2))
@@ -3807,7 +3814,7 @@ def _do_capabilities(args: argparse.Namespace) -> int:
             _json.dumps(
                 {
                     key: {
-                        "encoding": e.encoding,
+                        "tier": e.tier,
                         "checked_at": e.checked_at,
                         "manual": e.manual,
                     }
@@ -3825,7 +3832,7 @@ def _do_capabilities(args: argparse.Namespace) -> int:
     width = max(len(k) for k in cache.entries) + 2
     for key, entry in sorted(cache.entries.items()):
         suffix = " [manual]" if entry.manual else ""
-        print(f"  {key.ljust(width)} {entry.encoding}{suffix}  ({entry.checked_at})")
+        print(f"  {key.ljust(width)} {entry.tier}{suffix}  ({entry.checked_at})")
     return 0
 
 
