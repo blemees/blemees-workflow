@@ -918,6 +918,15 @@ def build_parser() -> argparse.ArgumentParser:
         "manual=true so it survives --refresh. Use --clear to undo. "
         "(--set-encoding is a deprecated alias.)",
     )
+    caps_action.add_argument(
+        "--provision",
+        action="store_true",
+        default=False,
+        help="Provision the org's native metadata for the native tier (ADR-0005): "
+        "create the framework's Issue Types and Issue Fields (Workflow State, "
+        "Agent, Last State, HITL *, Collected By) for the current --repo's org. "
+        "Idempotent by name; requires org admin. Honors --dry-run.",
+    )
     p_caps.set_defaults(func=_do_capabilities)
 
     return parser
@@ -3448,6 +3457,95 @@ def _enumerate_required_labels(ctx: dict, *, tier: str) -> set[str]:
     return labels
 
 
+def _enumerate_native_provisioning(ctx: dict) -> tuple[list[tuple], list[dict]]:
+    """Enumerate the org-level Issue Types and Issue Fields the native tier needs.
+
+    Returns `(issue_types, fields)`:
+      - `issue_types`: `[(name, description, color|None)]` — native GitHub Issue Types.
+      - `fields`: `[{"name", "data_type", "options"}]` — Issue Field specs.
+
+    Each single-select field's option set is the **union across all processes**
+    (ADR-0005: an org-level single-select must hold every value any process can
+    take). State/role/gate/topic vocabularies are gathered from the registry;
+    the HITL Claim/Signal sets are fixed; Collected By is a free-text field.
+    """
+    from workflow.config import build_registry
+    from workflow.core.model.human_gate import HumanGateLevel
+
+    registry = build_registry(
+        agent_home=ctx.get("agent_home"),
+        workflow_dir=ctx.get("workflow_dir"),
+        backend=None,
+        grants_dir=ctx.get("grants_dir"),
+    )
+    if registry is None:
+        raise ConfigError(
+            "No workflows directory found. Set WORKFLOW_DIR or run from "
+            "inside a tree containing `*-states.json` files."
+        )
+
+    states: set[str] = set()
+    resting: set[str] = set()
+    roles: set[str] = set()
+    blocked: set[str] = set()
+    audit: set[str] = set()
+    topics: set[str] = set()
+    issue_types: dict[str, tuple[str, str | None]] = {}
+
+    for wf_name in registry.discovered_processes():
+        try:
+            wf_context = registry.get_process(wf_name)
+        except WorkflowError as exc:
+            logger.warning("Skipping workflow %r during field enumeration: %s", wf_name, exc)
+            continue
+
+        for state_name, state in wf_context.state_machine.states.items():
+            states.add(state_name)
+            if state.state_class.value == "resting" and not state.is_closing:
+                resting.add(state_name)
+            topics.update(state.human_inputs)
+
+        if wf_context.catalog:
+            for gate in wf_context.catalog.entries.values():
+                if HumanGateLevel.BLOCK in gate.allowed_levels:
+                    blocked.add(gate.gate_name)
+                if HumanGateLevel.AUDIT in gate.allowed_levels:
+                    audit.add(gate.gate_name)
+
+        if wf_context.role_directory:
+            roles.update(wf_context.role_directory.roles)
+
+        if wf_context.issue_type_directory:
+            for entry in wf_context.issue_type_directory.types.values():
+                if entry.github_issue_type:
+                    issue_types[entry.github_issue_type] = (
+                        entry.description,
+                        entry.github_issue_type_color,
+                    )
+
+    fields: list[dict] = [
+        {"name": "Workflow State", "data_type": "SINGLE_SELECT", "options": sorted(states)},
+        {"name": "Last State", "data_type": "SINGLE_SELECT", "options": sorted(resting)},
+        {"name": "Agent", "data_type": "SINGLE_SELECT", "options": sorted(roles)},
+        {"name": "HITL Blocked", "data_type": "SINGLE_SELECT", "options": sorted(blocked)},
+        {"name": "HITL Audit", "data_type": "SINGLE_SELECT", "options": sorted(audit)},
+        {"name": "HITL Input", "data_type": "SINGLE_SELECT", "options": sorted(topics)},
+        {
+            "name": "HITL Claim",
+            "data_type": "SINGLE_SELECT",
+            "options": list(gh_labels.CLAIM_VALUES),
+        },
+        {
+            "name": "HITL Signal",
+            "data_type": "SINGLE_SELECT",
+            "options": list(gh_labels.SIGNAL_VALUES),
+        },
+        {"name": "Collected By", "data_type": "TEXT", "options": []},
+    ]
+    types_list = [(name, desc, color) for name, (desc, color) in sorted(issue_types.items())]
+    return types_list, fields
+
+
 def _provision_labels(
     backend: Any,
     required: set[str],
@@ -3750,6 +3848,108 @@ def _report_setup_github_dry_run(
     return 0
 
 
+def _provision_native(ctx: dict, cache: Any) -> int:
+    """Provision the org's native Issue Types + Issue Fields (ADR-0005, #71).
+
+    Idempotent by name: only missing types/fields are created. Single-select
+    fields with no enumerated options (e.g. a HITL gate field for a workflow set
+    with no such gates) can't be created and are reported as skipped. On success
+    the org is confirmed native-capable, so the cache is pinned to `native`.
+    Honors `--dry-run` — reports the plan and writes nothing.
+    """
+    try:
+        backend = _build_backend(ctx)
+    except WorkflowError as exc:
+        return _handle_workflow_error(exc)
+    host, owner = _host_and_owner(backend)
+
+    try:
+        issue_types, fields = _enumerate_native_provisioning(ctx)
+    except WorkflowError as exc:
+        return _handle_workflow_error(exc)
+
+    # Single-selects need ≥1 option; an empty option set can't be provisioned.
+    creatable = [f for f in fields if not (f["data_type"] == "SINGLE_SELECT" and not f["options"])]
+    empty = [f["name"] for f in fields if f["data_type"] == "SINGLE_SELECT" and not f["options"]]
+
+    if ctx["dry_run"]:
+        try:
+            existing_types = set(backend.list_issue_types(owner) or [])
+            existing_fields = set(backend.list_issue_fields(owner) or [])
+        except WorkflowError as exc:
+            return _handle_workflow_error(exc)
+        types_to_create = [t[0] for t in issue_types if t[0] not in existing_types]
+        fields_to_create = [f["name"] for f in creatable if f["name"] not in existing_fields]
+        if ctx["json_output"]:
+            print(
+                _json.dumps(
+                    {
+                        "org": owner,
+                        "issue_types_to_create": types_to_create,
+                        "fields_to_create": fields_to_create,
+                        "skipped_empty_fields": empty,
+                        "dry_run": True,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"[dry-run] native provisioning for {host}/{owner} (nothing created):")
+            print(f"  issue types to create: {types_to_create or '(none)'}")
+            print(f"  fields to create:      {fields_to_create or '(none)'}")
+            if empty:
+                print(f"  skipped (no options):  {empty}")
+        return 0
+
+    created_types: list[str] = []
+    created_fields: list[str] = []
+    skipped: list[str] = []
+    try:
+        for name, description, color in issue_types:
+            if backend.ensure_issue_type(
+                owner, name=name, description=description or "", color=color
+            ):
+                created_types.append(name)
+            else:
+                skipped.append(f"type:{name}")
+        for spec in creatable:
+            if backend.ensure_issue_field(
+                owner, spec["name"], spec["data_type"], options=spec["options"]
+            ):
+                created_fields.append(spec["name"])
+            else:
+                skipped.append(f"field:{spec['name']}")
+    except WorkflowError as exc:
+        return _handle_workflow_error(exc)
+
+    # Provisioning succeeded — the org is native-capable.
+    cache.set(host, owner, "native", manual=False)
+    cache.save()
+
+    if ctx["json_output"]:
+        print(
+            _json.dumps(
+                {
+                    "org": owner,
+                    "created_issue_types": created_types,
+                    "created_fields": created_fields,
+                    "skipped": skipped,
+                    "skipped_empty_fields": empty,
+                    "tier": "native",
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"Provisioned native metadata for {host}/{owner}:")
+        print(f"  issue types created: {created_types or '(none, all present)'}")
+        print(f"  fields created:      {created_fields or '(none, all present)'}")
+        if empty:
+            print(f"  skipped (no options): {empty}")
+        print("  tier pinned to: native")
+    return 0
+
+
 def _do_capabilities(args: argparse.Namespace) -> int:
     """Inspect or manage the capability cache."""
     from workflow.core.capability_cache import CapabilityCache
@@ -3762,6 +3962,9 @@ def _do_capabilities(args: argparse.Namespace) -> int:
         cache.save()
         print("Capability cache cleared.")
         return 0
+
+    if args.provision:
+        return _provision_native(ctx, cache)
 
     if args.set_tier:
         try:

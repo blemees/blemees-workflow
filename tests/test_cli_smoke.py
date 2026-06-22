@@ -1367,3 +1367,89 @@ def test_collect_into_cli_marks_contributors(
     assert rc == 0, out
     marked = {iid: getattr(change, "set_collected_by", None) for iid, change in applied}
     assert marked == {"101": "100", "102": "100"}
+
+
+# --------------------------------------------------------------------------- #
+# capabilities --provision (native tier, #71)
+
+
+def test_capabilities_provision_dry_run_lists_without_creating(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """--provision --dry-run reports the plan and creates nothing."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    with (
+        mock.patch("workflow.backends.github.GitHubBackend.list_issue_types", return_value=[]),
+        mock.patch("workflow.backends.github.GitHubBackend.list_issue_fields", return_value=[]),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.ensure_issue_field", return_value=True
+        ) as ensure_field,
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.ensure_issue_type", return_value=True
+        ) as ensure_type,
+    ):
+        rc = cli(
+            [
+                "--json",
+                "--dry-run",
+                "--repo",
+                "blemees/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "capabilities",
+                "--provision",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    payload = json.loads(out)
+    assert payload["dry_run"] is True
+    # The always-present framework fields show up in the plan.
+    for name in ("Workflow State", "Agent", "Collected By", "HITL Claim", "HITL Signal"):
+        assert name in payload["fields_to_create"], name
+    # Nothing was created.
+    assert not ensure_field.called
+    assert not ensure_type.called
+
+
+def test_capabilities_provision_creates_fields_and_pins_native(
+    workflow_dir: Path,
+    capsys: pytest.CaptureFixture,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """--provision creates missing fields/types and pins the tier to native."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    with (
+        mock.patch("workflow.backends.github.GitHubBackend.list_issue_types", return_value=[]),
+        mock.patch("workflow.backends.github.GitHubBackend.list_issue_fields", return_value=[]),
+        mock.patch(
+            "workflow.backends.github.GitHubBackend.ensure_issue_field", return_value=True
+        ) as ensure_field,
+        mock.patch("workflow.backends.github.GitHubBackend.ensure_issue_type", return_value=True),
+    ):
+        rc = cli(
+            [
+                "--repo",
+                "blemees/test",
+                "--workflow-dir",
+                str(workflow_dir),
+                "capabilities",
+                "--provision",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    created_field_names = {c.args[1] for c in ensure_field.call_args_list}
+    assert "Workflow State" in created_field_names
+    assert "Collected By" in created_field_names
+    assert "native" in out
+
+    # The tier was pinned to native in the (isolated) cache.
+    from workflow.core.capability_cache import CapabilityCache
+
+    entry = CapabilityCache.load().get("github.com", "blemees")
+    assert entry is not None and entry.tier == "native"
