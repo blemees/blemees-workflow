@@ -1402,22 +1402,58 @@ class GitHubBackend:
             )
         return {"fieldId": fm["id"], "delete": True}
 
+    def _text_op(self, field_name: str, value: str) -> dict:
+        """Build a setIssueFieldValue op writing `value` to a text field."""
+        fm = self._load_field_meta().get(field_name)
+        if fm is None:
+            raise BackendError(
+                f"Native field {field_name!r} is not provisioned on this org — "
+                f"run `workflow capabilities --provision`."
+            )
+        return {"fieldId": fm["id"], "textValue": value}
+
+    @staticmethod
+    def _issue_number(issue_id: str) -> int:
+        """Parse an issue id to its integer number, as a clean BackendError.
+
+        Guards the native GraphQL path against a malformed `child-of/<value>`
+        (or any non-numeric id) surfacing as a raw `ValueError`.
+        """
+        try:
+            return int(issue_id)
+        except (TypeError, ValueError) as exc:
+            raise BackendError(f"Expected a numeric issue id, got {issue_id!r}.") from exc
+
+    def _issue_node_id(self, issue_id: str) -> str:
+        """Resolve an issue number to its GraphQL node id (for sub-issue links)."""
+        owner, _, name = self.repo.partition("/")
+        data = self._graphql(
+            "query($o:String!,$r:String!,$n:Int!)"
+            "{repository(owner:$o,name:$r){issue(number:$n){id}}}",
+            {"o": owner, "r": name, "n": self._issue_number(issue_id)},
+        )
+        node_id = ((data.get("repository") or {}).get("issue") or {}).get("id")
+        if not node_id:
+            raise BackendError(f"Could not resolve issue #{issue_id} on {self.repo}.")
+        return node_id
+
     def _read_native(self, issue_id: str) -> tuple[str, IssueState]:
         """Read an issue's node id + framework state from its native fields.
 
         Resolves the GraphQL node id (needed for writes), the native Issue Type,
-        and every single-select field value, mapping each back to its
-        `IssueState` field.
+        the single-select + text field values, and the sub-issue `parent`
+        (→ child_of), mapping each back to its `IssueState` field.
         """
         owner, _, name = self.repo.partition("/")
         query = (
             "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){"
-            "id issueType{name} "
+            "id issueType{name} parent{number} "
             "issueFieldValues(first:50){nodes{__typename "
-            "... on IssueFieldSingleSelectValue{name field{... on IssueFieldSingleSelect{name}}}"
+            "... on IssueFieldSingleSelectValue{name field{... on IssueFieldSingleSelect{name}}} "
+            "... on IssueFieldTextValue{value field{... on IssueFieldText{name}}}"
             "}}}}}"
         )
-        data = self._graphql(query, {"o": owner, "r": name, "n": int(issue_id)})
+        data = self._graphql(query, {"o": owner, "r": name, "n": self._issue_number(issue_id)})
         issue = ((data.get("repository") or {}).get("issue")) or {}
         node_id = issue.get("id")
         if not node_id:
@@ -1425,9 +1461,12 @@ class GitHubBackend:
         values: dict[str, str] = {}
         for node in (issue.get("issueFieldValues") or {}).get("nodes") or []:
             fld = (node.get("field") or {}).get("name")
-            if fld and node.get("name") is not None:
-                values[fld] = node["name"]
+            # Single-select values surface as `name`; text values as `value`.
+            raw = node.get("name") if node.get("name") is not None else node.get("value")
+            if fld and raw is not None:
+                values[fld] = raw
         native_type = (issue.get("issueType") or {}).get("name")
+        parent = issue.get("parent") or {}
         claim = values.get(FIELD_HITL_CLAIM)
         state = IssueState(
             issue_id=str(issue_id),
@@ -1443,6 +1482,8 @@ class GitHubBackend:
             advising=claim == gh_labels.CLAIM_ADVISING,
             awaiting_input=FIELD_HITL_INPUT in values,
             human_input=values.get(FIELD_HITL_INPUT),
+            collected_by=values.get(FIELD_COLLECTED_BY),
+            child_of=str(parent["number"]) if parent.get("number") is not None else None,
         )
         return node_id, state
 
@@ -1450,13 +1491,10 @@ class GitHubBackend:
         """Translate an abstract MarkerChange into setIssueFieldValue ops.
 
         Mirrors `_marker_change_to_labels` for the native tier. Clears use the
-        field's `delete` op.
+        field's `delete` op. `collected_by` writes to the Collected By text
+        field; the `child_of` relationship is a sub-issue link set at creation,
+        not a field op.
         """
-        # `collected_by` rides the #74 relationship path — reject rather than
-        # silently no-op, so `collect` can't appear to succeed without recording.
-        if change.set_collected_by or change.clear_collected_by:
-            raise BackendError("Native collected_by writes are not yet implemented (#74).")
-
         ops: list[dict] = []
 
         def set_ss(field_name: str, value: str) -> None:
@@ -1513,6 +1551,12 @@ class GitHubBackend:
                 set_ss(FIELD_HITL_SIGNAL, value)
         if change.record_response:
             set_ss(FIELD_HITL_SIGNAL, gh_labels.SIGNAL_RESOLVED)
+
+        # Fan-in: the contributor's Collected By text field holds the collector id.
+        if change.set_collected_by:
+            ops.append(self._text_op(FIELD_COLLECTED_BY, change.set_collected_by))
+        elif change.clear_collected_by:
+            clear(FIELD_COLLECTED_BY)
 
         return ops
 
@@ -1572,20 +1616,24 @@ class GitHubBackend:
         create --type` sets the type atomically, but the Workflow State value is
         a follow-up `setIssueFieldValue`, so there is a one-call window where the
         issue has its type but not yet its state value; on failure there the
-        error names the created issue so it can be repaired. Relationship
-        extra-labels (`child-of` / `collected-by`) are rejected here — they ride
-        the #74 sub-issue / Collected-By path."""
+        error names the created issue so it can be repaired. A `child-of`
+        extra-label links the new issue under its parent as a native sub-issue
+        (#74); `type` extra-labels are ignored (the native type rides `--type`)."""
         ops_specs: list[tuple[str, str]] = [(FIELD_STATE, state)]
+        parent_id: str | None = None
         for raw in extra_labels or []:
             parsed = gh_labels.parse_label(raw)
             if parsed is None:
                 continue
             if parsed.kind == gh_labels.CLAIM and parsed.value:
                 ops_specs.append((FIELD_AGENT, parsed.value))
-            elif parsed.kind in (gh_labels.CHILD_OF, gh_labels.COLLECTED_BY):
+            elif parsed.kind == gh_labels.CHILD_OF and parsed.value:
+                parent_id = parsed.value
+            elif parsed.kind == gh_labels.COLLECTED_BY:
+                # collected_by is never set at creation (it rides `collect`).
                 raise BackendError(
-                    f"Native relationship writes ({parsed.kind}) are not yet "
-                    f"implemented (#74); cannot create with {raw!r}."
+                    f"Unexpected collected-by at creation ({raw!r}); collection is a "
+                    f"separate operation."
                 )
 
         new_id = self._create_bare_issue(title, body, issue_type)
@@ -1597,13 +1645,27 @@ class GitHubBackend:
                 "{setIssueFieldValue(input:$input){clientMutationId}}",
                 {"input": {"issueId": node_id, "issueFields": ops}},
             )
+            if parent_id is not None:
+                self._link_sub_issue(parent_id, node_id)
         except BackendError as exc:
             raise BackendError(
-                f"Issue #{new_id} was created but setting its field values failed "
-                f"({exc}). Set the Workflow State on #{new_id} by hand, or re-run "
-                f"once the org fields are provisioned."
+                f"Issue #{new_id} was created but a follow-up (field values / sub-issue "
+                f"link) failed ({exc}). Set the Workflow State / parent on #{new_id} by "
+                f"hand, or re-run once the org fields are provisioned."
             ) from exc
         return new_id
+
+    def _link_sub_issue(self, parent_id: str, child_node_id: str) -> None:
+        """Link `child_node_id` under parent issue `parent_id` as a sub-issue.
+
+        The framework's `child-of` relationship in the native tier (ADR-0005,
+        #74): `addSubIssue(issueId=<parent>, subIssueId=<child>)`.
+        """
+        parent_node = self._issue_node_id(parent_id)
+        self._graphql(
+            "mutation($input:AddSubIssueInput!){addSubIssue(input:$input){clientMutationId}}",
+            {"input": {"issueId": parent_node, "subIssueId": child_node_id}},
+        )
 
     def _create_bare_issue(self, title: str, body: str, issue_type: str | None) -> str:
         """`gh issue create` with no framework labels (native sets fields after)."""
@@ -1649,21 +1711,19 @@ class GitHubBackend:
         return url.rsplit("/", 1)[-1]
 
     def _list_issues_native(self, filters: IssueFilters) -> list[IssueState]:
-        """Native list: translate filters to `field."<name>":<value>` /
-        `type:` search qualifiers and resolve each match's fields.
+        """Native list: translate filters to search qualifiers and resolve each
+        match's fields.
 
-        Relationship-cohort filters (`child_of` / `collected_by`) are not yet
-        supported here — they ride the #74 sub-issue / Collected-By path.
+        - `state` / `claim_role` / `awaiting_gate` / `audit_pending`
+          → `field."<name>":"<value>"`
+        - `child_of` → `parent-issue:<owner/repo>#<n>` (sub-issue cohort, #74)
+        - `collected_by` → `field."collected by":"<id>"` (text exact-match, #74)
 
         NOTE: this reads each match's fields individually (`_read_native` per
         number) — an N+1 pattern. Acceptable for now (matches are usually few);
         a follow-up can fold the field read into a single GraphQL `search` query
         to collapse it to one round-trip.
         """
-        if filters.child_of or filters.collected_by:
-            raise BackendError(
-                "Native cohort queries (child_of / collected_by) are not yet implemented (#74)."
-            )
         quals: list[str] = []
         if filters.state:
             quals.append(f'field."{FIELD_STATE.lower()}":"{filters.state}"')
@@ -1673,6 +1733,10 @@ class GitHubBackend:
             quals.append(f'field."{FIELD_HITL_BLOCKED.lower()}":"{filters.awaiting_gate}"')
         if filters.audit_pending and filters.audit_pending != "*":
             quals.append(f'field."{FIELD_HITL_AUDIT.lower()}":"{filters.audit_pending}"')
+        if filters.child_of:
+            quals.append(f"parent-issue:{self.repo}#{filters.child_of}")
+        if filters.collected_by:
+            quals.append(f'field."{FIELD_COLLECTED_BY.lower()}":"{filters.collected_by}"')
         search = " ".join(quals)
 
         numbers: list[str] = []

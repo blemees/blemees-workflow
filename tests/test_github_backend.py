@@ -1499,6 +1499,7 @@ def _native_backend() -> GitHubBackend:
             "options": {"reviewing": "o_rev", "auditing": "o_aud", "advising": "o_adv"},
         },
         "HITL Signal": {"id": "HG", "options": {"approved": "o_app", "resolved": "o_res"}},
+        "Collected By": {"id": "CB", "options": {}},
     }
     return backend
 
@@ -1637,16 +1638,32 @@ def test_native_list_issues_builds_search_qualifiers() -> None:
     assert [r.issue_id for r in results] == ["5"]
 
 
-def test_native_list_issues_rejects_cohort_filters() -> None:
+def test_native_list_cohort_filters_build_search_qualifiers() -> None:
+    """child_of → parent-issue:; collected_by → field."collected by": (#74)."""
     backend = GitHubBackend(repo="blemees/repo", tier="native")
-    with pytest.raises(BackendError, match="not yet implemented"):
+    captured: list[str] = []
+
+    def fake_gh(*args, **kwargs):
+        if "list" in args and "--search" in args:
+            captured.append(args[args.index("--search") + 1])
+        return "[]"
+
+    with mock.patch.object(backend, "_gh", side_effect=fake_gh):
         backend.list_issues(IssueFilters(child_of="100"))
+        backend.list_issues(IssueFilters(collected_by="64"))
+    assert any("parent-issue:blemees/repo#100" in s for s in captured)
+    assert any('field."collected by":"64"' in s for s in captured)
 
 
-def test_native_collected_by_write_rejected_pending_74() -> None:
+def test_native_collected_by_writes_text_field() -> None:
+    """set_collected_by writes the collector id to the Collected By text field (#74)."""
     backend = _native_backend()
-    with pytest.raises(BackendError, match="collected_by.*#74"):
-        backend._marker_change_to_field_ops(MarkerChange(set_collected_by="42"))
+    assert backend._marker_change_to_field_ops(MarkerChange(set_collected_by="42")) == [
+        {"fieldId": "CB", "textValue": "42"}
+    ]
+    assert backend._marker_change_to_field_ops(MarkerChange(clear_collected_by=True)) == [
+        {"fieldId": "CB", "delete": True}
+    ]
 
 
 def test_native_clear_unprovisioned_field_fails_fast() -> None:
@@ -1666,14 +1683,27 @@ def test_native_claim_release_emits_single_clear() -> None:
     assert ops == [{"fieldId": "HC", "delete": True}]
 
 
-def test_native_create_rejects_relationship_extra_labels() -> None:
+def test_native_create_links_child_of_as_sub_issue() -> None:
+    """A child-of extra-label links the new issue under its parent (addSubIssue, #74)."""
     backend = _native_backend()
     with (
-        mock.patch.object(backend, "_create_bare_issue") as bare,
-        pytest.raises(BackendError, match="#74"),
+        mock.patch.object(backend, "_create_bare_issue", return_value="9"),
+        mock.patch.object(
+            backend,
+            "_read_native",
+            return_value=("CHILD_NODE", IssueState(issue_id="9", state=None, agent_claim=None)),
+        ),
+        mock.patch.object(backend, "_issue_node_id", return_value="PARENT_NODE") as pnode,
+        mock.patch.object(backend, "_graphql") as gql,
     ):
-        backend.create_issue(title="T", body="B", state="raw", extra_labels=["child-of/5"])
-    bare.assert_not_called()  # rejected before any issue is created
+        new_id = backend.create_issue(title="T", body="B", state="raw", extra_labels=["child-of/5"])
+    assert new_id == "9"
+    pnode.assert_called_once_with("5")
+    # One of the GraphQL calls is the addSubIssue link (parent ← child).
+    add_calls = [c for c in gql.call_args_list if "addSubIssue" in c.args[0]]
+    assert len(add_calls) == 1
+    sub_input = add_calls[0].args[1]["input"]
+    assert sub_input == {"issueId": "PARENT_NODE", "subIssueId": "CHILD_NODE"}
 
 
 def test_native_create_failure_names_created_issue() -> None:
@@ -1684,3 +1714,43 @@ def test_native_create_failure_names_created_issue() -> None:
         pytest.raises(BackendError, match="#9 was created"),
     ):
         backend.create_issue(title="T", body="B", state="raw")
+
+
+def test_native_read_maps_parent_and_collected_by() -> None:
+    """child_of comes from the sub-issue parent; collected_by from the text field (#74)."""
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+    payload = {
+        "repository": {
+            "issue": {
+                "id": "N",
+                "issueType": {"name": "Task"},
+                "parent": {"number": 64},
+                "issueFieldValues": {
+                    "nodes": [
+                        {
+                            "__typename": "IssueFieldSingleSelectValue",
+                            "name": "refining",
+                            "field": {"name": "Workflow State"},
+                        },
+                        {
+                            "__typename": "IssueFieldTextValue",
+                            "value": "100",
+                            "field": {"name": "Collected By"},
+                        },
+                    ]
+                },
+            }
+        }
+    }
+    with mock.patch.object(backend, "_graphql", return_value=payload):
+        state = backend.read_issue("9")
+    assert state.state == "refining"
+    assert state.child_of == "64"
+    assert state.collected_by == "100"
+
+
+def test_native_read_rejects_non_numeric_issue_id() -> None:
+    """A malformed issue id surfaces a BackendError, not a raw ValueError (#74 review)."""
+    backend = GitHubBackend(repo="blemees/repo", tier="native")
+    with pytest.raises(BackendError, match="numeric issue id"):
+        backend.read_issue("not-a-number")
