@@ -176,7 +176,7 @@ def test_irreversible_destination_with_gate_passes() -> None:
 def test_gate_with_multiple_source_states_errors() -> None:
     """A gate must fire from exactly one source state. Two transitions
     sharing a gate name but originating from different sources is an
-    error — the `hitl:awaiting-<gate>` label would be ambiguous."""
+    error — the `hitl-blocked/<gate>` label would be ambiguous."""
     workflow = StateMachine(name="t")
     workflow.states["src_a"] = State(name="src_a", state_class=StateClass.WORKING)
     workflow.states["src_b"] = State(name="src_b", state_class=StateClass.WORKING)

@@ -4,7 +4,7 @@ A creating operation: the CLI resolves the process, issue-type encoding (native
 vs label, via the capability cache), and contributor candidate set (the impure
 work) and passes the result through `extras`; the pure `_plan_creation` assembles
 the `CreationSpec`; the controller's create path opens the issue/PR and stamps
-any gathered contributors `collected-by:` with the new id.
+any gathered contributors `collected-by/` with the new id.
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 When an issue's state changes, two kinds of cross-process auto-advance can fire:
 
 1. **Spawn parent feedback.** If this issue was spawned by a parent
-   (it carries `child-of:<parent>`), and the new state matches a key
+   (it carries `child-of/<parent>`), and the new state matches a key
    in the parent's `spawns.advance_on`, the parent advances to the
    mapped state.
 
@@ -11,7 +11,7 @@ When an issue's state changes, two kinds of cross-process auto-advance can fire:
    collector (its state declares `collects`), and the new state
    matches a key in `collects.advance_on` (or appears in
    `collects.release_on`), every contributor (issues with
-   `collected-by:<this>`) advances or has its collection cleared.
+   `collected-by/<this>`) advances or has its collection cleared.
 
 Each cascade-applied state change can itself trigger further cascades.
 A BFS queue with a visited set keeps the chain bounded — every (issue,
@@ -180,7 +180,7 @@ def _apply_spawn_parent_cascade(
         return None
 
     # Wait-for-all: every active child on the parent must satisfy its rule.
-    # The cohort is discovered by querying the dependent-side `child-of:`
+    # The cohort is discovered by querying the dependent-side `child-of/`
     # label (ADR-0003) — there is no parent-side registry. This needs the
     # backend's list to surface closed issues and PRs (see #31), since a
     # child that just closed is exactly what triggers the cascade.
@@ -316,7 +316,7 @@ def _apply_collector_cascade(
         return []
 
     # The contributor cohort is discovered by querying the dependent-side
-    # `collected-by:` label (ADR-0003) — there is no collector-side registry.
+    # `collected-by/` label (ADR-0003) — there is no collector-side registry.
     try:
         cohort = backend.list_issues(IssueFilters(collected_by=collector_id))
     except BackendError as exc:

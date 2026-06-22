@@ -3,7 +3,7 @@
 A creating operation: the CLI resolves the spawn rule and target process (the
 impure cross-process lookup) and passes the result through `extras`; the pure
 `_plan_spawn` assembles the `CreationSpec`; the controller's create path opens
-the child and runs the cascade. The child carries only `child-of:<parent>`
+the child and runs the cascade. The child carries only `child-of/<parent>`
 (ADR-0003) — the parent is left untouched.
 """
 

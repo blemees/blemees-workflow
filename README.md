@@ -96,7 +96,7 @@ The catalogued / lifecycle operations below are grouped per `hitl-principles.md`
 
 - `create-issue` — open a new work item (or PR) in an initial state.
 - `spawn-issue` — open a child issue on another process per the parent state's `spawns` config.
-- `collect-into` — gather contributor issues into a collector via `collected-by:` labels.
+- `collect-into` — gather contributor issues into a collector via `collected-by/` labels.
 
 ## Configuration
 

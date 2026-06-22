@@ -812,9 +812,9 @@ def test_create_with_claim_creates_then_claims(
     capsys: pytest.CaptureFixture,
 ) -> None:
     """`--claim` creates the issue at the resting initial state, then runs
-    a proper `claim` operation against it. This sets `wip:<role>` and
-    `last-state:<initial_state>` atomically with moving to the working state —
-    no resting-state-with-wip-label invariant violation."""
+    a proper `claim` operation against it. This sets `claimed/<role>` and
+    `last-state/<initial_state>` atomically with moving to the working state —
+    no resting-state-with-claim-label invariant violation."""
     from workflow.backends.base import IssueState
 
     raw_state = IssueState(issue_id="99", state="raw", agent_claim=None, last_state=None)
@@ -928,20 +928,20 @@ def test_setup_github_dry_run_enumerates_without_calling_backend(
     output = capsys.readouterr().out
     assert rc == 0, output
     assert not ensure_mock.called
-    # The fixed HITL singletons must always appear.
+    # The fixed HITL claim/signal labels must always appear.
     for fixed in (
-        "hitl:reviewing",
-        "hitl:auditing",
-        "hitl:advising",
-        "hitl:awaiting-input",
-        "hitl:resolved",
+        "hitl-claim/reviewing",
+        "hitl-claim/auditing",
+        "hitl-claim/advising",
+        "hitl-signal/resolved",
+        "hitl-signal/approved",
     ):
         assert fixed in output, f"expected {fixed} in dry-run output"
-    assert "state:raw" in output
-    assert "wip:product-manager" in output
-    assert "wip:developer" in output
-    # In label-encoding mode, `type:*` labels are also enumerated.
-    assert "type:bug" in output
+    assert "state/raw" in output
+    assert "claimed/product-manager" in output
+    assert "claimed/developer" in output
+    # In label-encoding mode, `type/*` labels are also enumerated.
+    assert "type/bug" in output
 
 
 def test_setup_github_json_dry_run(
@@ -970,7 +970,7 @@ def test_setup_github_json_dry_run(
     labels = payload["labels"]
     assert isinstance(labels, list)
     assert labels == sorted(labels)
-    assert "hitl:reviewing" in labels
+    assert "hitl-claim/reviewing" in labels
 
 
 def test_setup_github_creates_only_missing(
@@ -978,7 +978,7 @@ def test_setup_github_creates_only_missing(
     capsys: pytest.CaptureFixture,
 ) -> None:
     """Missing labels are created via ensure_label; existing ones are skipped."""
-    existing = ["hitl:reviewing"]
+    existing = ["hitl-claim/reviewing"]
     with (
         mock.patch(
             "workflow.backends.github.GitHubBackend.list_issue_types",
@@ -1007,9 +1007,9 @@ def test_setup_github_creates_only_missing(
     assert rc == 0, output
     assert list_mock.called
     called_labels = {call.args[0] for call in ensure_mock.call_args_list}
-    assert "hitl:reviewing" not in called_labels  # skipped
-    assert "hitl:auditing" in called_labels
-    assert "state:raw" in called_labels
+    assert "hitl-claim/reviewing" not in called_labels  # skipped
+    assert "hitl-claim/auditing" in called_labels
+    assert "state/raw" in called_labels
     assert "skipped 1" in output
 
 
@@ -1322,7 +1322,7 @@ def test_spawn_issue_cli_labels_child_with_parent(
     assert rc == 0, out
     assert create_mock.called
     extra_labels = create_mock.call_args.kwargs.get("extra_labels", [])
-    assert "child-of:5" in extra_labels
+    assert "child-of/5" in extra_labels
 
 
 def test_collect_into_cli_marks_contributors(

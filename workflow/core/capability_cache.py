@@ -1,7 +1,7 @@
 """Capability cache — per-(host, owner) record of how to encode issue types.
 
 The tool needs to know, for each tracker org, whether to encode issue type
-via the backend's native field (e.g., GitHub Issue Types) or as a `type:<id>`
+via the backend's native field (e.g., GitHub Issue Types) or as a `type/<id>`
 label. The decision is determined by a one-time probe and cached to avoid
 re-checking on every operation.
 

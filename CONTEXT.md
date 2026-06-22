@@ -127,13 +127,13 @@ The PR process declares `"issue_types": ["pr"]`. PRs are created via the same `w
 - `--refs N` (required, repeatable) — parent ticket id(s) the PR addresses. Renders as a `Refs #N, #M, ...` footer in the body.
 - `--body` is required for PRs (PRs need a description; the framework wraps it).
 
-The backend dispatches to `create_pull_request` (which shells out to `gh pr create`) rather than `create_issue`. When the initial state is `draft`, the PR is opened in GitHub's draft mode. The `state:<name>` label is attached atomically. The framework does **not** apply a `type:` label or native Issue Type to PRs — the entity kind itself conveys the type.
+The backend dispatches to `create_pull_request` (which shells out to `gh pr create`) rather than `create_issue`. When the initial state is `draft`, the PR is opened in GitHub's draft mode. The `state/<name>` label is attached atomically. The framework does **not** apply a `type/` label or native Issue Type to PRs — the entity kind itself conveys the type.
 
 One ticket can spawn zero (spike findings doc only), one (typical), or many PRs (incident mitigation chain, hotfix + backports, multi-component feature) — the cardinality between an issue and its PRs is **1:N**, and the framework does not gate the parent ticket's advancement on the PR set. Each PR is an independent work item; the agent decides when the parent advances. The spawn from `inner-loop.implementing → pr.draft` is modelled on `pr-states.json` for documentation; agents may also create PRs directly with `workflow create-issue --to draft --head ... --refs ...` (e.g., for backports that don't pass through inner-loop).
 
 #### PR draft / ready lifecycle
 
-Every PR the framework creates is opened as a **GitHub draft PR** (`gh pr create --draft` is always passed). The framework's `pr-states.json` starts new PRs at `state:draft`, and that aligns with the tracker's draft state.
+Every PR the framework creates is opened as a **GitHub draft PR** (`gh pr create --draft` is always passed). The framework's `pr-states.json` starts new PRs at `state/draft`, and that aligns with the tracker's draft state.
 
 To flip a PR from draft → ready-for-review, the destination state declares `mark_pr_ready: true`. When the framework advances into that state, the backend calls `gh pr ready <id>`. The example pr process marks `needs_review` with the flag, so:
 
@@ -161,7 +161,9 @@ GitHub auto-links the `#N` references as cross-references on the parent ticket. 
 How the type is recorded on the tracker depends on what the org supports:
 
 - **Native** — GitHub's first-class Issue Type field (`gh issue create --type "Bug"`). Requires GHES ≥ ?? / GitHub.com, the org to have Issue Types enabled, and the user to have read access to the types.
-- **Label** — `type:<framework_id>` regular label (e.g., `type:bug`). Works on every tracker without preconditions.
+- **Label** — `type/<framework_id>` regular label (e.g., `type/bug`). Works on every tracker without preconditions.
+
+All framework labels follow one grammar, `<kebab-classifier>/<value>` (ADR-0005): `state/<name>`, `claimed/<role>`, `last-state/<name>`, `type/<id>`, `child-of/<id>`, `collected-by/<id>`, `hitl-blocked/<gate>`, `hitl-audit/<gate>`, `hitl-input/<topic>`, `hitl-claim/<reviewing|auditing|advising>`, `hitl-signal/<approved|rejected|checked|revoked|resolved>`. The grammar lives in `workflow/backends/github_labels.py` — the single source of truth for encoding and parsing.
 
 The choice is **auto-detected** per (host, owner) by probing the org's `/issue-types` endpoint via `gh api`. A non-empty type list → native; anything else (404, 403, empty list, network error) → label. The decision is cached in `~/.config/blemees-workflow/capabilities.json` with a 30-day TTL.
 
@@ -171,7 +173,7 @@ A manual override is set via `workflow capabilities --set-encoding native|label`
 
 Provisions both org Issue Types and repo labels:
 
-- **Default** (`workflow setup-github`): best-effort — tries to create missing org Issue Types; if it can't (permissions), falls back to label encoding and provisions `type:*` labels on the repo. Always provisions state/wip/last-state/hitl labels.
+- **Default** (`workflow setup-github`): best-effort — tries to create missing org Issue Types; if it can't (permissions), falls back to label encoding and provisions `type/*` labels on the repo. Always provisions `state/`, `claimed/`, `last-state/`, and `hitl-*/` labels.
 - **`--setup-org`**: admin path; creates missing Issue Types at the org and refreshes the capability cache. Fails loudly on any error. Does not touch repo labels.
 
 ## Closing the tracker's issue
@@ -192,11 +194,11 @@ A bounce-back (e.g. inner-loop → refinement) is a handoff: the same issue cont
 
 ## Origin marker (`last-state`)
 
-When `claim-issue` fires, the backend records `last-state:<source-state>` alongside `wip:<role>`. On `release-issue`, the planner reads this marker and returns the issue to that resting state — the user never specifies a destination, eliminating the footgun of allowing arbitrary state jumps without a valid CLAIM transition.
+When `claim-issue` fires, the backend records `last-state/<source-state>` alongside `claimed/<role>`. On `release-issue`, the planner reads this marker and returns the issue to that resting state — the user never specifies a destination, eliminating the footgun of allowing arbitrary state jumps without a valid CLAIM transition.
 
 A working state can have multiple incoming CLAIM transitions (e.g., `implementing` is claimed from both `ready_for_dev` initially and `staged` for revisions). The marker disambiguates without requiring user input.
 
-Whenever an issue leaves a working state (advance, approve, record-action, release), both `wip:<role>` and `last-state:<source>` are cleared atomically. Per principle 1, working = exactly one role owns the item; once the issue is resting (incl. closing), no role owns it.
+Whenever an issue leaves a working state (advance, approve, record-action, release), both `claimed/<role>` and `last-state/<source>` are cleared atomically. Per principle 1, working = exactly one role owns the item; once the issue is resting (incl. closing), no role owns it.
 
 If the marker drifts (no CLAIM transition from `last-state` → current state), `release-issue` errors rather than corrupting state.
 
@@ -226,7 +228,7 @@ Semantics:
 - States without `human_inputs` declared CANNOT host `request-input` — the agent must release the issue or stay put. No free-form fallback.
 - Add a `general` entry to a state's list to keep an explicit escape valve.
 - Inputs route to **the human operator** (not a specific framework role) — these are escalations out of the agent loop.
-- Markers: `hitl:awaiting-input` (existing queue marker) + `hitl:topic-<id>` (companion, set on request and cleared on respond). Operators can filter by id.
+- Marker: `hitl-input/<topic>` (ADR-0005) carries both the queue marker and the topic in one label — set on request, cleared on respond. Operators can filter by topic.
 
 Validator: every id referenced on a working state must resolve in `human-inputs.json` (missing directory → WARNING; declared id absent from directory → ERROR).
 
@@ -246,9 +248,9 @@ The set of dependent issues attached to one anchor issue. Two instances:
 - **Child cohort** — the children spawned from one parent (spawn relationship).
 - **Contributor cohort** — the contributors gathered into one collector (collect relationship).
 
-Both follow one rule (ADR-0003): the relationship is recorded by a **single label on the dependent side** — `child-of:<parent>` on each child, `collected-by:<collector>` on each contributor. There is no anchor-side registry (no `subprocess:`, no `collects:`). One label, one source of truth.
+Both follow one rule (ADR-0003): the relationship is recorded by a **single label on the dependent side** — `child-of/<parent>` on each child, `collected-by/<collector>` on each contributor. There is no anchor-side registry (no `subprocess:`, no `collects:`). One label, one source of truth. (Under the native tier, ADR-0005 splits these: `child-of` becomes a sub-issue link, `collected-by` a custom field.)
 
-The label is the **trigger edge**: when a child enters a closing state, or a contributor changes state, the cascade reads that dependent's own label to find the anchor to advance or release. The **cohort** — all dependents of one anchor — is discovered on demand by querying `list_issues(label="child-of:<parent>")` / `list_issues(label="collected-by:<collector>")`, never by reading the anchor. This is why the spawn cascade's **wait-for-all** semantics depend on the backend's list visibility covering closed issues and PRs (a closed dependent that just triggered the cascade must still appear in the cohort query).
+The label is the **trigger edge**: when a child enters a closing state, or a contributor changes state, the cascade reads that dependent's own label to find the anchor to advance or release. The **cohort** — all dependents of one anchor — is discovered on demand by querying `list_issues(child_of=<parent>)` / `list_issues(collected_by=<collector>)`, never by reading the anchor. This is why the spawn cascade's **wait-for-all** semantics depend on the backend's list visibility covering closed issues and PRs (a closed dependent that just triggered the cascade must still appear in the cohort query).
 
 A dependent is always labelled, even when its spawn/collect declares no `advance_on` rule (uniform labeling; the link is then informational only).
 

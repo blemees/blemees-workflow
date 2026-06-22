@@ -1,11 +1,16 @@
 """GitHub backend — implements the `TrackerBackend` protocol via the `gh` CLI.
 
-Per `backends/github-encoding.md`:
+The label tier of the encoding (ADR-0005). The framework's markers map to
+GitHub labels under one grammar, `<kebab-classifier>/<value>`:
 
-- State → `state:<name>` label, exactly one applied at any moment.
-- Agent claim → `wip:<role>` label, at most one.
-- HITL markers → `hitl:*` labels in the queue / claim / signal subnamespaces.
+- State → `state/<name>` label, exactly one applied at any moment.
+- Agent claim → `claimed/<role>` label, at most one.
+- HITL markers → `hitl-blocked/`, `hitl-audit/`, `hitl-input/`, `hitl-claim/`,
+  and `hitl-signal/` labels.
 - Audit records → issue/PR comments.
+
+The grammar itself — encoding and parsing — lives in `github_labels`; this
+backend only drives `gh` with the strings it produces.
 
 The label swap is the one atomic step: every add/remove rides a single `gh
 issue edit` invocation (GraphQL `replaceLabels`), so the state marker never
@@ -16,7 +21,7 @@ follow-up failure raises a partial-apply error with a repair hint rather than
 leaving a silent inconsistency. `gh` has no multi-resource transaction, so a
 fully atomic apply would need a single GraphQL mutation (future work).
 
-The backend creates missing labels lazily with namespace-appropriate colors.
+The backend creates missing labels lazily with classifier-appropriate colors.
 """
 
 from __future__ import annotations
@@ -30,19 +35,11 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from workflow.backends import github_labels as gh_labels
 from workflow.backends.base import IssueFilters, IssueState, MarkerChange
 from workflow.errors import BackendError, OperationError
 
 logger = logging.getLogger(__name__)
-
-
-# Label color hints (per github-encoding.md § 10).
-_LABEL_COLORS = {
-    "state": "1f6feb",  # blue
-    "wip": "fbca04",  # yellow
-    "last-state": "fef2c0",  # pale yellow — adjacent to wip
-    "hitl": "8957e5",  # purple
-}
 
 
 # Matches every git remote URL form for GitHub / GHES:
@@ -176,57 +173,58 @@ class GitHubBackend:
         `gh issue list` excludes pull requests and `gh pr list` excludes issues,
         so this queries both and merges the results, de-duplicated by id. Both
         are queried with `--state all` so closed issues and closed/merged PRs
-        are visible — cohort queries (`child-of:` / `collected-by:`) and
+        are visible — cohort queries (`child-of/` / `collected-by/`) and
         closing-state searches depend on it (ADR-0003).
 
         The filter translation (applied identically to issues and PRs):
 
-        - `filters.state` → `--label state:<name>`
-        - `filters.claim_role` → `--label wip:<role>`
+        - `filters.state` → `--label state/<name>`
+        - `filters.claim_role` → `--label claimed/<role>`
         - `filters.awaiting_gate` ("*" → match any awaiting; specific name → that label)
         - `filters.audit_pending` ("*" → match any audit-pending; specific → that label)
-        - `filters.awaiting_input` (True → `--label hitl:awaiting-input`; False → exclude)
-        - `filters.child_of` → `--label child-of:<id>` (cohort: a parent's children)
-        - `filters.collected_by` → `--label collected-by:<id>` (cohort: a collector's contributors)
+        - `filters.awaiting_input` (True → `--label hitl-input/<topic>` is not a single
+          fixed label, so this falls to post-fetch filtering)
+        - `filters.child_of` → `--label child-of/<id>` (cohort: a parent's children)
+        - `filters.collected_by` → `--label collected-by/<id>` (cohort: a collector's contributors)
         - `filters.limit` → `--limit N` (applied per entity kind)
 
-        For wildcard awaiting / audit filters that `gh` can't express with a
-        single label match, the backend filters in Python after fetching.
+        For wildcard awaiting / audit filters and `awaiting_input` that `gh`
+        can't express with a single label match, the backend filters in Python
+        after fetching.
         """
         wildcard_awaiting = filters.awaiting_gate == "*"
         wildcard_audit = filters.audit_pending == "*"
 
         label_filters: list[str] = []
         if filters.state:
-            label_filters.append(f"state:{filters.state}")
+            label_filters.append(gh_labels.state_label(filters.state))
         if filters.claim_role:
-            label_filters.append(f"wip:{filters.claim_role}")
+            label_filters.append(gh_labels.claim_label(filters.claim_role))
         if filters.awaiting_gate and not wildcard_awaiting:
-            label_filters.append(f"hitl:awaiting-{filters.awaiting_gate}")
+            label_filters.append(gh_labels.hitl_blocked_label(filters.awaiting_gate))
         if filters.audit_pending and not wildcard_audit:
-            label_filters.append(f"hitl:audit-{filters.audit_pending}")
-        if filters.awaiting_input is True:
-            label_filters.append("hitl:awaiting-input")
+            label_filters.append(gh_labels.hitl_audit_label(filters.audit_pending))
         if filters.child_of:
-            label_filters.append(f"child-of:{filters.child_of}")
+            label_filters.append(gh_labels.child_of_label(filters.child_of))
         if filters.collected_by:
-            label_filters.append(f"collected-by:{filters.collected_by}")
+            label_filters.append(gh_labels.collected_by_label(filters.collected_by))
 
         issue_entries = self._list_entities("issue", label_filters, filters.limit)
         pr_entries = self._list_entities("pr", label_filters, filters.limit)
 
-        # Wildcard gate/audit and `awaiting_input is False` can't be expressed as
-        # `gh` label filters, so they're applied in Python *after* the `--limit`
-        # cap. If a kind's raw fetch hit that cap, matches beyond it were never
-        # seen — warn rather than silently under-report (#26). The honest fix is
-        # pagination; until then, the operator can raise --limit.
-        post_filtering = wildcard_awaiting or wildcard_audit or (filters.awaiting_input is False)
+        # Wildcard gate/audit and any `awaiting_input` filter can't be expressed
+        # as a single `gh` label filter (`hitl-input/<topic>` is topic-keyed, so
+        # there is no fixed label to match on), so they're applied in Python
+        # *after* the `--limit` cap. If a kind's raw fetch hit that cap, matches
+        # beyond it were never seen — warn rather than silently under-report
+        # (#26). The honest fix is pagination; until then, raise --limit.
+        post_filtering = wildcard_awaiting or wildcard_audit or (filters.awaiting_input is not None)
         if post_filtering:
             for kind, fetched in (("issue", issue_entries), ("pr", pr_entries)):
                 if len(fetched) >= filters.limit:
                     logger.warning(
                         "list_issues hit the --limit %d cap on %ss while a post-fetch filter "
-                        "(wildcard gate/audit or awaiting_input=False) is active; matches beyond "
+                        "(wildcard gate/audit or awaiting_input) is active; matches beyond "
                         "the first %d may be missed. Raise --limit to widen the window.",
                         filters.limit,
                         kind,
@@ -248,10 +246,12 @@ class GitHubBackend:
             labels = [lbl.get("name", "") for lbl in (entry.get("labels") or [])]
             state = self._labels_to_state(number, labels)
 
-            # Wildcard awaiting / audit filters need post-filtering.
+            # Wildcard awaiting / audit and awaiting_input filters post-filter here.
             if wildcard_awaiting and not state.awaiting_gate:
                 continue
             if wildcard_audit and not state.audit_pending:
+                continue
+            if filters.awaiting_input is True and not state.awaiting_input:
                 continue
             if filters.awaiting_input is False and state.awaiting_input:
                 continue
@@ -303,8 +303,8 @@ class GitHubBackend:
     ) -> str:
         """Create a new GitHub issue with the framework's state marker.
 
-        Uses `gh issue create --title T --body-file BODY --label state:X`,
-        adding every label in `extra_labels` (e.g., `wip:<role>` for an
+        Uses `gh issue create --title T --body-file BODY --label state/X`,
+        adding every label in `extra_labels` (e.g., `claimed/<role>` for an
         immediate claim) to the same `--label` flag. Existing labels on
         the repo are required; missing ones are created lazily via
         `ensure_label` before the issue is created so `gh` doesn't error
@@ -317,7 +317,7 @@ class GitHubBackend:
         The issue URL printed by `gh` is parsed back into the issue number
         and returned as a string.
         """
-        labels = [f"state:{state}"]
+        labels = [gh_labels.state_label(state)]
         if extra_labels:
             labels.extend(extra_labels)
         for label in labels:
@@ -389,12 +389,12 @@ class GitHubBackend:
         to ready-for-review (via `mark_ready_for_review`). The `draft`
         parameter is retained for protocol compatibility but ignored.
 
-        The framework's `state:<name>` label is attached atomically with
+        The framework's `state/<name>` label is attached atomically with
         creation (gh `pr create` accepts `--label`). Labels are ensured to
         exist on the repo before the call so gh doesn't error on missing
         names. Returns the new PR's number parsed from gh's output URL.
         """
-        labels = [f"state:{state}"]
+        labels = [gh_labels.state_label(state)]
         if extra_labels:
             labels.extend(extra_labels)
         for label in labels:
@@ -467,7 +467,7 @@ class GitHubBackend:
 
         labels = [lbl.get("name", "") for lbl in (data.get("labels") or [])]
         # `issueType` is GitHub's native Issue Type ({"name": "Bug"} or null).
-        # Under native encoding there's no `type:` label, so this is the only
+        # Under native encoding there's no `type/` label, so this is the only
         # signal of the issue's type.
         issue_type_obj = data.get("issueType") or {}
         native_type = issue_type_obj.get("name") if isinstance(issue_type_obj, dict) else None
@@ -505,11 +505,11 @@ class GitHubBackend:
             self._gh(*args)
 
         # 1a. Claim concurrency control. GitHub labels have no compare-and-swap,
-        #     and `--add-label wip:<role>` is additive: two agents claiming the
-        #     same resting issue both pass the planner's snapshot precondition and
-        #     both wip: labels land, violating "at most one wip" (#21). Verify
-        #     after the write — if our claim didn't win cleanly, self-revert and
-        #     raise so the loser doesn't believe it holds the claim.
+        #     and `--add-label claimed/<role>` is additive: two agents claiming
+        #     the same resting issue both pass the planner's snapshot precondition
+        #     and both claim labels land, violating "at most one claim" (#21).
+        #     Verify after the write — if our claim didn't win cleanly, self-revert
+        #     and raise so the loser doesn't believe it holds the claim.
         if change.set_agent_claim:
             self._verify_claim_won(issue_id, change.set_agent_claim)
 
@@ -549,26 +549,34 @@ class GitHubBackend:
                 )
 
     def _verify_claim_won(self, issue_id: str, role: str) -> None:
-        """Confirm our `wip:<role>` claim is the only one on the issue (#21).
+        """Confirm our `claimed/<role>` claim is the only one on the issue (#21).
 
         Called immediately after a claim's label swap. Re-reads the live label
-        set and checks exactly one `wip:` label is present and it is ours. If a
-        concurrent claim also landed (two `wip:` labels), or the surviving claim
-        isn't ours, we lost the race: remove our own `wip:` label so we don't
-        leave a phantom claim, then raise `OperationError`.
+        set and checks exactly one claiming role is present and it is ours. If a
+        concurrent claim also landed (a second claim label), or the surviving
+        claim isn't ours, we lost the race: remove our own claim label so we
+        don't leave a phantom claim, then raise `OperationError`.
 
         This narrows but does not fully close the race. Both contenders may
         observe two labels and both self-revert (leaving the issue unclaimed for
         a retry), or — depending on read/write interleaving — one may read its
         label alone and return success while the other reverts. Either way the
         invariant that matters holds: no caller ever returns believing it won
-        while a second `wip:` label survives. The residual window is inherent to
+        while a second claim label survives. The residual window is inherent to
         a tracker without compare-and-swap; a single GraphQL mutation would be
         the real fix.
         """
-        expected = f"wip:{role}"
-        wip_labels = sorted(lbl for lbl in self._fetch_labels(issue_id) if lbl.startswith("wip:"))
-        if wip_labels == [expected]:
+        expected = gh_labels.claim_label(role)
+        claim_roles = sorted(
+            {
+                parsed.value
+                for raw in self._fetch_labels(issue_id)
+                if (parsed := gh_labels.parse_label(raw)) is not None
+                and parsed.kind == gh_labels.CLAIM
+                and parsed.value
+            }
+        )
+        if claim_roles == [role]:
             return  # clean win
         # Lost (or contended) — drop our own label so no phantom claim remains.
         try:
@@ -588,17 +596,17 @@ class GitHubBackend:
                 exc,
             )
         raise OperationError(
-            f"Lost claim race on #{issue_id}: expected only {expected!r} after claiming, "
-            f"but the live wip labels are {wip_labels}. A concurrent agent claimed the same "
-            f"issue; our claim was reverted. Re-poll the queue and claim a different issue."
+            f"Lost claim race on #{issue_id}: expected only role {role!r} after claiming, "
+            f"but the live claiming roles are {claim_roles}. A concurrent agent claimed the "
+            f"same issue; our claim was reverted. Re-poll the queue and claim a different issue."
         )
 
     def _fetch_labels(self, issue_id: str) -> list[str]:
         """Return the raw label names currently on the issue.
 
         Unlike `read_issue`, which collapses the label set into an `IssueState`
-        (one `wip:` claim wins), this preserves every label — needed by the
-        claim race check, which must see duplicate `wip:` labels.
+        (one claim wins), this preserves every label — needed by the claim race
+        check, which must see duplicate claim labels.
         """
         result = self._gh("issue", "view", str(issue_id), "--repo", self.repo, "--json", "labels")
         try:
@@ -678,8 +686,8 @@ class GitHubBackend:
     def resolve_role(self, role_id: str) -> str | None:
         # TODO: role-to-handle mapping is the team config's concern; until the
         # workflow tool grows a config loader, role names are returned to the
-        # caller untranslated. The wip:<role> label is always applied; only the
-        # GitHub assignee is conditionally set.
+        # caller untranslated. The claimed/<role> label is always applied; only
+        # the GitHub assignee is conditionally set.
         logger.debug(
             "resolve_role(%r) — no team mapping configured; returning None.",
             role_id,
@@ -717,7 +725,7 @@ class GitHubBackend:
         )
 
     def unassign(self, issue_id: str) -> None:
-        # Claims are framework-managed via `wip:<role>` labels, but GitHub
+        # Claims are framework-managed via `claimed/<role>` labels, but GitHub
         # assignees are not yet framework-managed because role→handle mapping
         # is still unresolved. Do not remove a human/UI assignment that this
         # backend cannot prove it created.
@@ -806,52 +814,45 @@ class GitHubBackend:
         advising = False
         awaiting_input = False
 
+        # The grammar module resolves each label; here we only fan each parsed
+        # marker out to its field. `collects:` / `subprocess:` were never
+        # encoded — those cohorts are `collected-by/` / `child-of/` queries
+        # (ADR-0003).
         for raw in labels:
-            label = raw.strip()
-            if label.startswith("state:"):
-                state = label[len("state:") :]
+            parsed = gh_labels.parse_label(raw)
+            if parsed is None:
                 continue
-            # `last-state:` is checked before `wip:` because both share a prefix.
-            if label.startswith("last-state:"):
-                last_state = label[len("last-state:") :]
-                continue
-            if label.startswith("wip:"):
-                agent_claim = label[len("wip:") :]
-                continue
-            if label.startswith("type:"):
-                issue_type = label[len("type:") :]
-                continue
-            if label.startswith("collected-by:"):
-                collected_by = label[len("collected-by:") :]
-                continue
-            # `collects:` (collector-side contributor registry) is intentionally
-            # not parsed — the cohort is a `collected-by:` query now (ADR-0003).
-            if label.startswith("child-of:"):
-                child_of = label[len("child-of:") :]
-                continue
-            # `subprocess:` (parent-side child registry) is intentionally not
-            # parsed — the cohort is a `child-of:` query now (ADR-0003).
-            if not label.startswith("hitl:"):
-                continue
-            suffix = label[len("hitl:") :]
-            if suffix == "reviewing":
-                reviewing = True
-            elif suffix == "auditing":
-                auditing = True
-            elif suffix == "advising":
-                advising = True
-            elif suffix == "awaiting-input":
+            kind, value = parsed.kind, parsed.value
+            if kind == gh_labels.STATE:
+                state = value
+            elif kind == gh_labels.CLAIM:
+                agent_claim = value
+            elif kind == gh_labels.LAST_STATE:
+                last_state = value
+            elif kind == gh_labels.TYPE:
+                issue_type = value
+            elif kind == gh_labels.COLLECTED_BY:
+                collected_by = value
+            elif kind == gh_labels.CHILD_OF:
+                child_of = value
+            elif kind == gh_labels.HITL_BLOCKED:
+                awaiting_gate = value
+            elif kind == gh_labels.HITL_AUDIT:
+                audit_pending = value
+            elif kind == gh_labels.HITL_INPUT:
+                # `hitl-input/<topic>` carries both the queue marker and the topic.
                 awaiting_input = True
-            elif suffix == "resolved":
-                pass  # signal marker only
-            elif suffix.startswith("topic-"):
-                human_input = suffix[len("topic-") :]
-            elif suffix.startswith("awaiting-"):
-                awaiting_gate = suffix[len("awaiting-") :]
-            elif suffix.startswith("audit-"):
-                audit_pending = suffix[len("audit-") :]
-            # signal markers approved-/rejected-/checked-/revoked-* are
-            # transient and don't translate to state.
+                if value:
+                    human_input = value
+            elif kind == gh_labels.HITL_CLAIM:
+                if value == gh_labels.CLAIM_REVIEWING:
+                    reviewing = True
+                elif value == gh_labels.CLAIM_AUDITING:
+                    auditing = True
+                elif value == gh_labels.CLAIM_ADVISING:
+                    advising = True
+            elif kind == gh_labels.HITL_SIGNAL:
+                pass  # transient audit-trace; never translates to state
 
         return IssueState(
             issue_id=str(issue_id),
@@ -868,7 +869,7 @@ class GitHubBackend:
             advising=advising,
             collected_by=collected_by,
             child_of=child_of,
-            # Only surface the native type when no `type:` label gave us the
+            # Only surface the native type when no `type/` label gave us the
             # framework id directly (label encoding wins).
             native_issue_type=native_issue_type if issue_type is None else None,
         )
@@ -881,89 +882,87 @@ class GitHubBackend:
         add: set[str] = set()
         remove: set[str] = set()
 
-        # State transitions: swap state: labels.
+        # State transitions: swap state/ labels.
         if change.set_state is not None:
             if current.state is not None and current.state != change.set_state:
-                remove.add(f"state:{current.state}")
-            add.add(f"state:{change.set_state}")
+                remove.add(gh_labels.state_label(current.state))
+            add.add(gh_labels.state_label(change.set_state))
 
         # Agent claim.
         if change.clear_agent_claim and current.agent_claim:
-            remove.add(f"wip:{current.agent_claim}")
+            remove.add(gh_labels.claim_label(current.agent_claim))
         if change.set_agent_claim:
             if current.agent_claim and current.agent_claim != change.set_agent_claim:
-                remove.add(f"wip:{current.agent_claim}")
-            add.add(f"wip:{change.set_agent_claim}")
+                remove.add(gh_labels.claim_label(current.agent_claim))
+            add.add(gh_labels.claim_label(change.set_agent_claim))
 
         # Origin marker (the resting state we came from on claim).
         if change.clear_last_state and current.last_state:
-            remove.add(f"last-state:{current.last_state}")
+            remove.add(gh_labels.last_state_label(current.last_state))
         if change.set_last_state:
             if current.last_state and current.last_state != change.set_last_state:
-                remove.add(f"last-state:{current.last_state}")
-            add.add(f"last-state:{change.set_last_state}")
+                remove.add(gh_labels.last_state_label(current.last_state))
+            add.add(gh_labels.last_state_label(change.set_last_state))
 
-        # Awaiting gate.
+        # Awaiting (block) gate.
         if change.clear_awaiting_gate and current.awaiting_gate:
-            remove.add(f"hitl:awaiting-{current.awaiting_gate}")
+            remove.add(gh_labels.hitl_blocked_label(current.awaiting_gate))
         if change.set_awaiting_gate:
             if current.awaiting_gate and current.awaiting_gate != change.set_awaiting_gate:
-                remove.add(f"hitl:awaiting-{current.awaiting_gate}")
-            add.add(f"hitl:awaiting-{change.set_awaiting_gate}")
+                remove.add(gh_labels.hitl_blocked_label(current.awaiting_gate))
+            add.add(gh_labels.hitl_blocked_label(change.set_awaiting_gate))
 
         # Audit pending.
         if change.clear_audit_pending and current.audit_pending:
-            remove.add(f"hitl:audit-{current.audit_pending}")
+            remove.add(gh_labels.hitl_audit_label(current.audit_pending))
         if change.set_audit_pending:
             if current.audit_pending and current.audit_pending != change.set_audit_pending:
-                remove.add(f"hitl:audit-{current.audit_pending}")
-            add.add(f"hitl:audit-{change.set_audit_pending}")
+                remove.add(gh_labels.hitl_audit_label(current.audit_pending))
+            add.add(gh_labels.hitl_audit_label(change.set_audit_pending))
 
-        # Singleton claim markers.
+        # Singleton claim markers → hitl-claim/<which>.
         if change.set_reviewing is True:
-            add.add("hitl:reviewing")
+            add.add(gh_labels.hitl_claim_label(gh_labels.CLAIM_REVIEWING))
         elif change.set_reviewing is False and current.reviewing:
-            remove.add("hitl:reviewing")
+            remove.add(gh_labels.hitl_claim_label(gh_labels.CLAIM_REVIEWING))
         if change.set_auditing is True:
-            add.add("hitl:auditing")
+            add.add(gh_labels.hitl_claim_label(gh_labels.CLAIM_AUDITING))
         elif change.set_auditing is False and current.auditing:
-            remove.add("hitl:auditing")
+            remove.add(gh_labels.hitl_claim_label(gh_labels.CLAIM_AUDITING))
         if change.set_advising is True:
-            add.add("hitl:advising")
+            add.add(gh_labels.hitl_claim_label(gh_labels.CLAIM_ADVISING))
         elif change.set_advising is False and current.advising:
-            remove.add("hitl:advising")
+            remove.add(gh_labels.hitl_claim_label(gh_labels.CLAIM_ADVISING))
 
-        # Recognized markers.
-        if change.set_awaiting_input is True:
-            add.add("hitl:awaiting-input")
-        elif change.set_awaiting_input is False and current.awaiting_input:
-            remove.add("hitl:awaiting-input")
-        # Companion topic label — `hitl:topic-<name>`, set alongside
-        # `hitl:awaiting-input` so humans can filter the queue by topic.
+        # Recognized input — one merged label `hitl-input/<topic>` carries both
+        # the queue marker and the topic. Keyed on the topic, so request-input
+        # adds it (set_human_input) and respond removes it (clear_human_input /
+        # set_awaiting_input False against the live topic).
         if change.set_human_input:
-            add.add(f"hitl:topic-{change.set_human_input}")
-        if change.clear_human_input and current.human_input:
-            remove.add(f"hitl:topic-{current.human_input}")
+            add.add(gh_labels.hitl_input_label(change.set_human_input))
+        clearing_input = change.clear_human_input or change.set_awaiting_input is False
+        if clearing_input and current.human_input:
+            remove.add(gh_labels.hitl_input_label(current.human_input))
 
-        # Outcome / signal markers (transient audit-trace labels).
+        # Outcome / signal markers → hitl-signal/<value> (transient audit-trace).
         if change.record_approval:
-            add.add(f"hitl:approved-{change.record_approval}")
+            add.add(gh_labels.hitl_signal_label(gh_labels.SIGNAL_APPROVED))
         if change.record_rejection:
-            add.add(f"hitl:rejected-{change.record_rejection}")
+            add.add(gh_labels.hitl_signal_label(gh_labels.SIGNAL_REJECTED))
         if change.record_confirm:
-            add.add(f"hitl:checked-{change.record_confirm}")
+            add.add(gh_labels.hitl_signal_label(gh_labels.SIGNAL_CHECKED))
         if change.record_revoke:
-            add.add(f"hitl:revoked-{change.record_revoke}")
+            add.add(gh_labels.hitl_signal_label(gh_labels.SIGNAL_REVOKED))
         if change.record_response:
-            add.add("hitl:resolved")
+            add.add(gh_labels.hitl_signal_label(gh_labels.SIGNAL_RESOLVED))
 
-        # Fan-in — only the contributor-side `collected-by:` label (ADR-0003).
+        # Fan-in — only the contributor-side `collected-by/` label (ADR-0003).
         if change.set_collected_by:
             if current.collected_by and current.collected_by != change.set_collected_by:
-                remove.add(f"collected-by:{current.collected_by}")
-            add.add(f"collected-by:{change.set_collected_by}")
+                remove.add(gh_labels.collected_by_label(current.collected_by))
+            add.add(gh_labels.collected_by_label(change.set_collected_by))
         if change.clear_collected_by and current.collected_by:
-            remove.add(f"collected-by:{current.collected_by}")
+            remove.add(gh_labels.collected_by_label(current.collected_by))
 
         # Sanity: never add and remove the same label.
         overlap = add & remove
@@ -1082,8 +1081,7 @@ class GitHubBackend:
         if name in self._known_labels:
             return False
         if color is None:
-            prefix = name.split(":", 1)[0] if ":" in name else ""
-            color = _LABEL_COLORS.get(prefix, "ededed")
+            color = gh_labels.color_for(name)
         try:
             self._gh(
                 "label",
@@ -1119,8 +1117,7 @@ class GitHubBackend:
         """
         if label in self._known_labels:
             return
-        prefix = label.split(":", 1)[0] if ":" in label else ""
-        color = _LABEL_COLORS.get(prefix, "ededed")
+        color = gh_labels.color_for(label)
         try:
             self._gh(
                 "label",

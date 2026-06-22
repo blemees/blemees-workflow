@@ -78,7 +78,7 @@ class Controller:
     # still runs but cascades are skipped (the user sees a debug log).
     registry: Workflow | None = None
     # Optional issue-type directory, used to map an issue read under native
-    # encoding (GitHub Issue Type name, no `type:` label) back to its framework
+    # encoding (GitHub Issue Type name, no `type/` label) back to its framework
     # type id before planning — so claim-time type-restriction checks aren't
     # silently skipped (#12).
     issue_type_directory: IssueTypeDirectory | None = None
@@ -219,7 +219,7 @@ class Controller:
 
         Opens a new issue/PR from `plan.create`, applies the plan's primary
         marker change to the new issue if non-empty (empty for spawn — the
-        `child-of:` marker rides in `extra_labels`), then runs the cascade
+        `child-of/` marker rides in `extra_labels`), then runs the cascade
         against the new issue.
         """
         spec = plan.create
@@ -263,7 +263,7 @@ class Controller:
         if plan.change != MarkerChange():
             self.backend.apply_marker_change(new_id, plan.change, audit_comment=plan.audit_comment)
 
-        # Stamp gathered contributors `collected-by:<new-id>` — the new id only
+        # Stamp gathered contributors `collected-by/<new-id>` — the new id only
         # exists now, so this is the create-with-collect secondary effect.
         for contributor_id in spec.collect_contributors:
             self.backend.apply_marker_change(

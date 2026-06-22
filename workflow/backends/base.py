@@ -29,13 +29,13 @@ class IssueState:
     last_state: str | None = None
     # Framework-canonical issue type id (e.g., "bug", "experiment"). Set
     # at issue creation; immutable. Backends extract this from the type
-    # encoding they were configured with — label encoding reads `type:<id>`
+    # encoding they were configured with — label encoding reads `type/<id>`
     # labels; native encoding (GitHub Issue Types) reads the entity's
     # native type field. None means the backend couldn't determine it;
     # the planner treats that as "skip type-restriction checks."
     issue_type: str | None = None
     # The backend's native type name when read under native encoding (GitHub
-    # Issue Type, e.g. "Bug") and no `type:` label is present. The framework id
+    # Issue Type, e.g. "Bug") and no `type/` label is present. The framework id
     # isn't derivable without the issue-type directory, so the controller maps
     # this back to `issue_type` before planning (otherwise type-restriction
     # checks silently no-op under native encoding).
@@ -52,21 +52,21 @@ class IssueState:
     advising: bool = False  # singleton: a human is advising
     # Fan-in marker — set when this issue has been gathered into a
     # collector issue on another process via `collects`. Backends populate
-    # this from a `collected-by:<collector-id>` label on GitHub. None
+    # this from a `collected-by/<collector-id>` label on GitHub. None
     # means the issue has not yet been collected and is a candidate for
     # future collectors that target its state.
     collected_by: str | None = None
     # The inverse — a collector's contributors — is NOT stored as a marker.
-    # The cohort is discovered on demand by querying the `collected-by:` label
+    # The cohort is discovered on demand by querying the `collected-by/` label
     # (`list_issues(collected_by=...)`); there is no collector-side registry
     # (ADR-0003).
     # Spawn parent — when this issue was created by another issue via
     # `spawns`, the parent's id is recorded here (read from a
-    # `child-of:<parent-id>` label on GitHub). None means this issue
+    # `child-of/<parent-id>` label on GitHub). None means this issue
     # was not spawned by anyone. Used by the cascade-advance logic to
     # walk back up the spawn chain when a child terminates.
     # The inverse — a parent's children — is NOT stored as a marker. The
-    # cohort is discovered on demand by querying the `child-of:` label
+    # cohort is discovered on demand by querying the `child-of/` label
     # (`list_issues(child_of=...)`); there is no parent-side registry
     # (ADR-0003).
     child_of: str | None = None
@@ -96,14 +96,15 @@ class MarkerChange:
     set_auditing: bool | None = None
     set_awaiting_input: bool | None = None
     # Companion to set_awaiting_input — records the topic the agent is
-    # awaiting input on (`hitl:topic-<topic>` on GitHub). Cleared via
-    # `clear_human_input` when respond fires.
+    # awaiting input on. On GitHub the two are encoded as one merged
+    # `hitl-input/<topic>` label. Cleared via `clear_human_input` when
+    # respond fires.
     set_human_input: str | None = None
     clear_human_input: bool = False
     set_advising: bool | None = None
-    # Fan-in label mutation — `collected-by:<collector>` is set on each
+    # Fan-in label mutation — `collected-by/<collector>` is set on each
     # contributor (the sole record of the relationship; ADR-0003). There is no
-    # collector-side `collects:` write — the cohort is a `collected-by:` query.
+    # collector-side `collects:` write — the cohort is a `collected-by/` query.
     set_collected_by: str | None = None
     clear_collected_by: bool = False
     # Outcome markers (audit-trace labels in GitHub encoding; signal events elsewhere)
@@ -167,9 +168,9 @@ class TrackerBackend(Protocol):
 
         Returns the new issue's id (a string — issue number for github,
         whatever the backend uses elsewhere). The backend MUST attach the
-        framework's `state:<name>` marker atomically with creation so the
+        framework's `state/<name>` marker atomically with creation so the
         item never exists without a state, and SHOULD attach any
-        `extra_labels` the caller passed (e.g., a `wip:<role>` to claim
+        `extra_labels` the caller passed (e.g., a `claimed/<role>` to claim
         the item at intake).
 
         `issue_type`, if provided, is the backend-specific type identifier
@@ -195,7 +196,7 @@ class TrackerBackend(Protocol):
         Distinct from `create_issue` because the backend dispatches to a
         different tracker entity (GitHub PRs aren't Issues; some trackers
         merge the two but the creation path still differs). The framework's
-        `state:<name>` marker is attached atomically with creation.
+        `state/<name>` marker is attached atomically with creation.
 
         `head` is the source branch; `base` is the target branch (None
         means the backend chooses the repo default). `draft` opens the PR
@@ -338,6 +339,6 @@ class TrackerBackend(Protocol):
         customizations on existing labels must be preserved.
 
         If `color` is None, the backend selects a default color appropriate
-        for the label's namespace (state, wip, hitl, ...).
+        for the label's classifier (state, claimed, hitl-*, ...).
         """
         ...
